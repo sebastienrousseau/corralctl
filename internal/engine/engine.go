@@ -1641,6 +1641,17 @@ var forgeToken = func(ctx context.Context, name string, mode github.AuthMode) st
 	}
 }
 
+// ForgeToken resolves the credential `corralctl sync` presents to a
+// destination forge, through the same ladder `corralctl clone` uses to
+// list from one: GitHub through its own client, every other forge from
+// the environment variable its own tooling names.
+func ForgeToken(ctx context.Context, name string, mode github.AuthMode) string {
+	if name == "github" {
+		return github.Token(ctx, mode)
+	}
+	return forgeToken(ctx, name, mode)
+}
+
 // firstEnv returns the first of these variables that is set and non-empty.
 func firstEnv(names ...string) string {
 	for _, n := range names {
