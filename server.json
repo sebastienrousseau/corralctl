@@ -3,7 +3,7 @@
   "name": "io.github.sebastienrousseau/corral",
   "title": "Corral",
   "description": "Search code and symbols across every clone in your Corral workspace. Zero network calls.",
-  "version": "0.0.36",
+  "version": "0.0.37",
   "repository": {
     "url": "https://github.com/sebastienrousseau/corral",
     "source": "github"
@@ -12,7 +12,7 @@
   "packages": [
     {
       "registryType": "oci",
-      "identifier": "ghcr.io/sebastienrousseau/corral:0.0.36",
+      "identifier": "ghcr.io/sebastienrousseau/corral:0.0.37",
       "transport": {
         "type": "stdio"
       }

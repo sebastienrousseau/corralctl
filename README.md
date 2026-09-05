@@ -43,6 +43,7 @@
 - [Layout Customization](#layout-customization) — Apple-style collections, ecosystems, and custom templates
 - [Smart Syncing](#smart-syncing) — network-optimised incremental updates
 - [Exec Mode](#exec-mode) — concurrent batch execution of Git commands
+- [Mirror to other forges](#mirror-to-other-forges) — `corralctl sync` pushes the tree to GitLab, Gitea, Forgejo, Codeberg, Bitbucket or GitHub
 - [MCP Server](#mcp-server-for-ai-agents) — expose your local workspace to AI coding agents
 - [Cross-repository symbol lookup](#cross-repository-symbol-lookup) — find where anything is defined, across every clone
 
@@ -159,15 +160,28 @@ sudo dnf install golang git gh
 
 ## Quick Start
 
-Run Corral with an owner name (GitHub username or organization) to clone and automatically sort all repositories into a clean local directory hierarchy:
+Run `corralctl clone` with an owner name (GitHub username or organization) to clone and automatically sort all repositories into a clean local directory hierarchy:
 
 ```bash
 # Log in to GitHub CLI first (or set GITHUB_TOKEN)
 gh auth login
 
-# Run Corral for your profile
-./corralctl my-username
+# Clone and organise every repository for your profile
+corralctl clone my-username
 ```
+
+The bare form, `corralctl my-username`, does the same thing. One binary,
+one base command, and every operation is a subcommand of it:
+
+| Command | Does |
+| :--- | :--- |
+| `corralctl clone <owner>` | Clone what is missing, pull what is stale, into the organised layout |
+| `corralctl sync --to <forge>` | Mirror the organised tree out to another forge — see [Mirror to other forges](#mirror-to-other-forges) |
+| `corralctl status` | Inventory local clones and their state |
+| `corralctl plan <owner>` | Preview a reconciliation without touching disk |
+| `corralctl prune <owner>` | Remove clones no longer upstream, refusing any with unpublished work |
+| `corralctl exec <cmd>` | Run a command across every clone — see [Exec Mode](#exec-mode) |
+| `corralctl mcp` | Serve the workspace to AI agents — see [MCP Server](#mcp-server-for-ai-agents) |
 
 This converges your local directory structure into a structured mirror:
 
@@ -337,6 +351,63 @@ Execute arbitrary shell commands concurrently across your organized repositories
 # Check git status for all Go/Rust private repositories
 ./corralctl exec "git status -s" --languages go,rust --visibility private
 ```
+
+---
+
+## Mirror to other forges
+
+`corralctl sync` is the outbound half of the workflow: what `clone` pulls in
+from one forge, `sync` pushes out to others, so the organised tree becomes
+the source of truth for a mirror on every host you care about.
+
+```bash
+export GITLAB_TOKEN=glpat-…            # scope: api
+export GITEA_TOKEN=…                   # scope: write:repository
+
+corralctl sync --to gitlab --to gitea@https://git.example.com --dry-run
+corralctl sync --to gitlab --to gitea@https://git.example.com
+```
+
+For every repository under the base directory, on every destination, `sync`
+creates the destination repository if it does not exist — with the
+visibility the local layout says, `Public/` or `Private/` — points a remote
+named after the forge at it, and pushes in one round trip:
+
+```text
+git push --prune --no-verify <forge> refs/heads/*:refs/heads/* +refs/tags/*:refs/tags/*
+```
+
+Every local branch and tag exists on the destination afterwards, and nothing
+else does. Branches are never forced: a destination that has moved on is
+refused and reported, not overwritten. Tags follow the local namespace.
+
+A destination is `<forge>[:<owner>][@<url>]`:
+
+| `--to` | Mirrors to |
+| :--- | :--- |
+| `gitlab` | gitlab.com, under the token's own account |
+| `gitlab:my-group` | gitlab.com, under a group |
+| `github:my-org` | github.com, under an organisation |
+| `codeberg` · `bitbucket:workspace` | the public instance |
+| `gitea@https://git.example.com` | a self-hosted Gitea or Forgejo |
+
+Credentials are the same environment variables `clone` uses to list from a
+forge: `GITHUB_TOKEN` (or the `gh` CLI), `GITLAB_TOKEN`, `BITBUCKET_TOKEN`,
+and `GITEA_TOKEN`, `FORGEJO_TOKEN` or `CODEBERG_TOKEN` for the Gitea family,
+each also accepted with a `CORRAL_` prefix. Over HTTPS, the default, the same
+token authenticates the push, scoped to that forge's origin and never written
+to `.git/config`; `--protocol ssh` uses your keys instead.
+
+Two refusals are built in. A repository is never pushed to the forge its
+`origin` lives on — corral clones from six forges, so the tree can hold a
+clone whose origin *is* a destination, and pruning against your own upstream
+is not a mirror. And a destination that already holds a same-named
+repository with the other visibility is an error, never a silent reuse.
+
+Results go to stdout in `--output text`, `json` or `ndjson`; the exit code is
+non-zero if any repository failed, so a cron job can alert on it. This
+replaces the standalone `corral-sync` tool, whose `gitlab` and `gitea` remote
+names are kept so existing clones carry over unchanged.
 
 ---
 
@@ -680,6 +751,21 @@ CORRAL_LOG_LEVEL=debug corralctl sebastienrousseau > out.json 2> diagnostics.log
 ```
 
 The default, `info`, is what corral has always printed.
+
+### Sync Options
+
+`corralctl sync [base_dir]` takes the persistent `--base-dir`, `--dry-run`
+and `--log-level` flags, plus:
+
+| Option | Short | Default | Description |
+| :--- | :--- | :--- | :--- |
+| `--to` | — | — | Destination as `<forge>[:<owner>][@<url>]`; repeatable, at least one required |
+| `--protocol` | `-p` | `https` | Push transport: `https` (the token authenticates) or `ssh` (your keys do) |
+| `--concurrency` | `-c` | 4–8 | Repositories mirrored at once, sized from the host |
+| `--timeout` | — | `5m` | Deadline for one repository on one destination |
+| `--output` | — | `text` | Output format: `text`, `json`, or `ndjson` |
+| `--auth` | — | `auto` | GitHub authentication mode: `auto`, `token`, or `gh` |
+| `--api-request-timeout` | — | `30s` | Deadline for a single forge API request |
 
 ### Operational Commands
 

@@ -36,8 +36,8 @@ footer_note: "Corral clones and organises repositories from six forges into a Fi
 copyright: "© 2026 Sebastien Rousseau. Licensed under GPL-3.0-only."
 translation_key: "usage"
 title: "Usage — Corral"
-description: "Positional arguments, the full flag reference, smart syncing, and running a command across every clone with exec mode."
-keywords: "corralctl flags, exec mode, smart syncing, dry run"
+description: "Positional arguments, the full flag reference, smart syncing, mirroring the tree to other forges with sync, and running a command across every clone with exec mode."
+keywords: "corralctl flags, corralctl sync, mirror to gitlab, exec mode, smart syncing, dry run"
 eyebrow: "Reference"
 headline: "Usage"
 lead: "Corral takes an owner and converges your local tree to match. Everything else is a flag, and every flag has a default that works."
@@ -49,8 +49,8 @@ toc_1: "Running it"
 toc_1_id: "running-it"
 toc_2: "Flags"
 toc_2_id: "flags"
-toc_3: "Exec mode"
-toc_3_id: "exec-mode"
+toc_3: "Mirror to other forges"
+toc_3_id: "mirror-to-other-forges"
 prev_href: "/installation/"
 prev_label: "Installation"
 next_href: "/mcp/"
@@ -61,8 +61,12 @@ layout: "doc"
 ## Running it
 
 ```bash
-corralctl <owner> [base_dir] [limit]
+corralctl clone <owner> [base_dir] [limit]
 ```
+
+`clone` is the documented spelling; the bare form, `corralctl <owner>`, does
+the same and keeps every existing script working. Every other operation is a
+subcommand too: `sync`, `status`, `plan`, `prune`, `exec` and `mcp`.
 
 `<owner>` is a GitHub username or organisation and is the only required
 argument. `base_dir` defaults to `$HOME/Code`, and `limit` to 1000
@@ -72,14 +76,14 @@ Authenticate first, either with the GitHub CLI or by setting `GITHUB_TOKEN`:
 
 ```bash
 gh auth login
-corralctl my-username
+corralctl clone my-username
 ```
 
 Nothing is written until you are happy with it — `--dry-run` prints what would
 happen and stops.
 
 ```bash
-corralctl my-username --dry-run
+corralctl clone my-username --dry-run
 ```
 
 ### Smart syncing
@@ -134,3 +138,37 @@ corralctl exec "git status -s" --languages go,rust --visibility private
 The same filtering flags apply, so you can scope a command to one ecosystem,
 one visibility, or both. `--dry-run` works here too, and lists the
 repositories a command would run against without running it.
+
+## Mirror to other forges
+
+`corralctl sync` pushes the organised tree out to other forges, creating each
+destination repository when it is missing and bringing its branches and tags
+to parity with the local clone. Branches are never forced.
+
+```bash
+export GITLAB_TOKEN=glpat-…
+export GITEA_TOKEN=…
+
+corralctl sync --to gitlab --to gitea@https://git.example.com --dry-run
+corralctl sync --to gitlab --to gitea@https://git.example.com
+```
+
+A destination is `<forge>[:<owner>][@<url>]` — `gitlab`, `gitlab:my-group`,
+`github:my-org`, `codeberg`, `bitbucket:workspace`, or
+`gitea@https://git.example.com` for a self-hosted instance. The token for each
+forge comes from the environment variable its own tooling uses, and over
+HTTPS it authenticates the push too; pass `--protocol ssh` to use your keys.
+
+| Option | Default | Description |
+| --- | --- | --- |
+| `--to` | | Destination; repeatable, at least one required |
+| `--protocol` | `https` | Push transport: `https` or `ssh` |
+| `--concurrency` | 4–8 | Repositories mirrored at once |
+| `--timeout` | `5m` | Deadline for one repository on one destination |
+| `--output` | `text` | `text`, `json` or `ndjson` |
+| `--dry-run` | off | Report what would happen without creating or pushing |
+
+Two things are refused. A repository is never pushed to the forge its origin
+lives on, so a clone taken *from* GitLab is not pruned against GitLab. And a
+destination that already holds a same-named repository with the other
+visibility is an error rather than a silent reuse.
