@@ -11,7 +11,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sebastienrousseau/corral/internal/search"
+	"github.com/sebastienrousseau/corralctl/internal/search"
 )
 
 // searchHit mirrors the shape corral_search_code returns, for decoding.

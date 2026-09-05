@@ -6,7 +6,7 @@ SPDX-License-Identifier: GPL-3.0-only
 # Migrating from ghq
 
 [ghq](https://github.com/x-motemen/ghq) gives every repository one
-predictable path under one root. Corral does too, and if that is all you
+predictable path under one root. corralctl does too, and if that is all you
 want from ghq, corral is a lateral move you can skip.
 
 The reason to switch is what the layout is *for*.
@@ -16,11 +16,11 @@ The reason to switch is what the layout is *for*.
 ghq's path mirrors the remote:
 
 ```text
-~/ghq/github.com/sebastienrousseau/corral
+~/ghq/github.com/sebastienrousseau/corralctl
 ~/ghq/gitlab.com/acme/internal-tool
 ```
 
-Corral's mirrors how you think about the work:
+corralctl's mirrors how you think about the work:
 
 ```text
 ~/Code/Public/Go/corral
@@ -83,7 +83,7 @@ Disk is cheaper than a migration that has to be right the first time.
 ## What you lose
 
 - **`ghq get` for a single repository.** Covered above.
-- **Arbitrary hosts.** ghq handles any remote. Corral clones from
+- **Arbitrary hosts.** ghq handles any remote. corralctl clones from
   GitHub, GitLab, Gitea, Forgejo, Codeberg and Bitbucket (`--forge`, `--forge-url`),
   which covers most of what ghq is used for but is not "any remote". Its
   *reading* has no such limit: the MCP server, `status`, `exec` and

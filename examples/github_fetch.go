@@ -10,7 +10,7 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/sebastienrousseau/corral/internal/github"
+	"github.com/sebastienrousseau/corralctl/internal/github"
 )
 
 func main() {

@@ -8,7 +8,7 @@ make it wrong — so a future change can tell "this was considered and
 rejected" apart from "nobody thought about it".
 
 Records 0003 and 0004 describe decisions whose implementation lands in
-[PR #107](https://github.com/sebastienrousseau/corral/pull/107); this
+[PR #107](https://github.com/sebastienrousseau/corralctl/pull/107); this
 branch should merge after it. The reasoning is recorded here either way —
 an ADR documents a decision, not a diff.
 

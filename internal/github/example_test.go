@@ -9,7 +9,7 @@ import (
 	"log"
 	"time"
 
-	"github.com/sebastienrousseau/corral/internal/github"
+	"github.com/sebastienrousseau/corralctl/internal/github"
 )
 
 // ExampleFetchReposWithOptions demonstrates fetching only private, non-fork,

@@ -7,7 +7,7 @@ changefreq: "weekly"
 copyright_year: "2026"
 locale_path: "/"
 base_path: "/"
-name: "Corral"
+name: "corralctl"
 short_name: "CO"
 slug_install: "installation"
 slug_usage: "usage"
@@ -31,16 +31,16 @@ label_pager: "Page"
 label_prev: "Previous"
 label_next: "Next"
 label_toc: "On this page"
-screenshot_alt: "Corral organising repositories into a Finder-friendly directory hierarchy."
-footer_note: "Corral clones and organises repositories from six forges into a Finder-friendly hierarchy. Published under GPL-3.0-only."
+screenshot_alt: "corralctl organising repositories into a Finder-friendly directory hierarchy."
+footer_note: "corralctl clones and organises repositories from six forges into a Finder-friendly hierarchy. Published under GPL-3.0-only."
 copyright: "© 2026 Sebastien Rousseau. Licensed under GPL-3.0-only."
 translation_key: "usage"
-title: "Usage — Corral"
+title: "Usage — corralctl"
 description: "Positional arguments, the full flag reference, smart syncing, mirroring the tree to other forges with sync, and running a command across every clone with exec mode."
 keywords: "corralctl flags, corralctl sync, mirror to gitlab, exec mode, smart syncing, dry run"
 eyebrow: "Reference"
 headline: "Usage"
-lead: "Corral takes an owner and converges your local tree to match. Everything else is a flag, and every flag has a default that works."
+lead: "corralctl takes an owner and converges your local tree to match. Everything else is a flag, and every flag has a default that works."
 cur_install: ""
 cur_usage: ' aria-current="page"'
 cur_mcp: ""
@@ -88,7 +88,7 @@ corralctl clone my-username --dry-run
 
 ### Smart syncing
 
-Corral keeps a `.corral-state.json` sidecar next to each repository's `.git`
+corralctl keeps a `.corral-state.json` sidecar next to each repository's `.git`
 directory and compares the remote `pushed_at` against it. If nothing has been
 pushed since the last run, `git pull` is skipped rather than attempted, which
 is where the 10x to 50x speed-up on repeat runs comes from.

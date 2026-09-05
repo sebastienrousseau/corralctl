@@ -1,29 +1,29 @@
 <!-- SPDX-License-Identifier: GPL-3.0-only -->
 
 <p align="center">
-  <img src=".github/logo.svg" alt="Corral logo" width="128" />
+  <img src=".github/logo.svg" alt="corralctl logo" width="128" />
 </p>
 
-<h1 align="center"><a id="corral"></a>Corral</h1>
+<h1 align="center"><a id="corral"></a>corralctl</h1>
 
 <p align="center">
   Automatically clone and organise repositories from GitHub, GitLab, Gitea, Forgejo, Codeberg and Bitbucket using Finder-friendly collections, ecosystems, and metadata.
 </p>
 
 <p align="center">
-  <a href="https://github.com/sebastienrousseau/corral/actions"><img src="https://img.shields.io/github/actions/workflow/status/sebastienrousseau/corral/ci.yml?style=for-the-badge&logo=github" alt="Build Status" /></a>
-  <a href="https://pkg.go.dev/github.com/sebastienrousseau/corral"><img src="https://img.shields.io/badge/go.dev-reference-007d9c?style=for-the-badge&logo=go&logoColor=white" alt="Go Reference" /></a>
+  <a href="https://github.com/sebastienrousseau/corralctl/actions"><img src="https://img.shields.io/github/actions/workflow/status/sebastienrousseau/corralctl/ci.yml?style=for-the-badge&logo=github" alt="Build Status" /></a>
+  <a href="https://pkg.go.dev/github.com/sebastienrousseau/corralctl"><img src="https://img.shields.io/badge/go.dev-reference-007d9c?style=for-the-badge&logo=go&logoColor=white" alt="Go Reference" /></a>
   <a href="https://golangci-lint.run/"><img src="https://img.shields.io/badge/lint-golangci--lint-00ADD8?style=for-the-badge&logo=go&logoColor=white" alt="golangci-lint" /></a>
-  <a href="https://codecov.io/gh/sebastienrousseau/corral"><img src="https://img.shields.io/codecov/c/github/sebastienrousseau/corral?style=for-the-badge&logo=codecov" alt="Code Coverage" /></a>
-  <a href="https://scorecard.dev/viewer/?uri=github.com/sebastienrousseau/corral"><img src="https://img.shields.io/ossf-scorecard/github.com/sebastienrousseau/corral?style=for-the-badge&label=OpenSSF%20Scorecard&logo=openssf" alt="OpenSSF Scorecard" /></a>
+  <a href="https://codecov.io/gh/sebastienrousseau/corralctl"><img src="https://img.shields.io/codecov/c/github/sebastienrousseau/corralctl?style=for-the-badge&logo=codecov" alt="Code Coverage" /></a>
+  <a href="https://scorecard.dev/viewer/?uri=github.com/sebastienrousseau/corralctl"><img src="https://img.shields.io/ossf-scorecard/github.com/sebastienrousseau/corralctl?style=for-the-badge&label=OpenSSF%20Scorecard&logo=openssf" alt="OpenSSF Scorecard" /></a>
   <a href="https://www.bestpractices.dev/projects/13455"><img src="https://img.shields.io/cii/level/13455?style=for-the-badge&label=OpenSSF%20Best%20Practices&logo=openssf" alt="OpenSSF Best Practices" /></a>
   <a href="https://doc.corrallib.com"><img src="https://img.shields.io/badge/docs-doc.corrallib.com-brightgreen?style=for-the-badge&logo=github" alt="Documentation" /></a>
-  <a href="https://github.com/sebastienrousseau/corral/releases/latest"><img src="https://img.shields.io/github/v/release/sebastienrousseau/corral?style=for-the-badge" alt="Release Version" /></a>
+  <a href="https://github.com/sebastienrousseau/corralctl/releases/latest"><img src="https://img.shields.io/github/v/release/sebastienrousseau/corralctl?style=for-the-badge" alt="Release Version" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-GPL--3.0-blue?style=for-the-badge" alt="License" /></a>
 </p>
 
 <p align="center">
-  <img src=".github/demo.gif" alt="Corral Demo" width="100%" />
+  <img src=".github/demo.gif" alt="corralctl Demo" width="100%" />
 </p>
 
 ---
@@ -57,7 +57,7 @@
 **Project**
 
 - [Documentation](#documentation) — manual, API reference, developer docs
-- [When not to use Corral](#when-not-to-use-corral) — honest limits
+- [When not to use corralctl](#when-not-to-use-corralctl) — honest limits
 - [Requirements & toolchain policy](#requirements--toolchain-policy) — the Go floor and when it moves
 - [Stability guarantees](#stability-guarantees) — what a breaking change means here
 - [Security & hardening](#security--hardening) — reporting, posture, fuzzing
@@ -70,7 +70,7 @@
 ### mise (macOS / Linux)
 
 ```bash
-mise use -g github:sebastienrousseau/corral
+mise use -g github:sebastienrousseau/corralctl
 ```
 
 This installs the latest released `corralctl` binary and keeps it managed with
@@ -84,7 +84,7 @@ brew install sebastienrousseau/tap/corralctl
 
 Homebrew here is a cask, which is a macOS-only mechanism — `brew install` on
 Linux will refuse it. On Linux use the `.deb`/`.rpm` packages or the tarballs
-attached to each [release](https://github.com/sebastienrousseau/corral/releases/latest),
+attached to each [release](https://github.com/sebastienrousseau/corralctl/releases/latest),
 or install with [mise](#mise-macos--linux) or the
 [Go toolchain](#go-toolchain).
 
@@ -97,8 +97,8 @@ yay -S corralctl-bin    # or: paru -S corralctl-bin
 ### Nix (any platform)
 
 ```sh
-nix run github:sebastienrousseau/corral -- --help   # run without installing
-nix profile install github:sebastienrousseau/corral # install
+nix run github:sebastienrousseau/corralctl -- --help   # run without installing
+nix profile install github:sebastienrousseau/corralctl # install
 ```
 
 The flake ships the binary with its manpages and shell completions, and
@@ -108,7 +108,7 @@ pinned by `flake.lock`.
 ### Go toolchain
 
 ```bash
-go install github.com/sebastienrousseau/corral/cmd/corralctl@latest
+go install github.com/sebastienrousseau/corralctl/cmd/corralctl@latest
 ```
 
 Installs into `$(go env GOPATH)/bin` (or `$GOBIN` when set). Note that a
@@ -121,7 +121,7 @@ not apply. Use a release artefact if you need `--version` to be meaningful.
 Requires Go 1.26+ and Git:
 
 ```bash
-git clone https://github.com/sebastienrousseau/corral.git
+git clone https://github.com/sebastienrousseau/corralctl.git
 cd corral
 make install            # installs ~/.local/bin/corralctl
 ```
@@ -203,7 +203,7 @@ This converges your local directory structure into a structured mirror:
 └── Work/
 ```
 
-On macOS, Corral also writes native Finder Tags to repository folders while
+On macOS, corralctl also writes native Finder Tags to repository folders while
 preserving tags you added yourself. This keeps the physical hierarchy shallow
 and makes Finder searches and Smart Folders useful across ecosystems.
 
@@ -300,7 +300,7 @@ Press `/` inside the TUI to enter Command Mode. Commands support prefix-based au
 
 ## Layout Customization
 
-By default, Corral uses the Apple-style layout `{{.Collection}}/{{.Bucket}}/{{.Name}}`. Forks use the `Forks` collection, while `.github.io` repositories use the `Web` bucket regardless of their detected language. You can override this using the `--layout` flag:
+By default, corralctl uses the Apple-style layout `{{.Collection}}/{{.Bucket}}/{{.Name}}`. Forks use the `Forks` collection, while `.github.io` repositories use the `Web` bucket regardless of their detected language. You can override this using the `--layout` flag:
 
 ```bash
 ./corralctl --layout "{{.Owner}}/{{.Name}}" my-org
@@ -318,13 +318,13 @@ Supported placeholders:
 ### Finder Tags on macOS
 
 Finder tagging is enabled by default on macOS and can be disabled with
-`--finder-tags=false`. Corral manages the following lifecycle taxonomy:
+`--finder-tags=false`. corralctl manages the following lifecycle taxonomy:
 
 | Color | Tag | Automatic signal |
 | :--- | :--- | :--- |
 | Green | `Active` | Pushed within seven days or checked out on a non-default branch |
 | Yellow | `On Hold` | Archived on GitHub |
-| Red | `Needs Fix` | Corral encountered a sync failure for the matching clone |
+| Red | `Needs Fix` | corralctl encountered a sync failure for the matching clone |
 | Purple | `Experiment` | Fork, template, or mirror repository |
 
 Uncolored metadata tags include `Visibility: Public`, `Collection: Forks`,
@@ -335,10 +335,10 @@ Finder can combine these tags in searches or saved Smart Folders.
 
 ## Smart Syncing
 
-Corral stores synchronization metadata next to each repository's `.git/` folder inside a `.corral-state.json` sidecar file:
+corralctl stores synchronization metadata next to each repository's `.git/` folder inside a `.corral-state.json` sidecar file:
 
 - **No Redundant Pulls:** If the remote repository has not received new pushes since the last sync, `git pull` is skipped completely.
-- **Overrides:** To bypass smart checks and force Corral to perform a full `git pull`, pass the `--force-sync` flag.
+- **Overrides:** To bypass smart checks and force corralctl to perform a full `git pull`, pass the `--force-sync` flag.
 - **Skip Syncing entirely:** Pass `--no-sync` to skip updates on all cloned repositories.
 
 ---
@@ -413,7 +413,7 @@ names are kept so existing clones carry over unchanged.
 
 ## MCP Server (for AI agents)
 
-Corral ships a Model Context Protocol server that exposes your local, Corral-organised workspace to AI coding agents — Claude Code, Cursor, Cline, Codex CLI, Aider, and anything else that speaks MCP. **In its default read-only mode no network calls are made and the GitHub API is never contacted**; the server is a window into the clones already on disk. (`--enable-mutations` adds `corral_clone_repo` and `corral_sync_repo`, which do reach the network — they shell out to `git`. The GitHub API is still never contacted.)
+corralctl ships a Model Context Protocol server that exposes your local, corralctl-organised workspace to AI coding agents — Claude Code, Cursor, Cline, Codex CLI, Aider, and anything else that speaks MCP. **In its default read-only mode no network calls are made and the GitHub API is never contacted**; the server is a window into the clones already on disk. (`--enable-mutations` adds `corral_clone_repo` and `corral_sync_repo`, which do reach the network — they shell out to `git`. The GitHub API is still never contacted.)
 
 Where GitHub's own MCP server covers the remote API surface (issues, PRs, search), `corral-mcp` covers the dimension only it can — your *local mirror*, organised by visibility and language, queryable without a round-trip.
 
@@ -488,7 +488,7 @@ claude mcp add corral -- corralctl mcp
         "run", "--rm", "-i",
         "--user", "1000:1000",
         "-v", "${HOME}/Code:/workspace:ro",
-        "ghcr.io/sebastienrousseau/corral:latest",
+        "ghcr.io/sebastienrousseau/corralctl:latest",
         "mcp", "--root", "/workspace"
       ]
     }
@@ -614,7 +614,7 @@ plan` shows you the outcome before anything changes.
 ## Cross-repository symbol lookup
 
 Every code-context server can tell an agent where a symbol is defined **in
-the repository it has open**. Corral is the only one that can answer across
+the repository it has open**. corralctl is the only one that can answer across
 **every clone on the machine**, because it is the only one that knows they
 are all there.
 
@@ -800,7 +800,7 @@ Multi-owner profiles use a strict JSON config (default
 
 ## Examples
 
-To inspect the package layout and programmatically run Corral modules, see the self-contained, copy-pasteable Go code examples in the [examples](examples/) directory:
+To inspect the package layout and programmatically run corralctl modules, see the self-contained, copy-pasteable Go code examples in the [examples](examples/) directory:
 
 1. **[Interactive Selector](examples/interactive_selection.go)** — Programmatically configure and launch the selection checklist TUI in AltScreen mode.
 2. **[GitHub Repository Fetcher](examples/github_fetch.go)** — Query the GitHub REST API using `github.FetchReposWithOptions` with stars sorting and language constraints.
@@ -822,7 +822,7 @@ To inspect the package layout and programmatically run Corral modules, see the s
 ## Frequently Asked Questions
 
 - **Does it work with GitLab or other hosts?**  
-  No. Corral is specifically built to integrate with the GitHub API and GitHub CLI (`gh`).
+  No. corralctl is specifically built to integrate with the GitHub API and GitHub CLI (`gh`).
 - **What happens to repositories deleted on GitHub?**  
   Normal reconciliation never deletes them. `--orphans` reports them; the explicit `prune` command can remove verified-safe orphans after `--yes` confirmation.
 - **Can I run it inside Cron or systemd timers?**  
@@ -842,7 +842,7 @@ To inspect the package layout and programmatically run Corral modules, see the s
 | Resource | Where |
 |---|---|
 | **User manual** | <https://doc.corrallib.com> |
-| **API reference** | <https://pkg.go.dev/github.com/sebastienrousseau/corral> |
+| **API reference** | <https://pkg.go.dev/github.com/sebastienrousseau/corralctl> |
 | **Developer docs** | [DEVELOPMENT.md](DEVELOPMENT.md) — toolchain and every CI gate reproduced locally |
 | **Architecture** | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) |
 | **Decision records** | [docs/adr/](docs/adr/) |
@@ -855,20 +855,20 @@ own page (`man corralctl-mcp`).
 
 ---
 
-## When not to use Corral
+## When not to use corralctl
 
-Corral is opinionated, and the opinions do not suit everyone.
+corralctl is opinionated, and the opinions do not suit everyone.
 
-- **You want a full mirror or backup.** Corral clones working copies to be
+- **You want a full mirror or backup.** corralctl clones working copies to be
   read and edited. For archival mirroring use `git clone --mirror` or a
-  purpose-built tool; Corral will not preserve every ref or hold a
+  purpose-built tool; corralctl will not preserve every ref or hold a
   guaranteed-complete copy.
 - **You need a forge corral does not list from.** GitHub, GitLab, Gitea,
   Forgejo, Codeberg and Bitbucket are supported; anything else is not.
   Reading is forge-neutral — a clone from any host is a first-class citizen
   in the index, the MCP server and symbol lookup — but `corralctl <owner>`
   only knows those six.
-- **Your repositories must stay where they are.** Corral's value is a
+- **Your repositories must stay where they are.** corralctl's value is a
   consistent layout, and the default reorganises clones into
   `Collection/Bucket/Name`. If a fixed path matters, use `--layout` to
   match your existing tree — or a different tool.
@@ -896,7 +896,7 @@ The Go floor is stated in exactly one place, `go.mod`, and CI sets
 
 **Policy for raising it.** The floor may rise in any release when a
 standard-library fix or language feature justifies it, and the reason is
-recorded in that release's CHANGELOG entry. Corral makes **no distro-LTS
+recorded in that release's CHANGELOG entry. corralctl makes **no distro-LTS
 compatibility promise** — an aspirational claim without a table mapping
 distro toolchains to the floor would be worse than none. Packagers should
 check `go.mod` on every version bump rather than assume the floor held.
@@ -905,7 +905,7 @@ check `go.mod` on every version bump rather than assume the floor held.
 
 ## Stability guarantees
 
-Corral is pre-1.0 and follows SemVer, with the patch digit moving for
+corralctl is pre-1.0 and follows SemVer, with the patch digit moving for
 everything until 1.0.
 
 **The breaking axis is behaviour, not signatures.** For a tool that moves
@@ -916,7 +916,7 @@ are treated as breaking:
 - A change to the default layout, or to how a repository maps onto a path
 - A change to what `--output json` / `ndjson` emits, beyond added fields
 - A change to an exit code
-- A refusal becoming permissive: any case where Corral used to decline to
+- A refusal becoming permissive: any case where corralctl used to decline to
   delete, prune or migrate and now proceeds
 - A change to the MCP tool or resource surface that an existing client
   would notice
@@ -935,7 +935,7 @@ stderr — never on stdout, which carries the selected output format.
 **Reporting.** Do not open a public issue. Follow the private process in
 [SECURITY.md](SECURITY.md); the response SLA is stated there.
 
-**Posture.** Corral runs with the user's own credentials against the user's
+**Posture.** corralctl runs with the user's own credentials against the user's
 own machine, so the threat model is about *limiting blast radius*, not
 crossing a privilege boundary. Full detail in
 [docs/security-model.md](docs/security-model.md).
@@ -961,7 +961,7 @@ crossing a privilege boundary. Full detail in
 **Fuzzing.** Fuzz targets cover the parsing and path-resolution boundaries —
 layout evaluation, language normalisation, remote-URL parsing, and the
 sandbox check that must never let a path escape its root. They run on every
-push for a fixed duration. Corral is not enrolled in OSS-Fuzz.
+push for a fixed duration. corralctl is not enrolled in OSS-Fuzz.
 
 **Supply chain.** Releases are signed with keyless cosign, carry SLSA build
 provenance and a CycloneDX SBOM, and are built with `-trimpath` and a

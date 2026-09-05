@@ -9,7 +9,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/sebastienrousseau/corral/internal/github"
+	"github.com/sebastienrousseau/corralctl/internal/github"
 )
 
 // BenchmarkEvaluateLayout measures the per-repository path computation. It

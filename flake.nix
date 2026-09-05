@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: 2026 Sebastien Rousseau <sebastian.rousseau@gmail.com>
 # SPDX-License-Identifier: GPL-3.0-only
 #
-# Corral as a Nix flake: a development shell, and the package itself.
+# corralctl as a Nix flake: a development shell, and the package itself.
 #
 # The dev shell exists because of a specific failure. The devcontainer used
 # to install markdownlint, codespell and pre-commit with `pip install` and
@@ -15,7 +15,7 @@
 #   nix build            # the corralctl package, with manpages + completions
 #   nix run . -- --help  # run it without installing
 {
-  description = "Corral: a local repository index for AI coding agents";
+  description = "corralctl: a local repository index for AI coding agents";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
@@ -63,8 +63,8 @@
           ldflags = [
             "-s"
             "-w"
-            "-X github.com/sebastienrousseau/corral/cmd.Version=${version}"
-            "-X github.com/sebastienrousseau/corral/internal/tui.Version=${version}"
+            "-X github.com/sebastienrousseau/corralctl/cmd.Version=${version}"
+            "-X github.com/sebastienrousseau/corralctl/internal/tui.Version=${version}"
           ];
 
           nativeBuildInputs = [ pkgs.installShellFiles ];
@@ -86,9 +86,9 @@
               "$TMPDIR/artifacts/completions/corralctl.zsh"
             installShellCompletion --fish --name corralctl.fish \
               "$TMPDIR/artifacts/completions/corralctl.fish"
-            install -Dm644 README.md   "$out/share/doc/corral/README.md"
-            install -Dm644 CHANGELOG.md "$out/share/doc/corral/CHANGELOG.md"
-            install -Dm644 LICENSE      "$out/share/doc/corral/LICENSE"
+            install -Dm644 README.md   "$out/share/doc/corralctl/README.md"
+            install -Dm644 CHANGELOG.md "$out/share/doc/corralctl/CHANGELOG.md"
+            install -Dm644 LICENSE      "$out/share/doc/corralctl/LICENSE"
           '';
 
           # The suite makes no network calls — the GitHub API is exercised
@@ -109,7 +109,7 @@
 
           meta = with pkgs.lib; {
             description = "Clone and organise repositories, and serve them to AI coding agents over MCP";
-            homepage = "https://github.com/sebastienrousseau/corral";
+            homepage = "https://github.com/sebastienrousseau/corralctl";
             license = licenses.gpl3Only;
             mainProgram = "corralctl";
             maintainers = [ ];

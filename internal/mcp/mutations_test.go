@@ -12,7 +12,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sebastienrousseau/corral/internal/git"
+	"github.com/sebastienrousseau/corralctl/internal/git"
 )
 
 // Mutation-tool tests.

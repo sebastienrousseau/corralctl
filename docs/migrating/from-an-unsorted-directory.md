@@ -22,7 +22,7 @@ once.
 
 ## Step 1: read-only, over what you already have
 
-Corral's read side does not care about the layout. Point the MCP server
+corralctl's read side does not care about the layout. Point the MCP server
 at the directory as it stands:
 
 ```bash
@@ -64,7 +64,7 @@ directory holding both is better.
 
 ## Step 4: move the rest, when you feel like it
 
-There is no import command, deliberately. Corral cannot know which
+There is no import command, deliberately. corralctl cannot know which
 clones you consider private, or which language a polyglot repository
 belongs under, and guessing wrong would scatter your work into
 directories you did not choose. Moving a repository is `mv`, and the

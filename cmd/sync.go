@@ -14,11 +14,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/sebastienrousseau/corral/internal/diag"
-	"github.com/sebastienrousseau/corral/internal/engine"
-	"github.com/sebastienrousseau/corral/internal/forge"
-	"github.com/sebastienrousseau/corral/internal/github"
-	"github.com/sebastienrousseau/corral/internal/mirror"
+	"github.com/sebastienrousseau/corralctl/internal/diag"
+	"github.com/sebastienrousseau/corralctl/internal/engine"
+	"github.com/sebastienrousseau/corralctl/internal/forge"
+	"github.com/sebastienrousseau/corralctl/internal/github"
+	"github.com/sebastienrousseau/corralctl/internal/mirror"
 	"github.com/spf13/cobra"
 )
 

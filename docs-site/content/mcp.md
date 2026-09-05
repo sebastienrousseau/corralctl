@@ -7,7 +7,7 @@ changefreq: "weekly"
 copyright_year: "2026"
 locale_path: "/"
 base_path: "/"
-name: "Corral"
+name: "corralctl"
 short_name: "CO"
 slug_install: "installation"
 slug_usage: "usage"
@@ -31,12 +31,12 @@ label_pager: "Page"
 label_prev: "Previous"
 label_next: "Next"
 label_toc: "On this page"
-screenshot_alt: "Corral organising repositories into a Finder-friendly directory hierarchy."
-footer_note: "Corral clones and organises repositories from six forges into a Finder-friendly hierarchy. Published under GPL-3.0-only."
+screenshot_alt: "corralctl organising repositories into a Finder-friendly directory hierarchy."
+footer_note: "corralctl clones and organises repositories from six forges into a Finder-friendly hierarchy. Published under GPL-3.0-only."
 copyright: "© 2026 Sebastien Rousseau. Licensed under GPL-3.0-only."
 translation_key: "mcp"
-title: "MCP Server — Corral"
-description: "Corral's Model Context Protocol server exposes your local, organised workspace to AI agents. Read-only by default, and it never contacts the GitHub API."
+title: "MCP Server — corralctl"
+description: "corralctl's Model Context Protocol server exposes your local, organised workspace to AI agents. Read-only by default, and it never contacts the GitHub API."
 keywords: "mcp server, model context protocol, claude code, cursor, ai agent tools"
 eyebrow: "Integration"
 headline: "MCP Server"
@@ -60,8 +60,8 @@ layout: "doc"
 
 ## What it is
 
-Corral ships a Model Context Protocol server that exposes your local,
-Corral-organised workspace to AI coding agents — Claude Code, Cursor, Cline,
+corralctl ships a Model Context Protocol server that exposes your local,
+corralctl-organised workspace to AI coding agents — Claude Code, Cursor, Cline,
 Codex CLI, Aider, and anything else that speaks MCP.
 
 Where GitHub's own MCP server covers the remote API surface — issues, pull

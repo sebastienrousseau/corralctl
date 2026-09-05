@@ -13,7 +13,7 @@ import (
 	"github.com/charmbracelet/bubbles/progress"
 	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/sebastienrousseau/corral/internal/github"
+	"github.com/sebastienrousseau/corralctl/internal/github"
 )
 
 func TestModelInit(t *testing.T) {

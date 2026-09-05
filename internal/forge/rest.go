@@ -124,7 +124,7 @@ func newRESTClient(base, token, tokenHeader, tokenPrefix string, opts Options) (
 // userAgent identifies corral to a forge. Some instances reject requests
 // without one, and an operator reading their logs deserves to know what
 // is calling them.
-const userAgent = "corral (+https://github.com/sebastienrousseau/corral)"
+const userAgent = "corral (+https://github.com/sebastienrousseau/corralctl)"
 
 // getPage fetches one page and decodes it into out.
 //

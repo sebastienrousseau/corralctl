@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sebastienrousseau/corral/internal/mcp"
+	"github.com/sebastienrousseau/corralctl/internal/mcp"
 )
 
 // The MCP help text is checked against the server's own registered tool

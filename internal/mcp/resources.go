@@ -15,7 +15,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/sebastienrousseau/corral/internal/sanitize"
+	"github.com/sebastienrousseau/corralctl/internal/sanitize"
 )
 
 // MIME types the corral resources advertise. Pinned constants keep the

@@ -2,13 +2,13 @@
 
 # Architecture
 
-How Corral works, for people changing it. For how to build and test it see
+How corralctl works, for people changing it. For how to build and test it see
 [DEVELOPMENT.md](../DEVELOPMENT.md); for the threat model see
 [security-model.md](security-model.md).
 
 ## The shape of it
 
-Corral does two things that share one data model:
+corralctl does two things that share one data model:
 
 1. **Reconcile** a GitHub owner's repositories against a local directory
    tree — clone what is missing, sync what is stale, relocate what moved.
@@ -16,7 +16,7 @@ Corral does two things that share one data model:
    locally and without touching the network.
 
 The second is why the first exists. GitHub's own MCP server already covers
-the remote API; the dimension only Corral can serve is a developer's
+the remote API; the dimension only corralctl can serve is a developer's
 already-cloned local mirror.
 
 ## Package layout
@@ -51,7 +51,7 @@ see [ADR-0002](adr/0002-github-package-is-a-leaf.md).
 ## The reconciliation loop
 
 `engine.RunE` is the whole flow. Reading it top to bottom is the fastest way
-to understand Corral.
+to understand corralctl.
 
 ```text
 normalize options

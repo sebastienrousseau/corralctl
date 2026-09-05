@@ -76,6 +76,18 @@ back out — and every operation is a subcommand of it.
 
 ### Changed
 
+- **The repository is now `sebastienrousseau/corralctl`, and so is the
+  brand.** `corralctl` was already the binary, the Homebrew cask and the AUR
+  package; the repository, the Go module, the container image and the MCP
+  registry entry all said `corral`, and `corral` is taken on Homebrew. One
+  name now, everywhere: the module is `github.com/sebastienrousseau/corralctl`,
+  the image is `ghcr.io/sebastienrousseau/corralctl`, the registry entry is
+  `io.github.sebastienrousseau/corralctl`, and installed documentation lives
+  under `share/doc/corralctl`. GitHub redirects the old repository URL, and
+  earlier module versions stay resolvable under the old path; the previous
+  registry entry and image tags remain where they were. The `CORRAL_*`
+  environment variables are unchanged, because renaming them would break
+  every shell that exports one.
 - The forge package's contract is now two things rather than "exactly one":
   list what an owner has, and hold a mirror of what the user has. Its
   package documentation says so.
@@ -2368,8 +2380,8 @@ cron-safety overhaul.
   100 % doc coverage.
 - All tests green under `-race -count=1`.
 
-[Unreleased]: https://github.com/sebastienrousseau/corral/compare/v0.0.37...HEAD
-[0.0.37]: https://github.com/sebastienrousseau/corral/compare/v0.0.36...v0.0.37
+[Unreleased]: https://github.com/sebastienrousseau/corralctl/compare/v0.0.37...HEAD
+[0.0.37]: https://github.com/sebastienrousseau/corralctl/compare/v0.0.36...v0.0.37
 [0.0.36]: https://github.com/sebastienrousseau/corral/compare/v0.0.35...v0.0.36
 [0.0.35]: https://github.com/sebastienrousseau/corral/compare/v0.0.34...v0.0.35
 [0.0.34]: https://github.com/sebastienrousseau/corral/compare/v0.0.33...v0.0.34

@@ -6,7 +6,7 @@
 
 ## Context
 
-Corral ships a CLI, so packagers expect `corralctl.1` and shell completions
+corralctl ships a CLI, so packagers expect `corralctl.1` and shell completions
 at FHS paths. The two ways to get them are to write and commit them, or to
 render them from the cobra command tree at build time.
 

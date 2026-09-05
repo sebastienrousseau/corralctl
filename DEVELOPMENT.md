@@ -2,7 +2,7 @@
 
 # Development
 
-The single entry point for working on Corral: toolchain, how to reproduce
+The single entry point for working on corralctl: toolchain, how to reproduce
 every CI gate locally, how the tests are laid out, and how a release is cut.
 
 If a gate fails in CI and you cannot reproduce it from this file, that is a
@@ -23,7 +23,7 @@ bug in this file — please report it.
 | Tool | Version | Why |
 |---|---|---|
 | Go | as pinned by the `go` directive in `go.mod` | `GOTOOLCHAIN=auto` downloads it; CI never pins a version separately, so `go.mod` is the single source of truth |
-| git | 2.30+ | Corral shells out to `git` for every clone, pull and inspection |
+| git | 2.30+ | corralctl shells out to `git` for every clone, pull and inspection |
 | make | any | Task runner for everything below |
 
 Optional, only needed for the gate that uses them:
@@ -68,7 +68,7 @@ dependency tree, and no CGO — `CGO_ENABLED=0` everywhere, which is what
 makes the released binaries static and the cross-compilation trivial.
 
 ```sh
-git clone https://github.com/sebastienrousseau/corral.git
+git clone https://github.com/sebastienrousseau/corralctl.git
 cd corral
 make            # format, vet, licence + manifest + example checks, tests, build
 ```
@@ -192,7 +192,7 @@ Every commit must be **cryptographically signed** and carry a DCO
 **Coverage threshold: 100% of statements, enforced per package.**
 
 A threshold chosen once and defended beats chasing a number, so here is the
-defence. Corral's failure modes are destructive — it moves, deletes and
+defence. corralctl's failure modes are destructive — it moves, deletes and
 overwrites directories in a developer's workspace — and the branches that
 matter most are the refusals: the paths that decline to delete a clone with
 unpushed work, decline to migrate a directory whose origin does not match,

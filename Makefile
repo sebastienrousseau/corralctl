@@ -14,7 +14,7 @@ PREFIX ?= /usr/local
 DESTDIR ?=
 BINDIR = $(DESTDIR)$(PREFIX)/bin
 MANDIR = $(DESTDIR)$(PREFIX)/share/man/man1
-DOCDIR = $(DESTDIR)$(PREFIX)/share/doc/corral
+DOCDIR = $(DESTDIR)$(PREFIX)/share/doc/corralctl
 BASHCOMPDIR = $(DESTDIR)$(PREFIX)/share/bash-completion/completions
 ZSHCOMPDIR = $(DESTDIR)$(PREFIX)/share/zsh/site-functions
 FISHCOMPDIR = $(DESTDIR)$(PREFIX)/share/fish/vendor_completions.d
@@ -31,7 +31,7 @@ DIST ?= build
 # the "dev" fallback baked into the source. Overridden by goreleaser at
 # release time.
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
-VERSION_PKG = github.com/sebastienrousseau/corral
+VERSION_PKG = github.com/sebastienrousseau/corralctl
 LDFLAGS = -s -w \
 	-X $(VERSION_PKG)/cmd.Version=$(VERSION) \
 	-X $(VERSION_PKG)/internal/tui.Version=$(VERSION)
@@ -83,7 +83,7 @@ install-smoke:
 	         usr/share/bash-completion/completions/$(BINARY_NAME) \
 	         usr/share/zsh/site-functions/_$(BINARY_NAME) \
 	         usr/share/fish/vendor_completions.d/$(BINARY_NAME).fish \
-	         usr/share/doc/corral/README.md; do \
+	         usr/share/doc/corralctl/README.md; do \
 	  test -f "/tmp/corral-stage/$$f" || { echo "MISSING: $$f" >&2; exit 1; }; \
 	done; \
 	test -x /tmp/corral-stage/usr/bin/$(BINARY_NAME) || { echo "binary not executable" >&2; exit 1; }

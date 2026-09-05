@@ -17,7 +17,7 @@ Not duplicated here; see [`../README.md`](../README.md) for why.
 - shell completions for bash, zsh and fish, installed under the names
   each shell actually looks the command up by
 - `README.md`, `CHANGELOG.md` and `LICENSE` under
-  `/usr/share/doc/corral/`
+  `/usr/share/doc/corralctl/`
 
 ## Runtime dependencies
 

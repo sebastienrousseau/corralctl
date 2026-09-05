@@ -39,15 +39,15 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sebastienrousseau/corral/cmd"
+	"github.com/sebastienrousseau/corralctl/cmd"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 )
 
 const (
 	manSection = "1"
-	manSource  = "Corral"
-	manManual  = "Corral Manual"
+	manSource  = "corralctl"
+	manManual  = "corralctl Manual"
 )
 
 func main() {
@@ -181,7 +181,7 @@ func renderMan(c, root *cobra.Command, date string) string {
 	seeAlso(&b, c, root)
 
 	b.WriteString(".SH REPORTING BUGS\n")
-	b.WriteString("Report issues at https://github.com/sebastienrousseau/corral/issues\n")
+	b.WriteString("Report issues at https://github.com/sebastienrousseau/corralctl/issues\n")
 	b.WriteString(".SH COPYRIGHT\n")
 	b.WriteString("Copyright \\(co 2026 Sebastien Rousseau. Licensed under GPL-3.0-only.\n")
 	return b.String()

@@ -2,21 +2,21 @@
 # SPDX-License-Identifier: GPL-3.0-only
 
 name: Feature request
-description: Something Corral should be able to do
+description: Something corralctl should be able to do
 labels: ["enhancement"]
 body:
   - type: textarea
     id: problem
     attributes:
       label: The problem
-      description: What are you trying to do that Corral makes hard or impossible? Describe the situation, not the feature.
+      description: What are you trying to do that corralctl makes hard or impossible? Describe the situation, not the feature.
     validations:
       required: true
 
   - type: textarea
     id: proposal
     attributes:
-      label: What you would like Corral to do
+      label: What you would like corralctl to do
     validations:
       required: true
 

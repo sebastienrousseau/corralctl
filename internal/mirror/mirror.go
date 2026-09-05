@@ -34,8 +34,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/sebastienrousseau/corral/internal/forge"
-	"github.com/sebastienrousseau/corral/internal/git"
+	"github.com/sebastienrousseau/corralctl/internal/forge"
+	"github.com/sebastienrousseau/corralctl/internal/git"
 )
 
 // Seams, so the orchestration is testable without a forge or a push.

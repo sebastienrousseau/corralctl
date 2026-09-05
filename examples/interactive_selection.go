@@ -12,8 +12,8 @@ import (
 	"os"
 	"time"
 
-	"github.com/sebastienrousseau/corral/internal/github"
-	"github.com/sebastienrousseau/corral/internal/tui"
+	"github.com/sebastienrousseau/corralctl/internal/github"
+	"github.com/sebastienrousseau/corralctl/internal/tui"
 )
 
 func main() {
@@ -31,7 +31,7 @@ func main() {
 				Name:       "corral",
 				Language:   "Go",
 				Visibility: "Public",
-				CloneURL:   "https://github.com/sebastienrousseau/corral.git",
+				CloneURL:   "https://github.com/sebastienrousseau/corralctl.git",
 				PushedAt:   time.Now(),
 				Stars:      120,
 			},

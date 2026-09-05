@@ -8,10 +8,10 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/sebastienrousseau/corral/internal/engine"
-	"github.com/sebastienrousseau/corral/internal/forge"
-	gitutil "github.com/sebastienrousseau/corral/internal/git"
-	"github.com/sebastienrousseau/corral/internal/mirror"
+	"github.com/sebastienrousseau/corralctl/internal/engine"
+	"github.com/sebastienrousseau/corralctl/internal/forge"
+	gitutil "github.com/sebastienrousseau/corralctl/internal/git"
+	"github.com/sebastienrousseau/corralctl/internal/mirror"
 )
 
 // TestCmdSeamsBindToRealImplementations pins the cmd-layer indirection seams to

@@ -16,7 +16,7 @@ import (
 	"github.com/charmbracelet/bubbles/table"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/sebastienrousseau/corral/internal/github"
+	"github.com/sebastienrousseau/corralctl/internal/github"
 )
 
 // Version is the build version of Corral, rendered in the TUI footer.

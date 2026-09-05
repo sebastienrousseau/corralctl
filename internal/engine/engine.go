@@ -22,11 +22,11 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/mattn/go-isatty"
-	"github.com/sebastienrousseau/corral/internal/diag"
-	"github.com/sebastienrousseau/corral/internal/forge"
-	"github.com/sebastienrousseau/corral/internal/git"
-	"github.com/sebastienrousseau/corral/internal/github"
-	"github.com/sebastienrousseau/corral/internal/tui"
+	"github.com/sebastienrousseau/corralctl/internal/diag"
+	"github.com/sebastienrousseau/corralctl/internal/forge"
+	"github.com/sebastienrousseau/corralctl/internal/git"
+	"github.com/sebastienrousseau/corralctl/internal/github"
+	"github.com/sebastienrousseau/corralctl/internal/tui"
 )
 
 // OutputFormat controls how operation results are emitted.

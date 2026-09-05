@@ -9,8 +9,8 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/sebastienrousseau/corral/internal/git"
-	"github.com/sebastienrousseau/corral/internal/tui"
+	"github.com/sebastienrousseau/corralctl/internal/git"
+	"github.com/sebastienrousseau/corralctl/internal/tui"
 )
 
 // TestSeamsBindToRealImplementations asserts that every indirection seam in
