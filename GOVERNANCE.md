@@ -1,6 +1,6 @@
 # Governance
 
-Corral is a small, focused open-source project. This document describes how
+corralctl is a small, focused open-source project. This document describes how
 decisions are made, who makes them, and what happens if key people become
 unavailable.
 
@@ -9,7 +9,7 @@ unavailable.
 ### Maintainer
 
 The **Maintainer** is the person with commit access to
-`sebastienrousseau/corral` who is responsible for the direction, quality,
+`sebastienrousseau/corralctl` who is responsible for the direction, quality,
 release cadence, and security of the project.
 
 **Current maintainer:** Sebastien Rousseau
@@ -33,7 +33,7 @@ Contribution mechanics are documented in [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Decision-making
 
-Because Corral has a single Maintainer, decisions are ultimately made by the
+Because corralctl has a single Maintainer, decisions are ultimately made by the
 Maintainer after considering community input. The Maintainer commits to:
 
 - Explaining the reasoning behind non-trivial rejections in the relevant
@@ -53,7 +53,7 @@ succession procedure — voluntary hand-off, community fork after
 ≥ 6 months of unresponsiveness, and emergency compromise response —
 is documented in [MAINTAINERS.md](MAINTAINERS.md). Key facts, in short:
 
-- **Repository ownership**: The `sebastienrousseau/corral` repository is
+- **Repository ownership**: The `sebastienrousseau/corralctl` repository is
   owned by the Maintainer's personal GitHub account. Any user may fork
   under GPL-3.0 without further permission.
 - **Release signing key**: Release tags are signed with the Maintainer's

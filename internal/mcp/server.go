@@ -14,7 +14,7 @@ import (
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	"github.com/sebastienrousseau/corral/internal/symbols"
+	"github.com/sebastienrousseau/corralctl/internal/symbols"
 )
 
 // ServerName is the public identifier the MCP server advertises to clients.

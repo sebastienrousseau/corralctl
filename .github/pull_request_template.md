@@ -1,5 +1,5 @@
 <!--
-Thanks for contributing to Corral.
+Thanks for contributing to corralctl.
 
 Before opening: branch from `main` and target `main`. A pull request based on
 another branch runs no CI here (every workflow filters on

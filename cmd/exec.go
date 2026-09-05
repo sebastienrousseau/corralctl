@@ -13,7 +13,7 @@ import (
 	"strings"
 	"sync"
 
-	gitutil "github.com/sebastienrousseau/corral/internal/git"
+	gitutil "github.com/sebastienrousseau/corralctl/internal/git"
 	"github.com/spf13/cobra"
 )
 

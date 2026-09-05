@@ -49,7 +49,7 @@ against a module that keeps eleven and a CI-checked SBOM. It is also
 strictly more accurate for Go than a tree-sitter grammar, because it is
 the same parser the compiler uses.
 
-The cost is real and should not be understated: **one language**. Corral
+The cost is real and should not be understated: **one language**. corralctl
 indexes Go and nothing else until another extractor is written.
 
 ## Correction — 2026-09-03
@@ -88,7 +88,7 @@ weighing, not an impossibility, and the original text read as the latter.
 
 Two things, either of which should reopen it:
 
-- Corral's audience turning out to be mostly non-Go. The extractor
+- corralctl's audience turning out to be mostly non-Go. The extractor
   interface exists so that is a new file rather than a rewrite.
 - A pure-Go tree-sitter path maturing. See the 2026-09-05 amendment
   below: this was investigated and declined, and the condition is

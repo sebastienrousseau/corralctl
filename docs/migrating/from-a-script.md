@@ -16,7 +16,7 @@ gh repo list "$OWNER" --limit 200 --json name,sshUrl |
   done
 ```
 
-It works. Corral is that script with the cases it does not handle.
+It works. corralctl is that script with the cases it does not handle.
 
 ## What the script gets wrong
 

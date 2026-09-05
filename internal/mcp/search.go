@@ -8,8 +8,8 @@ import (
 	"strconv"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	"github.com/sebastienrousseau/corral/internal/sanitize"
-	"github.com/sebastienrousseau/corral/internal/search"
+	"github.com/sebastienrousseau/corralctl/internal/sanitize"
+	"github.com/sebastienrousseau/corralctl/internal/search"
 )
 
 // Content search across the workspace.

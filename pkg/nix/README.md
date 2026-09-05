@@ -13,13 +13,13 @@ today.
 ## Run without installing
 
 ```bash
-nix run github:sebastienrousseau/corral -- --help
+nix run github:sebastienrousseau/corralctl -- --help
 ```
 
 ## Build
 
 ```bash
-nix build github:sebastienrousseau/corral
+nix build github:sebastienrousseau/corralctl
 ./result/bin/corralctl --version
 ```
 

@@ -25,7 +25,7 @@
         "run", "--rm", "-i",
         "--user", "1000:1000",
         "-v", "${HOME}/Code:/workspace:ro",
-        "ghcr.io/sebastienrousseau/corral:latest",
+        "ghcr.io/sebastienrousseau/corralctl:latest",
         "mcp", "--root", "/workspace"
       ]
     }

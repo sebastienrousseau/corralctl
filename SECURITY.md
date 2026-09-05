@@ -1,10 +1,10 @@
 # Security Policy
 
-Corral is a Go-based CLI application. We take security seriously and follow industry best practices.
+corralctl is a Go-based CLI application. We take security seriously and follow industry best practices.
 
 ## Reporting a Vulnerability
 
-Report security issues through [GitHub's private vulnerability reporting](https://github.com/sebastienrousseau/corral/security/advisories/new). Do not open a public issue.
+Report security issues through [GitHub's private vulnerability reporting](https://github.com/sebastienrousseau/corralctl/security/advisories/new). Do not open a public issue.
 
 You should receive a response within 48 hours. If confirmed, a fix will be released as soon as possible.
 

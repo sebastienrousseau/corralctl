@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sebastienrousseau/corral/internal/github"
+	"github.com/sebastienrousseau/corralctl/internal/github"
 )
 
 // newStateRepo creates a real git repository with one commit. The sidecar now

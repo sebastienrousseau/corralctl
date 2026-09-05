@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sebastienrousseau/corral/internal/diag"
+	"github.com/sebastienrousseau/corralctl/internal/diag"
 )
 
 // captureDiag redirects diagnostic output into a buffer at the given level

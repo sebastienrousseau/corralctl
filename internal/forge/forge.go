@@ -48,7 +48,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sebastienrousseau/corral/internal/git"
+	"github.com/sebastienrousseau/corralctl/internal/git"
 )
 
 // Repo is one repository, as any forge describes it.

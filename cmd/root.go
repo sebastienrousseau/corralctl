@@ -13,14 +13,14 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sebastienrousseau/corral/internal/diag"
-	"github.com/sebastienrousseau/corral/internal/engine"
-	"github.com/sebastienrousseau/corral/internal/github"
+	"github.com/sebastienrousseau/corralctl/internal/diag"
+	"github.com/sebastienrousseau/corralctl/internal/engine"
+	"github.com/sebastienrousseau/corralctl/internal/github"
 	"github.com/spf13/cobra"
 )
 
 // Version is the build version of Corral. It is overridden at release time via
-// -ldflags "-X github.com/sebastienrousseau/corral/cmd.Version=<version>"
+// -ldflags "-X github.com/sebastienrousseau/corralctl/cmd.Version=<version>"
 // (set by goreleaser) and by `make build` via `git describe`. The "dev"
 // fallback makes an un-injected build obviously local rather than masquerading
 // as a stale release tag.

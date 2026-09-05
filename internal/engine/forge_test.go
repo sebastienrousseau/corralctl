@@ -12,7 +12,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sebastienrousseau/corral/internal/github"
+	"github.com/sebastienrousseau/corralctl/internal/github"
 )
 
 // withForgeSelection sets the run's forge and restores it afterwards. The

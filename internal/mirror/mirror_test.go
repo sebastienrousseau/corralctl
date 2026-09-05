@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sebastienrousseau/corral/internal/forge"
-	"github.com/sebastienrousseau/corral/internal/git"
+	"github.com/sebastienrousseau/corralctl/internal/forge"
+	"github.com/sebastienrousseau/corralctl/internal/git"
 	"go.uber.org/goleak"
 )
 

@@ -6,7 +6,7 @@ package forge
 import (
 	"context"
 
-	"github.com/sebastienrousseau/corral/internal/github"
+	"github.com/sebastienrousseau/corralctl/internal/github"
 )
 
 func init() { Register(GitHub{}) }

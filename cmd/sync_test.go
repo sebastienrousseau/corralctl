@@ -13,9 +13,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sebastienrousseau/corral/internal/forge"
-	"github.com/sebastienrousseau/corral/internal/github"
-	"github.com/sebastienrousseau/corral/internal/mirror"
+	"github.com/sebastienrousseau/corralctl/internal/forge"
+	"github.com/sebastienrousseau/corralctl/internal/github"
+	"github.com/sebastienrousseau/corralctl/internal/mirror"
 )
 
 // captureSyncStdout runs fn with os.Stdout redirected and returns what it
