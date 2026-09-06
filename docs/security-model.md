@@ -188,6 +188,35 @@ attempted on that repo.
 
 - `internal/engine/engine_empty_test.go` asserts SKIP + no pull.
 
+### C6. `corralctl sync` never rewrites a branch, and never pushes a clone onto its own forge
+
+**Argument.** The only two functions that push are `git.EnsureRemote` and
+`git.PushMirror` in `internal/git/mirror.go`. The push is a single
+`git push --prune --no-verify <remote> refs/heads/*:refs/heads/*
++refs/tags/*:refs/tags/*`: branches carry no force marker, so a
+non-fast-forward is refused by git and surfaced as an error, while tags are
+forced because the local tag namespace is authoritative for a mirror. Before
+any push, `internal/mirror` compares the repository's `origin` host with the
+destination's host and skips the pair when they match, so a clone taken
+*from* a forge is never pruned against that forge. A destination repository
+that already exists with the other visibility is refused rather than reused.
+
+**Evidence.** `internal/git/mirror_test.go` pushes to a real bare repository
+and asserts all three properties; `internal/mirror/mirror_test.go` covers the
+origin guard in real and dry runs and the visibility refusal.
+
+### C7. `corralctl sync` presents each credential to exactly one forge
+
+**Argument.** A destination's token reaches git as an
+`http.<scheme>://<host>/.extraheader` config entry in the process
+environment, scoped to that destination's origin, and is never written to
+`.git/config` or placed in a URL. The push path deliberately does not use
+the helper that attaches the GitHub token to every git invocation, so a push
+to GitLab carries the GitLab credential and nothing else.
+
+**Evidence.** `pushAuthEnv` in `internal/git/mirror.go`, and
+`TestPushMirrorScopesTheCredential`.
+
 ## 4. Threats considered and out of scope
 
 ### In scope

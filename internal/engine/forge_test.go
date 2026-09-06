@@ -123,6 +123,22 @@ func TestFetchFromForgePropagatesAListingError(t *testing.T) {
 	}
 }
 
+func TestForgeTokenForSync(t *testing.T) {
+	// The exported resolver is what `corralctl sync` uses. It differs from
+	// the listing path in one way: GitHub's token is resolved here, because
+	// the target does not carry the listing client's auth ladder.
+	t.Setenv("GITHUB_TOKEN", "gh-env")
+	t.Setenv("GH_TOKEN", "")
+	if got := ForgeToken(context.Background(), "github", github.AuthModeToken); got != "gh-env" {
+		t.Errorf("github sync token = %q", got)
+	}
+	t.Setenv("CORRAL_GITLAB_TOKEN", "")
+	t.Setenv("GITLAB_TOKEN", "gl-env")
+	if got := ForgeToken(context.Background(), "gitlab", github.AuthModeAuto); got != "gl-env" {
+		t.Errorf("gitlab sync token = %q", got)
+	}
+}
+
 func TestForgeTokenSources(t *testing.T) {
 	// GitHub's credential is resolved inside its own client, which knows
 	// the ladder from an explicit token through the environment to the gh
