@@ -9,8 +9,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/sebastienrousseau/corral/internal/forge"
-	"github.com/sebastienrousseau/corral/internal/github"
+	"github.com/sebastienrousseau/corralctl/internal/forge"
+	"github.com/sebastienrousseau/corralctl/internal/github"
 	"github.com/spf13/pflag"
 )
 

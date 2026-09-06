@@ -13,15 +13,14 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sebastienrousseau/corral/internal/diag"
-	"github.com/sebastienrousseau/corral/internal/engine"
-	"github.com/sebastienrousseau/corral/internal/git"
-	"github.com/sebastienrousseau/corral/internal/github"
+	"github.com/sebastienrousseau/corralctl/internal/diag"
+	"github.com/sebastienrousseau/corralctl/internal/engine"
+	"github.com/sebastienrousseau/corralctl/internal/github"
 	"github.com/spf13/cobra"
 )
 
 // Version is the build version of Corral. It is overridden at release time via
-// -ldflags "-X github.com/sebastienrousseau/corral/cmd.Version=<version>"
+// -ldflags "-X github.com/sebastienrousseau/corralctl/cmd.Version=<version>"
 // (set by goreleaser) and by `make build` via `git describe`. The "dev"
 // fallback makes an un-injected build obviously local rather than masquerading
 // as a stale release tag.
@@ -75,108 +74,10 @@ var rootCmd = &cobra.Command{
 	PreRunE: func(cmd *cobra.Command, args []string) error {
 		return validateCommonFlags(cmd)
 	},
-	Run: func(cmd *cobra.Command, args []string) {
-		owner := args[0]
-		filterType := strings.ToLower(strings.TrimSpace(repoType))
-		filterSort := strings.ToLower(strings.TrimSpace(repoSort))
-		bDir := baseDir
-		lim := limit
-
-		// The positional grammar is exactly what `Use` and the README
-		// document: <owner> [base_dir] [limit]. Repository type and sort are
-		// --type and --sort flags.
-		//
-		// Until v0.0.20 this parser also silently consumed args[1] as a
-		// <type> and args[2] as a <sort> when they matched a keyword list,
-		// which meant ten ordinary directory names — forks, stars, name,
-		// public, private, templates and friends — were quietly swallowed and
-		// the run fell back to $HOME/Code instead of the directory the user
-		// named. validateRootArgs now rejects those instead of guessing.
-		argIdx := 1
-		if len(args) > argIdx {
-			bDir = args[argIdx]
-			argIdx++
-		}
-		if len(args) > argIdx {
-			if _, err := fmt.Sscanf(args[argIdx], "%d", &lim); err != nil {
-				fmt.Fprintf(os.Stderr, "ERROR: limit must be a valid integer\n")
-				osExit(1)
-				return
-			}
-			if lim < 0 {
-				fmt.Fprintf(os.Stderr, "ERROR: limit must be >= 0\n")
-				osExit(1)
-				return
-			}
-		}
-
-		// Preflight banner + confirm. Prints the parsed owner + resolved
-		// base_dir so a `corral i sebastienrousseau`-style arg typo is
-		// obvious BEFORE the network fetch. When the base_dir doesn't
-		// already exist and stdin is a TTY, also prompts for a
-		// confirmation; --yes bypasses it, --dry-run implies bypass.
-		// Interactive TUI mode has its own confirmation via /exit and
-		// doesn't need the extra prompt.
-		if !interactive {
-			proceed, err := preflightRunner(owner, bDir)
-			if err != nil {
-				// Refused (e.g. no TTY to confirm a brand-new target
-				// directory). This is a failure, not a choice, so exit
-				// non-zero: a script must be able to tell it did nothing.
-				fmt.Fprintf(os.Stderr, "corralctl: %v\n", err)
-				osExit(1)
-				return
-			}
-			if !proceed {
-				fmt.Fprintln(os.Stderr, "Aborted.")
-				osExit(0)
-				return
-			}
-		}
-
-		engineRun(cmdContext(cmd), engine.RunOptions{
-			Owner:       owner,
-			BaseDir:     bDir,
-			Concurrency: concurrency,
-			DryRun:      dryRun,
-			Orphans:     orphans,
-			Protocol:    protocol,
-			DoSync:      !noSync,
-			Output:      engine.OutputFormat(output),
-			Interactive: interactive,
-			Forge:       forgeName,
-			ForgeURL:    forgeURL,
-			Fetch: github.FetchOptions{
-				Limit:            lim,
-				Visibility:       visibility,
-				IncludeForks:     includeForks,
-				IncludeArchived:  includeArchived,
-				IncludeLanguages: parseCSV(includeLanguagesCSV),
-				ExcludeLanguages: parseCSV(excludeLanguagesCSV),
-				AuthMode:         github.AuthMode(authMode),
-				RetryMax:         retryMax,
-				RetryMinBackoff:  retryMinBackoff,
-				RetryMaxBackoff:  retryMaxBackoff,
-				RequestTimeout:   apiRequestTimeout,
-				TotalTimeout:     apiTotalTimeout,
-				Type:             filterType,
-				Sort:             filterSort,
-			},
-			Clone: git.CloneOptions{
-				RecurseSubmodules: recurseSubmodules,
-				SingleBranch:      cloneSingleBranch,
-				Blobless:          cloneBlobless,
-				Depth:             cloneDepth,
-			},
-			Sync: engine.SyncOptions{
-				Force:                   forceSync,
-				IgnoreSubmoduleFailures: ignoreSubmoduleErrs,
-			},
-			Layout:     layout,
-			FinderTags: finderTags,
-			Version:    Version,
-		})
-	},
+	// The bare form: `corralctl <owner>` does what `corralctl clone <owner>`
+	// does. Kept so every existing invocation, cron line and script keeps
+	// working; `clone` is the documented spelling.
+	Run: runClone,
 }
 
 func parseCSV(csv string) []string {

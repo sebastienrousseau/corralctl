@@ -12,7 +12,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sebastienrousseau/corral/internal/github"
+	"github.com/sebastienrousseau/corralctl/internal/github"
 )
 
 // withForgeSelection sets the run's forge and restores it afterwards. The
@@ -120,6 +120,22 @@ func TestFetchFromForgePropagatesAListingError(t *testing.T) {
 	withForgeSelection(t, "gitea", srv.URL)
 	if _, err := fetchFromForge(context.Background(), "nobody", github.FetchOptions{}); err == nil {
 		t.Error("an owner that does not exist should be an error, not an empty list")
+	}
+}
+
+func TestForgeTokenForSync(t *testing.T) {
+	// The exported resolver is what `corralctl sync` uses. It differs from
+	// the listing path in one way: GitHub's token is resolved here, because
+	// the target does not carry the listing client's auth ladder.
+	t.Setenv("GITHUB_TOKEN", "gh-env")
+	t.Setenv("GH_TOKEN", "")
+	if got := ForgeToken(context.Background(), "github", github.AuthModeToken); got != "gh-env" {
+		t.Errorf("github sync token = %q", got)
+	}
+	t.Setenv("CORRAL_GITLAB_TOKEN", "")
+	t.Setenv("GITLAB_TOKEN", "gl-env")
+	if got := ForgeToken(context.Background(), "gitlab", github.AuthModeAuto); got != "gl-env" {
+		t.Errorf("gitlab sync token = %q", got)
 	}
 }
 

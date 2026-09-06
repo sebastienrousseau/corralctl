@@ -196,7 +196,7 @@ func exactCoverage(profile string) (float64, []string, error) {
 	return 100 * float64(covered) / float64(total), uncovered, nil
 }
 
-const modulePath = "github.com/sebastienrousseau/corral"
+const modulePath = "github.com/sebastienrousseau/corralctl"
 
 // coverageClaim matches a stated overall percentage.
 var coverageClaim = regexp.MustCompile(`Statement coverage is ([0-9.]+)% overall`)

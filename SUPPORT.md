@@ -13,7 +13,7 @@ corralctl --version
 corralctl <owner> --dry-run --log-level debug
 ```
 
-`--dry-run` shows exactly what Corral intends to do without touching disk.
+`--dry-run` shows exactly what corralctl intends to do without touching disk.
 `--log-level debug` puts the reasoning on stderr while leaving stdout
 parseable.
 
@@ -23,7 +23,7 @@ parseable.
 |---|---|
 | Install, flags, usage | [README.md](README.md) |
 | The rendered manual | <https://doc.corrallib.com> |
-| Package reference | <https://pkg.go.dev/github.com/sebastienrousseau/corral> |
+| Package reference | <https://pkg.go.dev/github.com/sebastienrousseau/corralctl> |
 | How it works internally | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) |
 | Contributing and toolchain | [DEVELOPMENT.md](DEVELOPMENT.md) |
 | Security posture | [docs/security-model.md](docs/security-model.md) |
@@ -34,12 +34,12 @@ offline, and every subcommand has its own page.
 
 ## Questions and discussion
 
-[GitHub Discussions](https://github.com/sebastienrousseau/corral/discussions)
-— for "how do I", "should Corral do X", and anything open-ended.
+[GitHub Discussions](https://github.com/sebastienrousseau/corralctl/discussions)
+— for "how do I", "should corralctl do X", and anything open-ended.
 
 ## Bugs and feature requests
 
-[GitHub Issues](https://github.com/sebastienrousseau/corral/issues), using
+[GitHub Issues](https://github.com/sebastienrousseau/corralctl/issues), using
 the templates. A good report includes:
 
 - `corralctl --version`
@@ -47,7 +47,7 @@ the templates. A good report includes:
 - What you expected and what happened
 - OS and `git --version`
 
-Please redact tokens. Corral keeps credentials out of its own output and
+Please redact tokens. corralctl keeps credentials out of its own output and
 audit log, but a pasted shell transcript may still contain them.
 
 ## Security
@@ -57,6 +57,6 @@ reporting process in [SECURITY.md](SECURITY.md).
 
 ## Response expectations
 
-Corral is maintained by one person alongside other work. Issues are read
+corralctl is maintained by one person alongside other work. Issues are read
 within a week; security reports are prioritised per the SLA in
 SECURITY.md. There is no commercial support offering.

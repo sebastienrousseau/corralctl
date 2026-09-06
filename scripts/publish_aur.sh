@@ -23,7 +23,7 @@
 set -euo pipefail
 
 version="${1:?usage: publish_aur.sh <version>}"
-repo="${CORRAL_REPO:-sebastienrousseau/corral}"
+repo="${CORRAL_REPO:-sebastienrousseau/corralctl}"
 pkg="corralctl-bin"
 workdir="$(mktemp -d)"
 trap 'rm -rf "${workdir}"' EXIT
@@ -50,7 +50,7 @@ pkgver=${version}
 pkgrel=1
 pkgdesc="Clone and organise repositories from GitHub, GitLab, Gitea, Forgejo, Codeberg and Bitbucket, and serve them to AI agents over MCP"
 arch=('x86_64' 'aarch64')
-url="https://github.com/sebastienrousseau/corral"
+url="https://github.com/sebastienrousseau/corralctl"
 license=('GPL-3.0-only')
 depends=('git')
 provides=('corralctl')
@@ -75,7 +75,7 @@ echo "==> writing .SRCINFO"
   echo "	pkgdesc = Clone and organise repositories from GitHub, GitLab, Gitea, Forgejo, Codeberg and Bitbucket, and serve them to AI agents over MCP"
   echo "	pkgver = ${version}"
   echo "	pkgrel = 1"
-  echo "	url = https://github.com/sebastienrousseau/corral"
+  echo "	url = https://github.com/sebastienrousseau/corralctl"
   echo "	arch = x86_64"
   echo "	arch = aarch64"
   echo "	license = GPL-3.0-only"

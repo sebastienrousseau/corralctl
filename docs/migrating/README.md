@@ -5,14 +5,14 @@ SPDX-License-Identifier: GPL-3.0-only
 
 # Migrating to corral
 
-Corral does two things that are usually separate tools: it organises the
+corralctl does two things that are usually separate tools: it organises the
 repositories you clone, and it serves them to AI coding agents over MCP.
 Most people arrive from a tool that does one of those, so these guides
 are written per tool rather than as one document.
 
 | Coming from | What carries over | What is genuinely different |
 | --- | --- | --- |
-| [ghq](from-ghq.md) | The idea of one root and a predictable path per repository | Corral's path encodes visibility and language, not the host and owner |
+| [ghq](from-ghq.md) | The idea of one root and a predictable path per repository | corralctl's path encodes visibility and language, not the host and owner |
 | [a hand-written clone script](from-a-script.md) | Everything — corral is the script, with the edge cases handled | Refusal to destroy unpublished work; an audit log; agents can query it |
 | [a single-repository code index](from-a-code-index.md) | Symbol lookup, file reading | The lookup spans every clone on the machine, not the one that is open |
 | [nothing — an unsorted `~/src`](from-an-unsorted-directory.md) | — | Adopting a layout without re-cloning anything |

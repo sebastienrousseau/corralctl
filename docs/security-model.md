@@ -1,15 +1,15 @@
-# Corral — Security Model & Assurance Case
+# corralctl — Security Model & Assurance Case
 
 **Status:** Living document. Last full review: 2026-07-01.
 **Owner:** Sebastien Rousseau ([@sebastienrousseau](https://github.com/sebastienrousseau)).
 **Scope:** the `corralctl` binary, the MCP server it ships, the release
 pipeline that produces its artefacts, and the on-disk state it manages.
 
-This document is Corral's **assurance case**: a structured argument that the
+This document is corralctl's **assurance case**: a structured argument that the
 project is secure to a stated level, with the evidence that backs each
 claim. It is deliberately narrower and more explicit than a marketing-style
 "security policy". Reviewers, packagers, and downstream users should be
-able to read this document and understand *what Corral protects*, *what it
+able to read this document and understand *what corralctl protects*, *what it
 does not protect*, *what could go wrong*, and *what compensating controls
 exist*.
 
@@ -19,9 +19,9 @@ the specific criterion or control they satisfy.
 
 ---
 
-## 1. What Corral is
+## 1. What corralctl is
 
-Corral (`corralctl`) is a Go CLI that clones and organises a user's own
+corralctl (`corralctl`) is a Go CLI that clones and organises a user's own
 repositories — from GitHub, GitLab, Gitea, Forgejo, Codeberg or Bitbucket —
 into a local directory tree grouped by visibility and
 language. It also ships an MCP server that lets an LLM query the local
@@ -37,7 +37,7 @@ It is:
 
 ## 2. Trust boundaries
 
-Corral operates across four trust boundaries:
+corralctl operates across four trust boundaries:
 
 | # | Boundary                              | Direction     | What crosses it                                  |
 |---|---------------------------------------|---------------|--------------------------------------------------|
@@ -60,9 +60,9 @@ capability, including whatever mutations were enabled at startup.
 
 We claim the following properties. Each is followed by the evidence.
 
-### C1. Corral does not persist or log resolved GitHub credentials
+### C1. corralctl does not persist or log resolved GitHub credentials
 
-**Argument.** Corral resolves credentials from `GITHUB_TOKEN`, `GH_TOKEN`,
+**Argument.** corralctl resolves credentials from `GITHUB_TOKEN`, `GH_TOKEN`,
 or `gh auth token`. HTTPS Git authentication is injected through process
 environment configuration, not command arguments or repository config. Clone
 URLs accepted by the opt-in MCP mutation API may target other hosts, but their
@@ -78,7 +78,7 @@ userinfo and query strings are redacted before audit logging.
 - `--dry-run` prints the exact operations without executing them, so an
   auditor can inspect intended I/O.
 
-### C2. Corral cannot write outside the user-specified target directory
+### C2. corralctl cannot write outside the user-specified target directory
 
 **Argument.** Engine layout results reject absolute paths and traversal.
 MCP paths are canonicalised against the workspace, while file resources are
@@ -120,9 +120,9 @@ Users can verify with:
 gh attestation verify corralctl_*_linux_amd64.tar.gz \
   --owner sebastienrousseau
 cosign verify \
-  --certificate-identity-regexp='https://github.com/sebastienrousseau/corral/.github/workflows/release.yml@refs/tags/.*' \
+  --certificate-identity-regexp='https://github.com/sebastienrousseau/corralctl/.github/workflows/release.yml@refs/tags/.*' \
   --certificate-oidc-issuer=https://token.actions.githubusercontent.com \
-  ghcr.io/sebastienrousseau/corral:VERSION
+  ghcr.io/sebastienrousseau/corralctl:VERSION
 ```
 
 **Evidence.**
@@ -176,9 +176,9 @@ for an unattended workspace the operator is willing to lose.
   (`internal/mcp/audit.go`), so audit retention cannot be defeated by filling
   the disk.
 
-### C5. Corral fails closed on empty or hostile upstream state
+### C5. corralctl fails closed on empty or hostile upstream state
 
-**Argument.** For repositories with no commits, Corral detects the
+**Argument.** For repositories with no commits, corralctl detects the
 condition with `git rev-parse --verify -q HEAD^{commit}` (`internal/git`)
 and marks the repo `SKIP` instead of running `git pull` (which would
 error with "couldn't find remote ref HEAD"). No further work is
@@ -187,6 +187,35 @@ attempted on that repo.
 **Evidence.**
 
 - `internal/engine/engine_empty_test.go` asserts SKIP + no pull.
+
+### C6. `corralctl sync` never rewrites a branch, and never pushes a clone onto its own forge
+
+**Argument.** The only two functions that push are `git.EnsureRemote` and
+`git.PushMirror` in `internal/git/mirror.go`. The push is a single
+`git push --prune --no-verify <remote> refs/heads/*:refs/heads/*
++refs/tags/*:refs/tags/*`: branches carry no force marker, so a
+non-fast-forward is refused by git and surfaced as an error, while tags are
+forced because the local tag namespace is authoritative for a mirror. Before
+any push, `internal/mirror` compares the repository's `origin` host with the
+destination's host and skips the pair when they match, so a clone taken
+*from* a forge is never pruned against that forge. A destination repository
+that already exists with the other visibility is refused rather than reused.
+
+**Evidence.** `internal/git/mirror_test.go` pushes to a real bare repository
+and asserts all three properties; `internal/mirror/mirror_test.go` covers the
+origin guard in real and dry runs and the visibility refusal.
+
+### C7. `corralctl sync` presents each credential to exactly one forge
+
+**Argument.** A destination's token reaches git as an
+`http.<scheme>://<host>/.extraheader` config entry in the process
+environment, scoped to that destination's origin, and is never written to
+`.git/config` or placed in a URL. The push path deliberately does not use
+the helper that attaches the GitHub token to every git invocation, so a push
+to GitLab carries the GitLab credential and nothing else.
+
+**Evidence.** `pushAuthEnv` in `internal/git/mirror.go`, and
+`TestPushMirrorScopesTheCredential`.
 
 ## 4. Threats considered and out of scope
 
@@ -207,31 +236,31 @@ attempted on that repo.
   transparency log makes such a release publicly auditable after the
   fact but does not prevent it. Users concerned about this scenario
   should pin to a specific release tag+digest.
-- **Attacks against GitHub itself.** Corral trusts `api.github.com` and
+- **Attacks against GitHub itself.** corralctl trusts `api.github.com` and
   `github.com` as authoritative for repository state.
 - **Local privilege escalation via git hooks.** `corralctl` runs `git
   clone`, and `git` executes hooks from the cloned repository during
   some operations. Users cloning arbitrary attacker-controlled repos
   should be aware of `core.hooksPath` behaviour.
-- **Denial of service via GitHub rate limits.** Corral respects
+- **Denial of service via GitHub rate limits.** corralctl respects
   `X-RateLimit-*` headers and backs off, but cannot prevent a mistuned
   cron job from exhausting the user's own rate budget.
 
 ## 5. Assumptions
 
-- The user's `GITHUB_TOKEN` has only the scopes Corral needs
-  (`repo`, `read:user`). Corral does not need `write:*` scopes.
+- The user's `GITHUB_TOKEN` has only the scopes corralctl needs
+  (`repo`, `read:user`). corralctl does not need `write:*` scopes.
 - `git` is installed and version ≥ 2.20 (for `-C`, `-c`, and modern
   transports).
 - The user's clock is roughly correct (needed for TLS validation and
   Rekor entry timestamps).
 - The user runs a supported OS: recent Linux, macOS ≥ 14, or Windows 11.
 - The filesystem under the target directory is not simultaneously
-  written to by another Corral process.
+  written to by another corralctl process.
 
 ## 6. Compensating controls (bus factor + solo maintainer)
 
-Corral has a single maintainer. This is a real risk to sustained
+corralctl has a single maintainer. This is a real risk to sustained
 security response. Mitigations:
 
 - **Public assurance case (this doc)**: a successor maintainer or

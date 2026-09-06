@@ -1,6 +1,6 @@
 # Maintainers
 
-Corral is currently maintained by a single person. This document
+corralctl is currently maintained by a single person. This document
 records the current maintainer, the external services and accounts
 that are load-bearing for the project, and the procedure for
 succession or fork.
@@ -21,19 +21,19 @@ Best-effort response windows:
 
 ## External services and accounts
 
-These are the services and accounts that Corral depends on. A succession
+These are the services and accounts that corralctl depends on. A succession
 event requires the new maintainer to either take over each account
 (where possible) or reconstitute the same integration under their own
 account and update the linked configuration file.
 
 | # | Service                            | Account / Location                                       | Purpose                                     | Configuration reference                     |
 |---|------------------------------------|----------------------------------------------------------|---------------------------------------------|---------------------------------------------|
-| 1 | GitHub repository                  | `github.com/sebastienrousseau/corral`                    | Source of truth for code, issues, releases  | this repository                             |
+| 1 | GitHub repository                  | `github.com/sebastienrousseau/corralctl`                    | Source of truth for code, issues, releases  | this repository                             |
 | 2 | GitHub Actions                     | Same repo                                                | CI, release pipeline, SLSA provenance       | `.github/workflows/`                        |
-| 3 | GitHub Container Registry (ghcr)   | `ghcr.io/sebastienrousseau/corral`                       | Multi-arch OCI images                       | `.goreleaser.yaml`                          |
+| 3 | GitHub Container Registry (ghcr)   | `ghcr.io/sebastienrousseau/corralctl`                       | Multi-arch OCI images                       | `.goreleaser.yaml`                          |
 | 4 | Homebrew tap                       | `github.com/sebastienrousseau/homebrew-tap`              | macOS/Linux Homebrew installs               | `.goreleaser.yaml` (`brews:` block)         |
 | 5 | Arch User Repository (AUR)         | `aur.archlinux.org/packages/corralctl-bin`               | Arch Linux installs                         | `.goreleaser.yaml` (`aurs:` block)          |
-| 6 | MCP Registry                       | `io.github.sebastienrousseau/corral`                     | MCP server discovery                        | `server.json`                               |
+| 6 | MCP Registry                       | `io.github.sebastienrousseau/corralctl`                     | MCP server discovery                        | `server.json`                               |
 | 7 | Docs site                          | `doc.corrallib.com` (Cloudflare Pages)                   | Public documentation                        | separate repo; DNS via Cloudflare           |
 | 8 | Signing key (SSH ed25519)          | `SHA256:kIOPAavp1TCEauTr1tTIN3cv+tSs6F9m/4lZjuM9tqk`     | Signs release tags and commits              | `.github/workflows/release.yml`             |
 | 9 | Sigstore keyless signing           | Fulcio + Rekor (via GitHub OIDC)                         | Cosigns every release artefact              | `.goreleaser.yaml` (`sboms`/`signs` blocks) |
@@ -74,7 +74,7 @@ or, after prolonged unavailability, to a community fork.
 
 ### Community fork (unplanned)
 
-Corral is licensed GPL-3.0. If the maintainer becomes unresponsive
+corralctl is licensed GPL-3.0. If the maintainer becomes unresponsive
 for **≥ 6 months** (no issue comments, no releases, no PR merges), the
 community is explicitly encouraged to fork the project. `GOVERNANCE.md`
 codifies this window. A community fork:

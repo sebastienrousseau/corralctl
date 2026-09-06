@@ -22,11 +22,11 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/mattn/go-isatty"
-	"github.com/sebastienrousseau/corral/internal/diag"
-	"github.com/sebastienrousseau/corral/internal/forge"
-	"github.com/sebastienrousseau/corral/internal/git"
-	"github.com/sebastienrousseau/corral/internal/github"
-	"github.com/sebastienrousseau/corral/internal/tui"
+	"github.com/sebastienrousseau/corralctl/internal/diag"
+	"github.com/sebastienrousseau/corralctl/internal/forge"
+	"github.com/sebastienrousseau/corralctl/internal/git"
+	"github.com/sebastienrousseau/corralctl/internal/github"
+	"github.com/sebastienrousseau/corralctl/internal/tui"
 )
 
 // OutputFormat controls how operation results are emitted.
@@ -1639,6 +1639,17 @@ var forgeToken = func(ctx context.Context, name string, mode github.AuthMode) st
 	default:
 		return firstEnv("CORRAL_FORGE_TOKEN", "FORGEJO_TOKEN", "GITEA_TOKEN", "CODEBERG_TOKEN")
 	}
+}
+
+// ForgeToken resolves the credential `corralctl sync` presents to a
+// destination forge, through the same ladder `corralctl clone` uses to
+// list from one: GitHub through its own client, every other forge from
+// the environment variable its own tooling names.
+func ForgeToken(ctx context.Context, name string, mode github.AuthMode) string {
+	if name == "github" {
+		return github.Token(ctx, mode)
+	}
+	return forgeToken(ctx, name, mode)
 }
 
 // firstEnv returns the first of these variables that is set and non-empty.

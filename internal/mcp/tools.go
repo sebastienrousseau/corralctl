@@ -12,8 +12,8 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/sebastienrousseau/corral/internal/diag"
-	"github.com/sebastienrousseau/corral/internal/sanitize"
+	"github.com/sebastienrousseau/corralctl/internal/diag"
+	"github.com/sebastienrousseau/corralctl/internal/sanitize"
 )
 
 // Read-only tool set.

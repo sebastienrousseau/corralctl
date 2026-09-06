@@ -7,7 +7,7 @@ import (
 	"context"
 	"log"
 
-	"github.com/sebastienrousseau/corral/internal/git"
+	"github.com/sebastienrousseau/corralctl/internal/git"
 )
 
 // ExampleClone demonstrates a shallow, single-branch, blobless partial clone —
@@ -19,7 +19,7 @@ func ExampleClone() {
 		Blobless:     true,
 		Depth:        1,
 	}
-	if err := git.Clone(ctx, "https://github.com/sebastienrousseau/corral.git", "/tmp/corral", opts); err != nil {
+	if err := git.Clone(ctx, "https://github.com/sebastienrousseau/corralctl.git", "/tmp/corral", opts); err != nil {
 		log.Printf("clone failed: %v", err)
 	}
 }

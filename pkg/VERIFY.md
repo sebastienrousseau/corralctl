@@ -12,13 +12,13 @@ that came from the same place the file did.
 Set the version once:
 
 ```bash
-VERSION=0.0.36
+VERSION=0.0.37
 ```
 
 ## 1. Checksums
 
 ```bash
-curl -fsSLO "https://github.com/sebastienrousseau/corral/releases/download/v${VERSION}/checksums.txt"
+curl -fsSLO "https://github.com/sebastienrousseau/corralctl/releases/download/v${VERSION}/checksums.txt"
 sha256sum --check --ignore-missing checksums.txt
 ```
 
@@ -35,11 +35,11 @@ which carries the certificate and the signature together. There is no
 separate `.pem` or `.sig` to download.
 
 ```bash
-curl -fsSLO "https://github.com/sebastienrousseau/corral/releases/download/v${VERSION}/checksums.txt.sigstore.json"
+curl -fsSLO "https://github.com/sebastienrousseau/corralctl/releases/download/v${VERSION}/checksums.txt.sigstore.json"
 
 cosign verify-blob \
   --bundle checksums.txt.sigstore.json \
-  --certificate-identity-regexp '^https://github\.com/sebastienrousseau/corral/\.github/workflows/release\.yml@refs/tags/v' \
+  --certificate-identity-regexp '^https://github\.com/sebastienrousseau/corralctl/\.github/workflows/release\.yml@refs/tags/v' \
   --certificate-oidc-issuer 'https://token.actions.githubusercontent.com' \
   checksums.txt
 ```
@@ -51,7 +51,7 @@ artefact.
 
 ```bash
 gh attestation verify "corralctl_${VERSION}_linux_amd64.tar.gz" \
-  --repo sebastienrousseau/corral
+  --repo sebastienrousseau/corralctl
 ```
 
 This states which workflow, at which commit, built the artefact — the
@@ -67,4 +67,4 @@ rather than transcribing them.
 ## If verification fails
 
 Do not package the artefact, and please open a security advisory rather
-than an issue: <https://github.com/sebastienrousseau/corral/security/advisories/new>.
+than an issue: <https://github.com/sebastienrousseau/corralctl/security/advisories/new>.

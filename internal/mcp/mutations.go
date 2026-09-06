@@ -34,7 +34,7 @@ import (
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	"github.com/sebastienrousseau/corral/internal/git"
+	"github.com/sebastienrousseau/corralctl/internal/git"
 )
 
 // gitPull / gitClone are indirected through package vars so tests can

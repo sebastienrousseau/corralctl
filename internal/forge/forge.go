@@ -10,11 +10,14 @@
 //
 // # What a forge has to do
 //
-// Exactly one thing: given an owner, list their repositories. Everything
-// after that — the layout, the clone, the sync, the index — is already
-// host-agnostic, because it operates on a URL and a directory.
+// Two things. Given an owner, list their repositories — that is [Forge],
+// and everything after it (the layout, the clone, the sync, the index) is
+// already host-agnostic, because it operates on a URL and a directory.
+// And given a local repository, make sure a place for it exists and say
+// where to push — that is [Target], the receiving side `corralctl sync`
+// needs, and every forge here implements both.
 //
-// That is why the interface is one method. A design that mirrored each
+// That is why each interface is small. A design that mirrored each
 // forge's full API would be a large surface with one caller, and every
 // forge would drag in a client library an order of magnitude larger than
 // the part of it corral uses.
@@ -45,7 +48,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sebastienrousseau/corral/internal/git"
+	"github.com/sebastienrousseau/corralctl/internal/git"
 )
 
 // Repo is one repository, as any forge describes it.

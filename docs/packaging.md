@@ -1,12 +1,12 @@
 <!-- SPDX-License-Identifier: GPL-3.0-only -->
 
-# Packaging Corral
+# Packaging corralctl
 
 Written for distribution maintainers. Everything a packager needs to
-decide whether Corral fits their archive, and to build it without asking.
+decide whether corralctl fits their archive, and to build it without asking.
 
 Maintainer contact: <sebastian.rousseau@gmail.com> · issues at
-<https://github.com/sebastienrousseau/corral/issues>.
+<https://github.com/sebastienrousseau/corralctl/issues>.
 
 ## What it is
 
@@ -33,7 +33,7 @@ is deliberately not restated anywhere else, so it cannot disagree with
 itself; CI sets `GOTOOLCHAIN=auto` and lets `go.mod` decide.
 
 **When it may rise:** on any release, if a standard-library fix or language
-feature is worth it. Corral makes no distro-LTS compatibility promise. If
+feature is worth it. corralctl makes no distro-LTS compatibility promise. If
 your archive pins an older Go, check `go.mod` before packaging a new
 version rather than assuming the floor held — an aspirational compatibility
 claim here would be worse than none.
@@ -60,7 +60,7 @@ $PREFIX/share/man/man1/corralctl-<subcommand>.1
 $PREFIX/share/bash-completion/completions/corralctl
 $PREFIX/share/zsh/site-functions/_corralctl
 $PREFIX/share/fish/vendor_completions.d/corralctl.fish
-$PREFIX/share/doc/corral/{README.md,CHANGELOG.md,LICENSE,SECURITY.md}
+$PREFIX/share/doc/corralctl/{README.md,CHANGELOG.md,LICENSE,SECURITY.md}
 ```
 
 `make uninstall` removes exactly that set. Both are exercised in CI by
@@ -100,7 +100,7 @@ clones from a real remote. It is safe in a sealed build environment.
 
 ## Runtime dependencies
 
-- **`git`** — required. Corral shells out for every clone, pull and
+- **`git`** — required. corralctl shells out for every clone, pull and
   inspection. Declare it as a hard dependency.
 - **`gh`** (GitHub CLI) — optional. Only used by `--auth gh`, and only when
   no `GITHUB_TOKEN`/`GH_TOKEN` is set. A `Suggests`/`Recommends` at most.
@@ -123,7 +123,7 @@ Verify a download:
 ```console
 $ cosign verify-blob checksums.txt \
     --bundle checksums.txt.sigstore.json \
-    --certificate-identity-regexp 'https://github.com/sebastienrousseau/corral/.*' \
+    --certificate-identity-regexp 'https://github.com/sebastienrousseau/corralctl/.*' \
     --certificate-oidc-issuer https://token.actions.githubusercontent.com
 
 $ sha256sum -c checksums.txt --ignore-missing

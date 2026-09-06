@@ -8,8 +8,8 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/sebastienrousseau/corral/cmd"
-	"github.com/sebastienrousseau/corral/internal/git"
+	"github.com/sebastienrousseau/corralctl/cmd"
+	"github.com/sebastienrousseau/corralctl/internal/git"
 )
 
 // TestMainSeamsBindToRealImplementations is the smallest and most important of

@@ -16,7 +16,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/sebastienrousseau/corral/internal/symbols"
+	"github.com/sebastienrousseau/corralctl/internal/symbols"
 )
 
 // resultText joins a tool result's text content, matching what an MCP

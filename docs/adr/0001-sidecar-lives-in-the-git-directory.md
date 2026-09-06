@@ -6,7 +6,7 @@
 
 ## Context
 
-Corral skips a `git pull` when the upstream `pushed_at` has not advanced
+corralctl skips a `git pull` when the upstream `pushed_at` has not advanced
 since the last successful sync. That requires remembering, per clone, what
 `pushed_at` was last seen — a small piece of state that has to live beside
 the clone.
@@ -21,7 +21,7 @@ The sidecar lives at `<repo>/.git/corral-state.json`, resolved through
 ## Consequences
 
 A file in the working tree shows up in `git status` for every repository
-Corral manages. Users would then either commit a tool's cache file or add
+corralctl manages. Users would then either commit a tool's cache file or add
 it to a `.gitignore` they do not control — in someone else's repository,
 neither is acceptable. Inside the git directory it is invisible to status,
 diff and clean, which is where a tool's private per-clone state belongs.
@@ -35,7 +35,7 @@ successful sync.
 
 ## What would make this wrong
 
-If Corral ever needed the state to be shared between machines, or to be
+If corralctl ever needed the state to be shared between machines, or to be
 visible to other tooling, a git-directory file would be the wrong home.
 Neither is true today: the sidecar is an optimisation, and a missing one
 falls back to always pulling.

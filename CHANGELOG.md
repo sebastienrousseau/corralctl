@@ -6,6 +6,94 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.37] — 2026-09-06
+
+One binary, one base command. `corralctl` now carries both halves of the
+workflow — cloning a forge into the organised tree, and mirroring that tree
+back out — and every operation is a subcommand of it.
+
+### Added
+
+- **`corralctl sync`: mirror the organised tree to any forge corral can
+  clone from.** GitHub, GitLab, Gitea, Forgejo, Codeberg and Bitbucket are
+  all destinations, named as `--to <forge>[:<owner>][@<url>]` and
+  repeatable. For every repository under the base directory, on every
+  destination, it creates the repository when it is missing — with the
+  visibility the local layout says — points a remote named after the forge
+  at it, and pushes branches and tags to parity in a single round trip:
+
+  ```text
+  git push --prune --no-verify <forge> refs/heads/*:refs/heads/* +refs/tags/*:refs/tags/*
+  ```
+
+  Branches are never forced; a destination that has moved on is refused and
+  reported. Tags follow the local namespace. Both properties are pinned by a
+  test against a real bare repository.
+
+  This is the standalone `corral-sync` tool folded in, and it inherits the
+  things that tool had learned: the non-interactive git environment, the
+  empty-repository skip, the refusal to reuse a same-named repository with
+  the wrong visibility, and the `gitlab` and `gitea` remote names, so clones
+  that tool already configured carry over unchanged. It also inherits its
+  most recent fix, which the multi-forge support in 0.0.30 made necessary: a
+  repository is **never pushed to the forge its `origin` lives on**. The
+  tree can now hold a clone whose origin *is* a destination, and pushing it
+  back would run `--prune` against its own upstream — with a single-branch
+  clone, deleting every branch the local copy does not carry.
+
+  Credentials are the environment variables `clone` already reads for each
+  forge, and over HTTPS the same token authenticates the push, handed to git
+  as an `http.<origin>/.extraheader` scoped to that forge and never written
+  to `.git/config`. `--protocol ssh` uses your keys instead.
+
+- **`corralctl clone`, the named form of what the bare command does.** The
+  CLI grew from one verb into several and the one it started with was the
+  only one without a name, which read as two tools sharing a binary. The
+  bare form, `corralctl <owner>`, keeps working exactly as before.
+
+- **Every forge adapter has a receiving side.** `internal/forge` gains a
+  `Target` contract — who the credential belongs to, and ensure that a
+  repository exists — implemented by all six adapters over the same REST
+  client the listings use, plus a non-paginated `call` for creates. GitLab's
+  create omits `namespace_id` for a personal namespace, because the id from
+  `/user` is not the id of the namespace and sending it yields "namespace:
+  is not valid"; a group is looked up by path. Each target also says how
+  git should present the token over HTTPS, since each forge spells the
+  username differently.
+
+- **`internal/mirror`, the orchestration behind `sync`.** A walker that
+  reads visibility from either spelling of `Public`/`Private`, treats
+  `Forks` as private and never consults the repository's own name; a
+  bounded worker pool; and results reported as they happen so `--output
+  ndjson` streams. Every failure is a result rather than an abort, so one
+  repository cannot stop the others, and the exit code is non-zero if any
+  failed.
+
+- **`git.EnsureRemote` and `git.PushMirror`**, the only two functions in
+  the codebase that push. They deliberately bypass the helper that attaches
+  the GitHub token to every git invocation: a push to another forge should
+  carry exactly one credential, the one meant for it.
+
+### Changed
+
+- **The repository is now `sebastienrousseau/corralctl`, and so is the
+  brand.** `corralctl` was already the binary, the Homebrew cask and the AUR
+  package; the repository, the Go module, the container image and the MCP
+  registry entry all said `corral`, and `corral` is taken on Homebrew. One
+  name now, everywhere: the module is `github.com/sebastienrousseau/corralctl`,
+  the image is `ghcr.io/sebastienrousseau/corralctl`, the registry entry is
+  `io.github.sebastienrousseau/corralctl`, and installed documentation lives
+  under `share/doc/corralctl`. GitHub redirects the old repository URL, and
+  earlier module versions stay resolvable under the old path; the previous
+  registry entry and image tags remain where they were. The `CORRAL_*`
+  environment variables are unchanged, because renaming them would break
+  every shell that exports one.
+- The forge package's contract is now two things rather than "exactly one":
+  list what an owner has, and hold a mirror of what the user has. Its
+  package documentation says so.
+- The statement-coverage claim in `.bestpractices.json` now names thirteen
+  packages. `make claims-check` counts them.
+
 ## [0.0.36] — 2026-09-05
 
 ### Fixed
@@ -2292,7 +2380,8 @@ cron-safety overhaul.
   100 % doc coverage.
 - All tests green under `-race -count=1`.
 
-[Unreleased]: https://github.com/sebastienrousseau/corral/compare/v0.0.36...HEAD
+[Unreleased]: https://github.com/sebastienrousseau/corralctl/compare/v0.0.37...HEAD
+[0.0.37]: https://github.com/sebastienrousseau/corralctl/compare/v0.0.36...v0.0.37
 [0.0.36]: https://github.com/sebastienrousseau/corral/compare/v0.0.35...v0.0.36
 [0.0.35]: https://github.com/sebastienrousseau/corral/compare/v0.0.34...v0.0.35
 [0.0.34]: https://github.com/sebastienrousseau/corral/compare/v0.0.33...v0.0.34

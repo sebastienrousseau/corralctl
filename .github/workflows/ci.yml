@@ -383,7 +383,7 @@ jobs:
           # The package list was hardcoded once and internal/diag shipped in
           # v0.0.26 without ever reaching the site, so this compares against
           # what `go list` actually reports.
-          for pkg in $(go list ./... | sed 's|github.com/sebastienrousseau/corral/||'); do
+          for pkg in $(go list ./... | sed 's|github.com/sebastienrousseau/corralctl/||'); do
             # `--` matters: the pattern starts with a hyphen, and without
             # it grep reads it as an option and reports every package
             # missing, which is a gate that fails whatever you do.

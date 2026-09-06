@@ -1,9 +1,9 @@
 # Software Bill of Materials (SBOM)
 
-**Project:** Corral
+**Project:** corralctl
 **Format:** Go Modules (`go.mod` / `go.sum`)
 
-Corral has been migrated from a single-file Bash script to a compiled Go application.
+corralctl has been migrated from a single-file Bash script to a compiled Go application.
 The canonical source of truth for all runtime dependencies, version constraints, and cryptographic checksums is the `go.mod` and `go.sum` files located at the root of the repository.
 
 ## Core Dependencies

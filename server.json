@@ -1,18 +1,18 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
-  "name": "io.github.sebastienrousseau/corral",
-  "title": "Corral",
-  "description": "Search code and symbols across every clone in your Corral workspace. Zero network calls.",
-  "version": "0.0.36",
+  "name": "io.github.sebastienrousseau/corralctl",
+  "title": "corralctl",
+  "description": "Search code and symbols across every clone in your corralctl workspace. Zero network calls.",
+  "version": "0.0.37",
   "repository": {
-    "url": "https://github.com/sebastienrousseau/corral",
+    "url": "https://github.com/sebastienrousseau/corralctl",
     "source": "github"
   },
   "websiteUrl": "https://doc.corrallib.com",
   "packages": [
     {
       "registryType": "oci",
-      "identifier": "ghcr.io/sebastienrousseau/corral:0.0.36",
+      "identifier": "ghcr.io/sebastienrousseau/corralctl:0.0.37",
       "transport": {
         "type": "stdio"
       }

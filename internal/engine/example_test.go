@@ -6,9 +6,9 @@ package engine_test
 import (
 	"context"
 
-	"github.com/sebastienrousseau/corral/internal/engine"
-	"github.com/sebastienrousseau/corral/internal/git"
-	"github.com/sebastienrousseau/corral/internal/github"
+	"github.com/sebastienrousseau/corralctl/internal/engine"
+	"github.com/sebastienrousseau/corralctl/internal/git"
+	"github.com/sebastienrousseau/corralctl/internal/github"
 )
 
 // ExampleRun demonstrates a complete run: clone and organise every public Go and

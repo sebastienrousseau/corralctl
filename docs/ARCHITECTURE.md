@@ -2,13 +2,13 @@
 
 # Architecture
 
-How Corral works, for people changing it. For how to build and test it see
+How corralctl works, for people changing it. For how to build and test it see
 [DEVELOPMENT.md](../DEVELOPMENT.md); for the threat model see
 [security-model.md](security-model.md).
 
 ## The shape of it
 
-Corral does two things that share one data model:
+corralctl does two things that share one data model:
 
 1. **Reconcile** a GitHub owner's repositories against a local directory
    tree — clone what is missing, sync what is stale, relocate what moved.
@@ -16,7 +16,7 @@ Corral does two things that share one data model:
    locally and without touching the network.
 
 The second is why the first exists. GitHub's own MCP server already covers
-the remote API; the dimension only Corral can serve is a developer's
+the remote API; the dimension only corralctl can serve is a developer's
 already-cloned local mirror.
 
 ## Package layout
@@ -25,6 +25,8 @@ already-cloned local mirror.
 cmd/corralctl        main(); nothing but a call into cmd
 cmd/                 cobra commands, flag validation, config file
 internal/engine      the reconciliation loop: workers, layout, migration
+internal/forge       one adapter per forge: list an owner (Forge) and hold a mirror (Target)
+internal/mirror      `corralctl sync`: walk the tree, guard, push in parallel
 internal/github      GitHub API client, paging, retry, token resolution
 internal/git         every `git` subprocess, credentials, remote identity
 internal/tui         Bubble Tea progress view and interactive selector
@@ -49,7 +51,7 @@ see [ADR-0002](adr/0002-github-package-is-a-leaf.md).
 ## The reconciliation loop
 
 `engine.RunE` is the whole flow. Reading it top to bottom is the fastest way
-to understand Corral.
+to understand corralctl.
 
 ```text
 normalize options

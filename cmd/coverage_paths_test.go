@@ -14,8 +14,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/sebastienrousseau/corral/internal/diag"
-	"github.com/sebastienrousseau/corral/internal/github"
+	"github.com/sebastienrousseau/corralctl/internal/diag"
+	"github.com/sebastienrousseau/corralctl/internal/github"
 )
 
 // withConfigPath points the package-level configPath at a temporary file and

@@ -8,7 +8,7 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/sebastienrousseau/corral/internal/git"
+	"github.com/sebastienrousseau/corralctl/internal/git"
 )
 
 // TestMCPSeamsBindToRealImplementations pins the MCP mutation seams.

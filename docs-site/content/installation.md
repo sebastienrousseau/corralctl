@@ -7,7 +7,7 @@ changefreq: "weekly"
 copyright_year: "2026"
 locale_path: "/"
 base_path: "/"
-name: "Corral"
+name: "corralctl"
 short_name: "CO"
 slug_install: "installation"
 slug_usage: "usage"
@@ -31,12 +31,12 @@ label_pager: "Page"
 label_prev: "Previous"
 label_next: "Next"
 label_toc: "On this page"
-screenshot_alt: "Corral organising repositories into a Finder-friendly directory hierarchy."
-footer_note: "Corral clones and organises repositories from six forges into a Finder-friendly hierarchy. Published under GPL-3.0-only."
+screenshot_alt: "corralctl organising repositories into a Finder-friendly directory hierarchy."
+footer_note: "corralctl clones and organises repositories from six forges into a Finder-friendly hierarchy. Published under GPL-3.0-only."
 copyright: "© 2026 Sebastien Rousseau. Licensed under GPL-3.0-only."
 translation_key: "install"
-title: "Installation — Corral"
-description: "Install Corral with mise, Homebrew, the AUR, the Go toolchain, or from source, and verify the download against its signed checksums."
+title: "Installation — corralctl"
+description: "Install corralctl with mise, Homebrew, the AUR, the Go toolchain, or from source, and verify the download against its signed checksums."
 keywords: "install corralctl, mise, homebrew, aur, go install"
 eyebrow: "Getting started"
 headline: "Installation"
@@ -63,7 +63,7 @@ layout: "doc"
 ### mise (macOS and Linux)
 
 ```bash
-mise use -g github:sebastienrousseau/corral
+mise use -g github:sebastienrousseau/corralctl
 ```
 
 Installs the latest released `corralctl` and keeps it managed alongside your
@@ -90,7 +90,7 @@ yay -S corralctl-bin
 ### Go toolchain
 
 ```bash
-go install github.com/sebastienrousseau/corral/cmd/corralctl@latest
+go install github.com/sebastienrousseau/corralctl/cmd/corralctl@latest
 ```
 
 Installs into `$(go env GOPATH)/bin`, or `$GOBIN` when it is set.
@@ -105,7 +105,7 @@ instead.
 Requires Go 1.26 or newer, and Git:
 
 ```bash
-git clone https://github.com/sebastienrousseau/corral.git
+git clone https://github.com/sebastienrousseau/corralctl.git
 cd corral
 make install
 ```
@@ -114,7 +114,7 @@ That installs to `~/.local/bin/corralctl`.
 
 ## Prerequisites
 
-Corral shells out to `git`, and authenticates through the GitHub CLI or a
+corralctl shells out to `git`, and authenticates through the GitHub CLI or a
 token. The table lists what to install first.
 
 | Platform | Command |
@@ -137,7 +137,7 @@ intercept.
 cosign verify-blob \
   --certificate checksums.txt.pem \
   --signature checksums.txt.sig \
-  --certificate-identity-regexp 'https://github.com/sebastienrousseau/corral' \
+  --certificate-identity-regexp 'https://github.com/sebastienrousseau/corralctl' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
   checksums.txt
 ```

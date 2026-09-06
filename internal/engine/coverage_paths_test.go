@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sebastienrousseau/corral/internal/github"
+	"github.com/sebastienrousseau/corralctl/internal/github"
 )
 
 // writeCloneFixture creates a directory that git.IsRepository accepts, with

@@ -8,8 +8,10 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/sebastienrousseau/corral/internal/engine"
-	gitutil "github.com/sebastienrousseau/corral/internal/git"
+	"github.com/sebastienrousseau/corralctl/internal/engine"
+	"github.com/sebastienrousseau/corralctl/internal/forge"
+	gitutil "github.com/sebastienrousseau/corralctl/internal/git"
+	"github.com/sebastienrousseau/corralctl/internal/mirror"
 )
 
 // TestCmdSeamsBindToRealImplementations pins the cmd-layer indirection seams to
@@ -32,6 +34,10 @@ func TestCmdSeamsBindToRealImplementations(t *testing.T) {
 		{"localStateCheck", localStateCheck, gitutil.HasUnpublishedWork},
 		{"removeAll", removeAll, os.RemoveAll},
 		{"userHomeDir", userHomeDir, os.UserHomeDir},
+		{"syncWalk", syncWalk, mirror.Walk},
+		{"syncRun", syncRun, mirror.Run},
+		{"syncToken", syncToken, engine.ForgeToken},
+		{"asTarget", asTarget, forge.AsTarget},
 	}
 	for _, tc := range cases {
 		if tc.got == nil || tc.want == nil {

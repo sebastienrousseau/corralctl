@@ -2,17 +2,17 @@
 # SPDX-License-Identifier: GPL-3.0-only
 
 cff-version: 1.2.0
-title: "Corral: a local repository index for AI coding agents"
+title: "corralctl: a local repository index for AI coding agents"
 message: "If you use this software, please cite it using these metadata."
 type: software
 authors:
   - family-names: Rousseau
     given-names: Sebastien
     email: sebastian.rousseau@gmail.com
-repository-code: "https://github.com/sebastienrousseau/corral"
+repository-code: "https://github.com/sebastienrousseau/corralctl"
 url: "https://doc.corrallib.com"
 abstract: >-
-  Corral clones and organises GitHub repositories into a structured local
+  corralctl clones and organises GitHub repositories into a structured local
   workspace, then exposes that workspace to AI coding agents over the Model
   Context Protocol. It answers questions about a developer's already-cloned
   repositories without a network round-trip.

@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sebastienrousseau/corral/internal/diag"
+	"github.com/sebastienrousseau/corralctl/internal/diag"
 )
 
 // makeFakeRepo creates a directory layout that looks like a corral-
