@@ -223,6 +223,14 @@ func TestRunSkipsAndGuards(t *testing.T) {
 		t.Fatalf("unreadable origin: summary = %+v", got)
 	}
 
+	// A repository the walk marked as colliding is an error on every
+	// destination, and nothing is asked of any forge.
+	gl.ensured = nil
+	got = Run(context.Background(), Options{Repos: []Repo{{Name: "dup", Path: "/x", Conflict: "not mirrored: shares the name"}}, Destinations: dests, Timeout: time.Second})
+	if got.Errors != 2 || gl.calls() != 0 {
+		t.Fatalf("conflict: summary = %+v", got)
+	}
+
 	// A name no forge could hold is an error on every destination, and
 	// nothing is asked of any forge.
 	gl.ensured = nil
@@ -287,11 +295,11 @@ func TestHostOf(t *testing.T) {
 		"../relative":                              "",
 		"C:\\repos\\r":                             "",
 		"file:///srv/git/r.git":                    "",
-		"http://[::1/x":                             "",
-		"user@host:o/r":                             "host",
-		"@:o/r":                                     "",
-		":o/r":                                      "",
-		"a b:o/r":                                   "",
+		"http://[::1/x":                            "",
+		"user@host:o/r":                            "host",
+		"@:o/r":                                    "",
+		":o/r":                                     "",
+		"a b:o/r":                                  "",
 	}
 	for raw, want := range cases {
 		if got := hostOf(raw); got != want {

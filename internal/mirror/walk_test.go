@@ -46,15 +46,38 @@ func TestWalkFindsRepositoriesInOrder(t *testing.T) {
 	}
 }
 
-func TestWalkRefusesNameCollisions(t *testing.T) {
+func TestWalkMarksNameCollisions(t *testing.T) {
 	base := t.TempDir()
-	for _, p := range []string{filepath.Join(base, "Public", "Go", "Repo", ".git"), filepath.Join(base, "Private", "Rust", "repo", ".git")} {
+	for _, p := range []string{
+		filepath.Join(base, "Public", "Go", "Repo", ".git"),
+		filepath.Join(base, "Private", "Rust", "repo", ".git"),
+		filepath.Join(base, "Forks", "Rust", "REPO", ".git"),
+		filepath.Join(base, "Public", "Go", "other", ".git"),
+	} {
 		if err := os.MkdirAll(p, 0o750); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if _, err := Walk(base); err == nil {
-		t.Fatal("expected a collision to be refused")
+	got, err := Walk(base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 4 {
+		t.Fatalf("repositories = %+v", got)
+	}
+	conflicts := 0
+	for _, r := range got {
+		switch {
+		case r.Name == "other" && r.Conflict != "":
+			t.Fatalf("a unique name was marked: %+v", r)
+		case r.Name != "other" && r.Conflict == "":
+			t.Fatalf("a colliding name was not marked: %+v", r)
+		case r.Conflict != "":
+			conflicts++
+		}
+	}
+	if conflicts != 3 {
+		t.Fatalf("conflicts = %d, want all three spellings", conflicts)
 	}
 }
 
