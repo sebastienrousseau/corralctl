@@ -28,12 +28,15 @@ var (
 // skipped: a stray directory the user cannot read must not stop the
 // mirror of the hundreds they can.
 //
-// Two repositories with the same name, in any case, are an error rather
-// than a choice: they would converge on one destination and the second
-// push would prune the first.
+// Two repositories with the same name, in any case, would converge on one
+// destination and the second push would prune the first. Both are returned
+// with Conflict set so the run reports them and pushes neither, rather
+// than refusing the whole tree for one pair — a fork kept beside its
+// original is ordinary, and the other two hundred repositories should not
+// wait on it.
 func Walk(baseDir string) ([]Repo, error) {
 	var repos []Repo
-	seen := map[string]string{}
+	seen := map[string]int{}
 	err := walkDir(baseDir, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			if filepath.Clean(path) == filepath.Clean(baseDir) {
@@ -52,11 +55,17 @@ func Walk(baseDir string) ([]Repo, error) {
 		}
 		name := filepath.Base(path)
 		key := strings.ToLower(name)
-		if previous, dup := seen[key]; dup {
-			return fmt.Errorf("two repositories would share the name %q on every destination: %s and %s", name, previous, path)
+		repo := Repo{Name: name, Path: path, Private: privateFromPath(baseDir, path)}
+		if i, dup := seen[key]; dup {
+			first := &repos[i]
+			if first.Conflict == "" {
+				first.Conflict = fmt.Sprintf("not mirrored: shares the name %q with %s; two repositories cannot land on one destination path", name, path)
+			}
+			repo.Conflict = fmt.Sprintf("not mirrored: shares the name %q with %s; two repositories cannot land on one destination path", name, first.Path)
+		} else {
+			seen[key] = len(repos)
 		}
-		seen[key] = path
-		repos = append(repos, Repo{Name: name, Path: path, Private: privateFromPath(baseDir, path)})
+		repos = append(repos, repo)
 		return fs.SkipDir
 	})
 	if err != nil {
