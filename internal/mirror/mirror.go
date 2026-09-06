@@ -22,6 +22,11 @@
 // A destination whose existing repository has the wrong visibility is an
 // error, not a silent reuse: a private clone must not be pushed into a
 // public repository that happens to share its name.
+//
+// Two local repositories with the same name — a fork beside the original,
+// say — would converge on one destination path, and the second push would
+// prune the first. Both are reported as errors on every destination and
+// neither is pushed; the rest of the tree is unaffected.
 package mirror
 
 import (
@@ -55,6 +60,11 @@ type Repo struct {
 	Path string
 	// Private is the visibility the destination is created with.
 	Private bool
+	// Conflict, when set, says why this repository cannot be mirrored at
+	// all: another repository in the tree would land at the same
+	// destination path. It is reported on every destination and never
+	// pushed, while the rest of the tree proceeds.
+	Conflict string
 }
 
 // Destination is one forge to mirror into.
@@ -228,6 +238,12 @@ func resolveDestinations(ctx context.Context, opts Options, c *counters) []resol
 // The two read-only inspections run in dry-run mode as well, so a dry run
 // previews exactly the decisions a real run makes.
 func processOne(ctx context.Context, r Repo, dests []resolved, opts Options, c *counters) {
+	if r.Conflict != "" {
+		for _, d := range dests {
+			c.emit(Result{Repo: r.Name, Destination: d.Name, Action: ActionError, Message: r.Conflict})
+		}
+		return
+	}
 	if err := forge.ValidateRepoName(r.Name); err != nil {
 		for _, d := range dests {
 			c.emit(Result{Repo: r.Name, Destination: d.Name, Action: ActionError, Message: err.Error()})

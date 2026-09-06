@@ -398,8 +398,10 @@ each also accepted with a `CORRAL_` prefix. Over HTTPS, the default, the same
 token authenticates the push, scoped to that forge's origin and never written
 to `.git/config`; `--protocol ssh` uses your keys instead.
 
-Two refusals are built in. A repository is never pushed to the forge its
-`origin` lives on — corral clones from six forges, so the tree can hold a
+Three refusals are built in. Two local repositories with the same name — a
+fork kept beside its original — would land on one destination path, so both
+are reported and neither is pushed while the rest of the tree proceeds. A
+repository is never pushed to the forge its `origin` lives on — corral clones from six forges, so the tree can hold a
 clone whose origin *is* a destination, and pruning against your own upstream
 is not a mirror. And a destination that already holds a same-named
 repository with the other visibility is an error, never a silent reuse.
