@@ -120,9 +120,13 @@ type SearchCodeOutput struct {
 	Returned             int         `json:"returned"`
 	Hits                 []SearchHit `json:"hits"`
 	Regex                bool        `json:"regex,omitempty"`
-	Truncated            bool        `json:"truncated,omitempty"`
-	PartialRepositories  []string    `json:"partial_repositories,omitempty"`
-	Note                 string      `json:"note,omitempty"`
+	// IndexedRepositories is how many of the repositories searched were
+	// narrowed by the trigram index rather than read in full. Reported so a
+	// slow answer can be told apart from a cold one without guessing.
+	IndexedRepositories int      `json:"indexed_repositories"`
+	Truncated           bool     `json:"truncated,omitempty"`
+	PartialRepositories []string `json:"partial_repositories,omitempty"`
+	Note                string   `json:"note,omitempty"`
 }
 
 // SymbolHit is one declaration.

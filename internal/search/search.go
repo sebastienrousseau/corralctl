@@ -105,6 +105,14 @@ type Matcher struct {
 	maxHits      int
 	// includeTests is carried here so a walker has one object to consult.
 	includeTests bool
+	// rawLiteral is the user's pattern when it is a literal, in either case
+	// sense. literalBytes is empty for the case-insensitive form, which is
+	// searched as a regex, so the index needs its own copy.
+	rawLiteral []byte
+	// caseFolded records that matching is case-insensitive, which the
+	// trigram index needs to know: folding is a Unicode operation and a byte
+	// index cannot model it.
+	caseFolded bool
 	// literalOnly records that the pattern is a literal, in either case
 	// sense, and therefore carries no anchors. That is what makes a
 	// whole-file prefilter sound: for an unanchored pattern, "matches
@@ -181,6 +189,7 @@ func Compile(q Query) (*Matcher, error) {
 		m.literal = q.Pattern
 		m.literalBytes = []byte(q.Pattern)
 		m.literalOnly = true
+		m.rawLiteral = []byte(q.Pattern)
 		return m, nil
 	}
 
@@ -205,6 +214,8 @@ func Compile(q Query) (*Matcher, error) {
 	// QuoteMeta escaped the pattern, so whatever the user typed it is a
 	// literal now and cannot anchor.
 	m.literalOnly = true
+	m.rawLiteral = []byte(q.Pattern)
+	m.caseFolded = true
 	return m, err
 }
 
@@ -263,6 +274,14 @@ func (m *Matcher) MatchAny(buf []byte) bool {
 	}
 	return bytes.Contains(buf, m.literalBytes)
 }
+
+// indexPattern is the literal this matcher searches for, as bytes.
+//
+// Only meaningful when CanPrefilter reports true; the trigram index uses it to
+// derive the trigrams a matching file must contain. For the case-insensitive
+// form the literal was QuoteMeta'd into a regex, so the original is kept
+// alongside it purely for this.
+func (m *Matcher) indexPattern() []byte { return m.rawLiteral }
 
 // MaxHits is the cap this matcher was compiled with.
 func (m *Matcher) MaxHits() int { return m.maxHits }

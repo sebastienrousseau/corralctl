@@ -76,6 +76,7 @@ func (s *Server) registerSearchTool() {
 
 // handleSearchCode runs one content search.
 func (s *Server) handleSearchCode(ctx context.Context, _ *mcp.CallToolRequest, in searchCodeInput) (*mcp.CallToolResult, SearchCodeOutput, error) {
+	s.noteSymbolQuery()
 	limit := in.MaxResults
 	switch {
 	case limit <= 0:
@@ -125,18 +126,12 @@ func (s *Server) handleSearchCode(ctx context.Context, _ *mcp.CallToolRequest, i
 		targets = filtered
 	}
 
-	// The file policy the file resource enforces, applied to every
-	// candidate before it is opened.
-	allowed := func(rel string) bool {
-		_, ok := fileAllowed(rel, s.extraFileExts)
-		return ok
-	}
-
 	var (
 		hits            []SearchHit
 		partial         []string
 		scanned         int
 		repoLimitHit    bool
+		indexedRepos    int
 		filesSearched   int
 		stoppedEarly    bool
 		remainingBudget = limit
@@ -167,8 +162,9 @@ func (s *Server) handleSearchCode(ctx context.Context, _ *mcp.CallToolRequest, i
 	}
 
 	type repoResult struct {
-		res *search.Result
-		err error
+		res     *search.Result
+		indexed bool
+		err     error
 	}
 
 	for start := 0; start < len(targets); start += batch {
@@ -198,8 +194,8 @@ func (s *Server) handleSearchCode(ctx context.Context, _ *mcp.CallToolRequest, i
 			wg.Add(1)
 			go func(slot int, repo *RepoEntry) {
 				defer wg.Done()
-				res, err := searchRepo(ctx, repo.Path, matcher, allowed)
-				results[slot] = repoResult{res: res, err: err}
+				res, indexed, err := s.searchOneRepo(ctx, repo, matcher)
+				results[slot] = repoResult{res: res, indexed: indexed, err: err}
 			}(j-start, &targets[j])
 		}
 		wg.Wait()
@@ -216,6 +212,9 @@ func (s *Server) handleSearchCode(ctx context.Context, _ *mcp.CallToolRequest, i
 			}
 			repo := &targets[j]
 			scanned++
+			if r.indexed {
+				indexedRepos++
+			}
 			filesSearched += r.res.Files
 			if r.res.Truncated {
 				partial = append(partial, repo.Redacted().RelPath)
@@ -257,6 +256,7 @@ func (s *Server) handleSearchCode(ctx context.Context, _ *mcp.CallToolRequest, i
 		Returned:             len(hits),
 		Hits:                 hits,
 		Regex:                in.Regex,
+		IndexedRepositories:  indexedRepos,
 	}
 
 	switch {

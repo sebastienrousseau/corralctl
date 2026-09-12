@@ -91,6 +91,10 @@ type Server struct {
 	// hot path does no string work.
 	extraFileExts map[string]struct{}
 
+	// indexCache holds per-repository trigram indexes, which decide which
+	// files a content search has to open.
+	indexCache *indexCache
+
 	// symbolCache holds per-repository symbol extractions. Parsing is far
 	// more expensive than the workspace scan, and source changes far less
 	// often than the set of repositories does, so it gets its own cache
@@ -206,6 +210,7 @@ func NewServer(opts ServerOptions) (*Server, error) {
 		opts:           opts,
 		extraFileExts:  normalizeExtraExts(opts.AllowFileExts),
 		symbolCache:    newSymbolCache(),
+		indexCache:     newIndexCache(),
 		symbolDisk:     newSymbolDiskCache(opts.SymbolCacheDir),
 		confirmDeletes: opts.ConfirmDeletes,
 		confirmer:      elicitConfirmer{},

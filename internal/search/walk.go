@@ -132,14 +132,35 @@ func SearchRepo(ctx context.Context, root string, m *Matcher, allowed FileFilter
 		ctx = context.Background()
 	}
 
-	paths, truncated, err := discover(ctx, root, m, allowed)
+	paths, truncated, err := discover(ctx, root, m.IncludeTests(), m.pathGlob, allowed)
 	if err != nil {
 		return nil, err
 	}
+	return searchPaths(ctx, root, m, paths, truncated), nil
+}
 
+// SearchRepoPaths searches only the listed files.
+//
+// Used with a trigram index, which decides which files could possibly match so
+// the rest are never opened. Everything after that point — reading, matching,
+// bounding, ordering — is the same code the full walk runs, so an indexed
+// search and an exhaustive one cannot disagree about a file they both read.
+// TestIndexedSearchMatchesExhaustive asserts that over a tree of both.
+//
+// paths must be in walk order and already filtered by the query's path_glob
+// and include_tests, since those are per-query and the index is not.
+func SearchRepoPaths(ctx context.Context, root string, m *Matcher, paths []string, truncated bool) (*Result, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return searchPaths(ctx, root, m, paths, truncated), nil
+}
+
+// searchPaths is the shared body: read these files, report the matches.
+func searchPaths(ctx context.Context, root string, m *Matcher, paths []string, truncated bool) *Result {
 	res := &Result{Files: len(paths), Truncated: truncated}
 	if len(paths) == 0 {
-		return res, nil
+		return res
 	}
 
 	var (
@@ -209,11 +230,11 @@ func SearchRepo(ctx context.Context, root string, m *Matcher, allowed FileFilter
 	if hitsCap.Load() {
 		res.Truncated = true
 	}
-	return res, nil
+	return res
 }
 
 // discover collects the searchable files, in walk order.
-func discover(ctx context.Context, root string, m *Matcher, allowed FileFilter) ([]string, bool, error) {
+func discover(ctx context.Context, root string, includeTests bool, pathGlob string, allowed FileFilter) ([]string, bool, error) {
 	var (
 		paths     []string
 		truncated bool
@@ -244,10 +265,10 @@ func discover(ctx context.Context, root string, m *Matcher, allowed FileFilter) 
 		// could never be taken and so could never be tested.
 		rel := filepath.ToSlash(strings.TrimPrefix(path, root+string(filepath.Separator)))
 
-		if !m.IncludeTests() && IsTestFile(rel) {
+		if !includeTests && IsTestFile(rel) {
 			return nil
 		}
-		if m.pathGlob != "" && !matchGlob(m.pathGlob, rel) {
+		if pathGlob != "" && !matchGlob(pathGlob, rel) {
 			return nil
 		}
 		// The file policy is the caller's, and it is what stops a search
@@ -413,6 +434,16 @@ func searchFile(root, rel string, m *Matcher) (hits []Hit, more bool) {
 // with unrelated work, where wall-clock between separate runs says more about
 // the other processes than about this code.
 var prefilterEnabled = true
+
+// readFileBounded opens root/rel and reads it, bounded.
+func readFileBounded(root, rel string, dst []byte) ([]byte, error) {
+	f, err := os.Open(filepath.Join(root, rel)) // #nosec G304 -- rel is walk-derived and policy-filtered
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = f.Close() }()
+	return readBounded(f, dst)
+}
 
 // readBounded reads at most maxFileBytes from f, appending into dst.
 //

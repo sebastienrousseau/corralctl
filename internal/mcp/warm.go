@@ -49,8 +49,8 @@ const warmIdleAfter = 10 * time.Minute
 // already missed on it.
 const warmInterval = symbolCacheTTL / 2
 
-// noteSymbolQuery records that a client asked something that uses the symbol
-// cache. Called from the symbol tools.
+// noteSymbolQuery records that a client asked something a warmed cache serves.
+// Called from the symbol tools and from the content search.
 func (s *Server) noteSymbolQuery() {
 	s.lastSymbolQuery.Store(time.Now().UnixNano())
 }
@@ -129,6 +129,10 @@ func (s *Server) warmSymbols(ctx context.Context) {
 				if i >= len(repos) || ctx.Err() != nil {
 					return
 				}
+				// Build the content index first: it is what a search
+				// needs, and a search is the more common question.
+				s.indexFor(ctx, &repos[i])
+
 				// Skip what is already fresh, so a refresh pass costs
 				// nothing for the repositories that have not expired.
 				if _, ok := s.symbolCache.get(repos[i].Path); ok {
