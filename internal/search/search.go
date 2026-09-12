@@ -109,6 +109,11 @@ type Matcher struct {
 	// sense. literalBytes is empty for the case-insensitive form, which is
 	// searched as a regex, so the index needs its own copy.
 	rawLiteral []byte
+	// foldNeedle is the lowercased pattern for the ASCII fast path, set only
+	// when the pattern is a literal with no byte above 0x7F. nil means every
+	// line goes through the regex engine.
+	foldNeedle     []byte
+	foldFirstUpper byte
 	// caseFolded records that matching is case-insensitive, which the
 	// trigram index needs to know: folding is a Unicode operation and a byte
 	// index cannot model it.
@@ -216,6 +221,17 @@ func Compile(q Query) (*Matcher, error) {
 	m.literalOnly = true
 	m.rawLiteral = []byte(q.Pattern)
 	m.caseFolded = true
+	if asciiFoldable(m.rawLiteral) {
+		lower := make([]byte, len(m.rawLiteral))
+		for i, b := range m.rawLiteral {
+			lower[i] = lowerASCII(b)
+		}
+		m.foldNeedle = lower
+		m.foldFirstUpper = lower[0]
+		if lower[0] >= 'a' && lower[0] <= 'z' {
+			m.foldFirstUpper = lower[0] - ('a' - 'A')
+		}
+	}
 	return m, err
 }
 

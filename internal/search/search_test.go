@@ -565,7 +565,7 @@ func TestSearchFileHandlesAVanishedFile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	hits, more := searchFile(t.TempDir(), "gone.md", m)
+	hits, more := searchFile(t.TempDir(), "gone.md", m, newFileBuffer())
 	if hits != nil || more {
 		t.Errorf("a missing file yields nothing, got %v %v", hits, more)
 	}

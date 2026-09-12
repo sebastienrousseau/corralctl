@@ -178,12 +178,22 @@ func searchPaths(ctx context.Context, root string, m *Matcher, paths []string, t
 			// Each worker accumulates locally and merges once, so the
 			// mutex is contended per worker rather than per file.
 			var local []Hit
+			// One read buffer per worker, not per file.
+			//
+			// This was a sync.Pool, which looked right and was not: a
+			// workspace search runs hundreds of goroutines, a Pool is
+			// per-P with a shared overflow, and GC drains it every cycle,
+			// so Get missed far more often than it hit. Every miss
+			// allocated 64KB, and readBounded became 2.15GB — 55% of all
+			// allocation in a query. A worker outlives every file it
+			// reads, so the buffer belongs to it.
+			buf := &fileBuffers{data: make([]byte, 0, 64*1024)}
 			for {
 				i := int(next.Add(1)) - 1
 				if i >= len(paths) || ctx.Err() != nil || hitsCap.Load() {
 					break
 				}
-				fileHits, more := searchFile(root, paths[i], m)
+				fileHits, more := searchFile(root, paths[i], m, buf)
 				local = append(local, fileHits...)
 				if more {
 					// The file had matches this result will not carry, so
@@ -332,13 +342,9 @@ type fileBuffers struct {
 	data []byte
 }
 
-// maxPooledBytes bounds what goes back into the pool. A 2 MiB buffer grown for
-// one unusually large file would otherwise be retained per worker forever,
-// turning a rare file into permanent resident memory.
-const maxPooledBytes = 128 << 10
-
-var bufferPool = sync.Pool{
-	New: func() any { return &fileBuffers{data: make([]byte, 0, 64*1024)} },
+// newFileBuffer is the per-worker read scratch.
+func newFileBuffer() *fileBuffers {
+	return &fileBuffers{data: make([]byte, 0, 64*1024)}
 }
 
 // searchFile reads one file and returns the lines matching m.
@@ -353,23 +359,19 @@ var bufferPool = sync.Pool{
 // The prefilter applies only to a literal pattern. A user regex may anchor with
 // ^ or $, where "matches somewhere in the file" and "matches on some line" are
 // different questions, so those files are scanned as before.
-func searchFile(root, rel string, m *Matcher) (hits []Hit, more bool) {
+func searchFile(root, rel string, m *Matcher, buf *fileBuffers) (hits []Hit, more bool) {
 	f, err := os.Open(filepath.Join(root, rel)) // #nosec G304 -- rel is walk-derived and policy-filtered
 	if err != nil {
 		return nil, false
 	}
 	defer func() { _ = f.Close() }()
 
-	buf, _ := bufferPool.Get().(*fileBuffers)
-	defer func() {
-		if cap(buf.data) <= maxPooledBytes {
-			buf.data = buf.data[:0]
-			bufferPool.Put(buf)
-		}
-	}()
-
 	data, readErr := readBounded(f, buf.data[:0])
-	buf.data = data
+	// Keep whatever growth happened, so the next file this worker reads
+	// starts from the larger buffer rather than growing again.
+	if cap(data) > cap(buf.data) {
+		buf.data = data[:0]
+	}
 	if readErr != nil {
 		return nil, false
 	}
@@ -384,8 +386,26 @@ func searchFile(root, rel string, m *Matcher) (hits []Hit, more bool) {
 		return nil, false
 	}
 
-	if prefilterEnabled && m.CanPrefilter() && !m.MatchAny(data) {
-		return nil, false
+	// Decide once per file which matcher to use.
+	//
+	// The regex engine is needed only for a file containing a rune that folds
+	// onto an ASCII letter — two exist in all of Unicode — or for a pattern
+	// the byte path cannot express. Everything else, which is effectively
+	// every file, takes the byte path and skips the engine that a profile
+	// showed was costing 45% of a query's CPU, against 37% for the file reads
+	// the search exists to do.
+	fold := m.CanFoldASCII() && !NeedsUnicodeFold(data)
+
+	if prefilterEnabled && m.CanPrefilter() {
+		hit := false
+		if fold {
+			hit = m.containsFold(data)
+		} else {
+			hit = m.MatchAny(data)
+		}
+		if !hit {
+			return nil, false
+		}
 	}
 
 	line := 0
@@ -408,7 +428,12 @@ func searchFile(root, rel string, m *Matcher) (hits []Hit, more bool) {
 			// limit gave before.
 			return hits, true
 		}
-		col := m.MatchBytes(raw)
+		var col int
+		if fold {
+			col = m.indexFold(raw)
+		} else {
+			col = m.MatchBytes(raw)
+		}
 		if col < 0 {
 			continue
 		}
