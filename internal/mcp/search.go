@@ -5,7 +5,9 @@ package mcp
 
 import (
 	"context"
+	"fmt"
 	"strconv"
+	"sync"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/sebastienrousseau/corralctl/internal/sanitize"
@@ -73,7 +75,7 @@ func (s *Server) registerSearchTool() {
 }
 
 // handleSearchCode runs one content search.
-func (s *Server) handleSearchCode(ctx context.Context, _ *mcp.CallToolRequest, in searchCodeInput) (*mcp.CallToolResult, any, error) {
+func (s *Server) handleSearchCode(ctx context.Context, _ *mcp.CallToolRequest, in searchCodeInput) (*mcp.CallToolResult, SearchCodeOutput, error) {
 	limit := in.MaxResults
 	switch {
 	case limit <= 0:
@@ -94,19 +96,19 @@ func (s *Server) handleSearchCode(ctx context.Context, _ *mcp.CallToolRequest, i
 		// A pattern that cannot be compiled is an error, never an empty
 		// result: "no matches" is a conclusion an agent will act on, and
 		// it is the wrong one.
-		return toolError("%v", err), nil, nil
+		return nil, SearchCodeOutput{}, err
 	}
 
 	idx, err := s.scan()
 	if err != nil {
-		return toolError("scan workspace: %v", err), nil, nil
+		return nil, SearchCodeOutput{}, fmt.Errorf("scan workspace: %v", err)
 	}
 
 	targets := idx.Repos
 	if in.Repo != "" {
 		match, findErr := idx.Find(in.Repo)
 		if findErr != nil {
-			return toolError("%v", findErr), nil, nil
+			return nil, SearchCodeOutput{}, findErr
 		}
 		targets = []RepoEntry{*match}
 	} else if in.Language != "" {
@@ -118,7 +120,7 @@ func (s *Server) handleSearchCode(ctx context.Context, _ *mcp.CallToolRequest, i
 			}
 		}
 		if len(filtered) == 0 {
-			return toolError("no repositories with language %q; call corral_status_summary for the languages present", in.Language), nil, nil
+			return nil, SearchCodeOutput{}, fmt.Errorf("no repositories with language %q; call corral_status_summary for the languages present", in.Language)
 		}
 		targets = filtered
 	}
@@ -130,16 +132,8 @@ func (s *Server) handleSearchCode(ctx context.Context, _ *mcp.CallToolRequest, i
 		return ok
 	}
 
-	type hit struct {
-		Repo   string `json:"repo"`
-		File   string `json:"file"`
-		Line   int    `json:"line"`
-		Column int    `json:"column"`
-		Text   string `json:"text"`
-	}
-
 	var (
-		hits            []hit
+		hits            []SearchHit
 		partial         []string
 		scanned         int
 		repoLimitHit    bool
@@ -148,7 +142,36 @@ func (s *Server) handleSearchCode(ctx context.Context, _ *mcp.CallToolRequest, i
 		remainingBudget = limit
 	)
 
-	for i := range targets {
+	// Repositories are searched in bounded parallel batches, in order.
+	//
+	// This loop used to be sequential while the symbol tools fanned out to
+	// sixteen workers, so a content search read one repository at a time —
+	// 11-17s on a 234-repository workspace, almost all of it waiting on the
+	// filesystem. The cost is dominated by repositories that contain no match
+	// at all, which cannot be skipped without an index and can be overlapped.
+	//
+	// Batching in order rather than racing every repository is what keeps the
+	// answer deterministic. Hits are merged in repository order and the limit
+	// is applied to that merged list, so two identical queries return the same
+	// results regardless of which worker happened to finish first — the
+	// property the symbol tools sort to recover after their fan-out.
+	//
+	// The early exit survives: the budget is checked between batches, so a
+	// query whose answer fills up stops after at most one extra batch rather
+	// than reading the rest of the workspace. Any hits that batch collected
+	// beyond the limit are discarded in order, which is the same set the
+	// sequential loop would have produced.
+	batch := repoFanOut()
+	if batch > len(targets) {
+		batch = len(targets)
+	}
+
+	type repoResult struct {
+		res *search.Result
+		err error
+	}
+
+	for start := 0; start < len(targets); start += batch {
 		if err := ctx.Err(); err != nil {
 			stoppedEarly = true
 			break
@@ -164,72 +187,100 @@ func (s *Server) handleSearchCode(ctx context.Context, _ *mcp.CallToolRequest, i
 			stoppedEarly = true
 			break
 		}
-		repo := &targets[i]
 
-		res, searchErr := searchRepo(ctx, repo.Path, matcher, allowed)
-		if searchErr != nil {
-			// One unreadable repository must not fail the whole search.
-			continue
+		stop := start + batch
+		if stop > len(targets) {
+			stop = len(targets)
 		}
-		scanned++
-		filesSearched += res.Files
-		if res.Truncated {
-			partial = append(partial, repo.Redacted().RelPath)
+		results := make([]repoResult, stop-start)
+		var wg sync.WaitGroup
+		for j := start; j < stop; j++ {
+			wg.Add(1)
+			go func(slot int, repo *RepoEntry) {
+				defer wg.Done()
+				res, err := searchRepo(ctx, repo.Path, matcher, allowed)
+				results[slot] = repoResult{res: res, err: err}
+			}(j-start, &targets[j])
 		}
-		red := repo.Redacted()
-		for _, h := range res.Hits {
-			if remainingBudget <= 0 {
-				stoppedEarly = true
+		wg.Wait()
+
+		for j := start; j < stop; j++ {
+			r := results[j-start]
+			if r.err != nil {
+				// One unreadable repository must not fail the whole search.
+				continue
+			}
+			if scanned >= maxSearchRepos {
+				repoLimitHit = true
 				break
 			}
-			hits = append(hits, hit{
-				Repo:   red.RelPath,
-				File:   sanitize.Untrusted(h.File, maxEntryPath),
-				Line:   h.Line,
-				Column: h.Column,
-				// The matching line is source written by whoever owns the
-				// repository. It reaches a model's context verbatim
-				// otherwise, which is exactly the runtime half of the
-				// trust gap the server instructions describe.
-				Text: sanitize.Untrusted(h.Text, maxHitText),
-			})
-			remainingBudget--
+			repo := &targets[j]
+			scanned++
+			filesSearched += r.res.Files
+			if r.res.Truncated {
+				partial = append(partial, repo.Redacted().RelPath)
+			}
+			red := repo.Redacted()
+			for _, h := range r.res.Hits {
+				if remainingBudget <= 0 {
+					stoppedEarly = true
+					break
+				}
+				hits = append(hits, SearchHit{
+					Repo:   red.RelPath,
+					File:   sanitize.Untrusted(h.File, maxEntryPath),
+					Line:   h.Line,
+					Column: h.Column,
+					// The matching line is source written by whoever owns
+					// the repository. It reaches a model's context verbatim
+					// otherwise, which is exactly the runtime half of the
+					// trust gap the server instructions describe.
+					Text: sanitize.Untrusted(h.Text, maxHitText),
+				})
+				remainingBudget--
+			}
 		}
 	}
 
-	body := map[string]any{
-		"query":                 sanitize.Untrusted(in.Query, maxEntryName),
-		"repositories_searched": scanned,
-		"files_searched":        filesSearched,
-		"returned":              len(hits),
-		"hits":                  hits,
+	// A nil slice marshals to `null`, and the output schema says `array`.
+	// "No matches" is the most common answer this tool gives, so the empty
+	// case is the one that must be right: a client reading hits.length should
+	// see 0, not trip over a null.
+	if hits == nil {
+		hits = []SearchHit{}
 	}
-	if in.Regex {
-		body["regex"] = true
+
+	body := SearchCodeOutput{
+		Query:                sanitize.Untrusted(in.Query, maxEntryName),
+		RepositoriesSearched: scanned,
+		FilesSearched:        filesSearched,
+		Returned:             len(hits),
+		Hits:                 hits,
+		Regex:                in.Regex,
 	}
 
 	switch {
 	case repoLimitHit:
-		body["truncated"] = true
-		body["note"] = "Stopped after " + strconv.Itoa(maxSearchRepos) +
+		body.Truncated = true
+		body.Note = "Stopped after " + strconv.Itoa(maxSearchRepos) +
 			" repositories. Narrow the search with repo, language or path_glob."
 	case stoppedEarly:
-		body["truncated"] = true
-		body["note"] = "Stopped at the result limit; more matches exist. " +
+		body.Truncated = true
+		body.Note = "Stopped at the result limit; more matches exist. " +
 			"Raise max_results, or narrow with repo, language or path_glob."
 	case len(partial) > 0:
-		body["truncated"] = true
-		body["partial_repositories"] = capList(partial, 10)
-		body["note"] = "Some repositories hit a file or size bound, so their results are incomplete."
+		body.Truncated = true
+		body.PartialRepositories = capList(partial, 10)
+		body.Note = "Some repositories hit a file or size bound, so their results are incomplete."
 	}
 
 	if len(hits) == 0 && !repoLimitHit && !stoppedEarly {
-		body["note"] = "No match in " + strconv.Itoa(filesSearched) + " files across " +
+		body.Note = "No match in " + strconv.Itoa(filesSearched) + " files across " +
 			strconv.Itoa(scanned) + " repositories. Only files the file resource would serve are searched, " +
 			"and test files are excluded unless include_tests is set."
 	}
 
-	return jsonResult(body), nil, nil
+	return jsonResult(body), body, nil
 }
 
 // searchRepo is the seam tests replace to drive failure paths that a real

@@ -6,6 +6,7 @@ package mcp
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -419,10 +420,7 @@ func TestSearchCodeHonoursCancellation(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	res, _, err := srv.handleSearchCode(ctx, nil, searchCodeInput{Query: "needle"})
-	if err != nil {
-		t.Fatalf("cancellation is not a protocol error: %v", err)
-	}
+	res := asToolResult(srv.handleSearchCode(ctx, nil, searchCodeInput{Query: "needle"}))
 	if res.IsError {
 		t.Fatalf("a cancelled search reports what it has: %s", resultText(res))
 	}
@@ -480,13 +478,19 @@ func TestSearchCodeReportsAScanFailure(t *testing.T) {
 	}
 }
 
-// TestSearchCodeStopsOnceTheBudgetIsSpent covers both halves of the
-// early stop: the budget running out partway through one repository's
-// hits, and the loop then declining to read the repositories after it.
+// TestSearchCodeStopsOnceTheBudgetIsSpent covers the budget running out
+// partway through one repository's hits.
 //
-// Without the second, a query that is already answered still pays to read
-// every remaining clone — which on a large workspace is the difference
-// between a fast common case and a slow one.
+// It used to also assert that the very next repository was never opened.
+// Repositories are now searched in parallel batches — sequential scanning was
+// what made this tool take 11-17s on a 234-repository workspace — so a batch
+// is read together and the repository after the fill point may be read with
+// it. The count below reports that honestly rather than hiding it.
+//
+// The property that actually mattered is unchanged and is pinned by
+// TestSearchCodeDoesNotReadTheWholeWorkspace: a query that is already answered
+// must not go on to read every remaining clone. Reading at most one extra
+// batch, in parallel, is a bounded cost; reading all of them is not.
 func TestSearchCodeStopsOnceTheBudgetIsSpent(t *testing.T) {
 	base := t.TempDir()
 	// Three hits in the first repository, four in the second, with a
@@ -507,8 +511,16 @@ func TestSearchCodeStopsOnceTheBudgetIsSpent(t *testing.T) {
 	if len(body.Hits) != 5 {
 		t.Fatalf("got %d hits, want exactly the budget of 5: %v", len(body.Hits), hitFiles(body))
 	}
-	if body.RepositoriesSearched != 2 {
-		t.Errorf("read %d repositories; the third should never have been opened", body.RepositoriesSearched)
+	// All three fit in one batch here, so all three are read. What must hold
+	// is that the answer is still exactly the budget, taken in repository
+	// order — the hits below come from the first two repositories only.
+	if body.RepositoriesSearched > 3 {
+		t.Errorf("read %d repositories, want at most the 3 that exist", body.RepositoriesSearched)
+	}
+	for _, h := range body.Hits {
+		if strings.Contains(h.Repo, "c-third") {
+			t.Errorf("a hit from the third repository displaced an earlier one: %v", hitFiles(body))
+		}
 	}
 	if !body.Truncated {
 		t.Error("a partial answer must say it is partial")
@@ -521,4 +533,40 @@ func TestSearchCodeStopsOnceTheBudgetIsSpent(t *testing.T) {
 			t.Errorf("the third repository was read after all: %+v", hit)
 		}
 	}
+}
+
+// TestSearchCodeDoesNotReadTheWholeWorkspace pins the early stop at the scale
+// where it matters.
+//
+// The three-repository case above cannot distinguish "stopped early" from
+// "read everything", because everything is one batch. This builds a workspace
+// large enough that the difference is visible: with a budget of five hits and
+// a match in the first repository, a search that read every clone would report
+// all of them.
+func TestSearchCodeDoesNotReadTheWholeWorkspace(t *testing.T) {
+	base := t.TempDir()
+	const repos = 60
+	for i := 0; i < repos; i++ {
+		name := fmt.Sprintf("repo-%02d", i)
+		r := makeFakeRepo(t, base, "Public", "go", name, "https://github.com/acme/"+name+".git", "")
+		writeIn(t, r, "a.md", "needle\nneedle\nneedle\nneedle\nneedle\nneedle\n")
+	}
+
+	h := newHarness(t, ServerOptions{Root: base})
+	body := searchCode(t, h, map[string]any{"query": "needle", "max_results": 5})
+
+	if len(body.Hits) != 5 {
+		t.Fatalf("got %d hits, want the budget of 5", len(body.Hits))
+	}
+	if !body.Truncated {
+		t.Error("a partial answer must say it is partial")
+	}
+	// The first repository alone fills the budget, so the search should stop
+	// within a batch or two. The bound is deliberately loose — it is testing
+	// that the early stop exists, not the batch size — but far below 60.
+	if body.RepositoriesSearched > repos/2 {
+		t.Errorf("read %d of %d repositories; the budget was filled by the first",
+			body.RepositoriesSearched, repos)
+	}
+	t.Logf("read %d of %d repositories", body.RepositoriesSearched, repos)
 }

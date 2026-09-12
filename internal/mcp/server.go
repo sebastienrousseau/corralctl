@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -102,6 +103,12 @@ type Server struct {
 	confirmDeletes bool
 	confirmer      confirmer
 	repoLocks      *repoLocks
+
+	// lastSymbolQuery is when a client last asked something that uses the
+	// symbol cache, as UnixNano. Read by the background warmer to decide
+	// whether anyone still cares. Atomic because the warmer runs
+	// concurrently with request handling.
+	lastSymbolQuery atomic.Int64
 
 	// scanMu guards the in-memory workspace-index cache below.
 	// Every tool and resource handler goes through Server.scan(),
@@ -411,7 +418,13 @@ var listenAndServe = func(srv *http.Server) error { return srv.ListenAndServe() 
 // it to a routable interface publishes that. The cmd layer refuses a
 // non-loopback bind without an explicit flag, and this logs what it is
 // listening on so an operator can see which it got.
-func (s *Server) ServeHTTP(ctx context.Context, addr string) error {
+// httpHandler builds the HTTP handler chain the server serves.
+//
+// Separate from ServeHTTP so a test can drive the real chain rather than
+// assemble a lookalike: the whole point of the jsonrpcHTTP wrapper is what it
+// does to responses the SDK produced, which a hand-rolled stand-in would not
+// reproduce.
+func (s *Server) httpHandler() http.Handler {
 	handler := mcp.NewStreamableHTTPHandler(
 		func(*http.Request) *mcp.Server { return s.mcp },
 		// Stateless: every request carries its own identity, so any
@@ -421,10 +434,35 @@ func (s *Server) ServeHTTP(ctx context.Context, addr string) error {
 		// where they have been.
 		&mcp.StreamableHTTPOptions{Stateless: true},
 	)
+	// jsonrpcHTTP turns the transport's HTTP error pages for unknown methods
+	// back into JSON-RPC error responses, which is what a client can parse.
+	// It delegates first and only rewrites what the SDK refused, so a served
+	// request never passes through its logic.
+	return jsonrpcHTTP(handler)
+}
+
+func (s *Server) ServeHTTP(ctx context.Context, addr string) error {
+	// Warm the symbol cache off the request path. HTTP only: this server is
+	// long-lived and serves many sessions, so the scan pays for itself, while
+	// a stdio server is started per session and may never be asked about
+	// symbols at all. See warm.go.
+	//
+	// Its own cancellable context, not the caller's: if the listener fails,
+	// this function returns while ctx is still live, and a warmer tied to ctx
+	// would outlive the server it was warming. Waiting for it here means the
+	// goroutine is always gone before ServeHTTP returns — which is what the
+	// package's goroutine-leak check requires, and what stops a stopped server
+	// from still reading the user's disk.
+	warmCtx, stopWarm := context.WithCancel(ctx)
+	warmDone := s.startSymbolWarmer(warmCtx)
+	defer func() {
+		stopWarm()
+		<-warmDone
+	}()
 
 	srv := &http.Server{
 		Addr:    addr,
-		Handler: handler,
+		Handler: s.httpHandler(),
 		// A workspace scan on a large tree is the slowest thing here, and
 		// a symbol extraction is slower still, so the read and write
 		// budgets are generous. ReadHeaderTimeout is not: it is the one

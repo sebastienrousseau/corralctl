@@ -150,6 +150,27 @@ func (h *harness) prompt(name string, args map[string]string) *mcp.GetPromptResu
 	return res
 }
 
+// asToolResult applies the SDK's own rule for a handler's return values, so a
+// test asserts what a client receives rather than which of two equivalent
+// conventions the handler happened to use.
+//
+// AddTool turns a returned error into a CallToolResult with IsError set and the
+// error's text as content (see CallToolResult.SetError), so a handler may refuse
+// either by returning a toolError result or by returning an error — both reach
+// the client as the same bytes. Tests that hard-coded the first form failed when
+// handlers moved to the second to gain typed output, though nothing observable
+// had changed.
+// Generic over the output value so a handler's three return values can be
+// passed straight in: asToolResult(s.handleX(...)).
+func asToolResult[T any](res *mcp.CallToolResult, _ T, err error) *mcp.CallToolResult {
+	if err != nil {
+		var out mcp.CallToolResult
+		out.SetError(err)
+		return &out
+	}
+	return res
+}
+
 // newTestServer builds a Server without a client session, for tests that poke
 // internals (scan caching, option validation) rather than protocol behaviour.
 func newTestServer(t *testing.T, base string) *Server {

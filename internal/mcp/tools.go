@@ -105,64 +105,66 @@ func (s *Server) registerTools() {
 	}, s.handleWorkspaceIndex)
 }
 
-func (s *Server) handleListRepos(ctx context.Context, _ *mcp.CallToolRequest, in listReposInput) (*mcp.CallToolResult, any, error) {
+func (s *Server) handleListRepos(ctx context.Context, _ *mcp.CallToolRequest, in listReposInput) (*mcp.CallToolResult, PageOutput, error) {
 	idx, err := s.scan()
 	if err != nil {
-		return toolError("scan workspace: %v", err), nil, nil
+		return nil, PageOutput{}, fmt.Errorf("scan workspace: %v", err)
 	}
 	out := filterRepos(idx.Repos, in)
 	page, meta := paginate(out, in.Limit, in.Offset)
-	body := map[string]any{
-		"root":          idx.Root,
-		"total_matched": meta.Total,
-		"returned":      meta.Returned,
-		"repos":         projectRepos(page, in.ResponseFormat),
+	body := PageOutput{
+		Root:         idx.Root,
+		TotalMatched: meta.Total,
+		Returned:     meta.Returned,
+		Repos:        projectRepos(page, in.ResponseFormat),
 	}
 	if meta.NextOffset > 0 {
-		body["next_offset"] = meta.NextOffset
-		body["note"] = "More results are available. Pass next_offset as 'offset', or narrow the filters."
+		body.NextOffset = meta.NextOffset
+		body.Note = "More results are available. Pass next_offset as 'offset', or narrow the filters."
 	}
 	if idx.Truncated {
-		body["workspace_truncated"] = true
+		body.WorkspaceTruncated = true
 	}
-	return jsonResult(body), nil, nil
+	return jsonResult(body), body, nil
 }
 
-func (s *Server) handleFindRepo(ctx context.Context, _ *mcp.CallToolRequest, in queryInput) (*mcp.CallToolResult, any, error) {
+func (s *Server) handleFindRepo(ctx context.Context, _ *mcp.CallToolRequest, in queryInput) (*mcp.CallToolResult, RepoSummary, error) {
 	idx, err := s.scan()
 	if err != nil {
-		return toolError("scan workspace: %v", err), nil, nil
+		return nil, RepoSummary{}, fmt.Errorf("scan workspace: %v", err)
 	}
 	match, err := idx.Find(in.Query)
 	if err != nil {
-		return toolError("%v", err), nil, nil
+		return nil, RepoSummary{}, err
 	}
-	return jsonResult(match.Redacted()), nil, nil
+	out := summarizeDetailed(*match)
+	return jsonResult(out), out, nil
 }
 
-func (s *Server) handleRepoMetadata(ctx context.Context, _ *mcp.CallToolRequest, in queryInput) (*mcp.CallToolResult, any, error) {
+func (s *Server) handleRepoMetadata(ctx context.Context, _ *mcp.CallToolRequest, in queryInput) (*mcp.CallToolResult, RepoMetadataOutput, error) {
 	idx, err := s.scan()
 	if err != nil {
-		return toolError("scan workspace: %v", err), nil, nil
+		return nil, RepoMetadataOutput{}, fmt.Errorf("scan workspace: %v", err)
 	}
 	match, err := idx.Find(in.Query)
 	if err != nil {
-		return toolError("%v", err), nil, nil
+		return nil, RepoMetadataOutput{}, err
 	}
 	// match.Path (not the redacted copy) is what git is run against; only
 	// the reported value is sanitised. The branch name is attacker-
 	// controlled too — a branch may be named anything a ref allows.
 	branch := sanitize.Untrusted(currentBranch(ctx, match.Path), maxEntryField)
-	return jsonResult(map[string]any{
-		"repo":           match.Redacted(),
-		"current_branch": branch,
-	}), nil, nil
+	out := RepoMetadataOutput{
+		Repo:          summarizeDetailed(*match),
+		CurrentBranch: branch,
+	}
+	return jsonResult(out), out, nil
 }
 
-func (s *Server) handleStatusSummary(ctx context.Context, _ *mcp.CallToolRequest, _ noInput) (*mcp.CallToolResult, any, error) {
+func (s *Server) handleStatusSummary(ctx context.Context, _ *mcp.CallToolRequest, _ noInput) (*mcp.CallToolResult, StatusSummaryOutput, error) {
 	idx, err := s.scan()
 	if err != nil {
-		return toolError("scan workspace: %v", err), nil, nil
+		return nil, StatusSummaryOutput{}, fmt.Errorf("scan workspace: %v", err)
 	}
 	byVis := map[string]int{}
 	byLang := map[string]int{}
@@ -181,38 +183,39 @@ func (s *Server) handleStatusSummary(ctx context.Context, _ *mcp.CallToolRequest
 			synced++
 		}
 	}
-	return jsonResult(map[string]any{
-		"root":          idx.Root,
-		"total":         len(idx.Repos),
-		"synced":        synced,
-		"by_visibility": byVis,
-		"by_language":   sortedLangCounts(byLang),
-	}), nil, nil
+	out := StatusSummaryOutput{
+		Root:         idx.Root,
+		Total:        len(idx.Repos),
+		Synced:       synced,
+		ByVisibility: byVis,
+		ByLanguage:   sortedLangCounts(byLang),
+	}
+	return jsonResult(out), out, nil
 }
 
-func (s *Server) handleWorkspaceIndex(ctx context.Context, _ *mcp.CallToolRequest, in pageInput) (*mcp.CallToolResult, any, error) {
+func (s *Server) handleWorkspaceIndex(ctx context.Context, _ *mcp.CallToolRequest, in pageInput) (*mcp.CallToolResult, PageOutput, error) {
 	idx, err := s.scan()
 	if err != nil {
-		return toolError("scan workspace: %v", err), nil, nil
+		return nil, PageOutput{}, fmt.Errorf("scan workspace: %v", err)
 	}
 	page, meta := paginate(idx.Repos, in.Limit, in.Offset)
-	body := map[string]any{
-		"root":          idx.Root,
-		"total_matched": meta.Total,
-		"returned":      meta.Returned,
-		"repos":         projectRepos(page, in.ResponseFormat),
+	body := PageOutput{
+		Root:         idx.Root,
+		TotalMatched: meta.Total,
+		Returned:     meta.Returned,
+		Repos:        projectRepos(page, in.ResponseFormat),
 	}
 	if meta.NextOffset > 0 {
-		body["next_offset"] = meta.NextOffset
-		body["note"] = "More results are available. Pass next_offset as 'offset', or use corral_list_repos with filters."
+		body.NextOffset = meta.NextOffset
+		body.Note = "More results are available. Pass next_offset as 'offset', or use corral_list_repos with filters."
 	}
 	if idx.Truncated {
 		// Set when a workspace exceeds the scan cap. Previously never surfaced
 		// in any payload, so an over-cap workspace looked complete to callers.
-		body["workspace_truncated"] = true
-		body["workspace_truncated_note"] = "The workspace exceeded the scan cap; some repositories are missing from this index."
+		body.WorkspaceTruncated = true
+		body.WorkspaceTruncatedNote = "The workspace exceeded the scan cap; some repositories are missing from this index."
 	}
-	return jsonResult(body), nil, nil
+	return jsonResult(body), body, nil
 }
 
 // filterRepos applies the corral_list_repos filters. Split out so the handler
@@ -251,17 +254,16 @@ type cloneInput struct {
 	Blobless bool   `json:"blobless,omitempty" jsonschema:"Use a partial clone with filter=blob:none."`
 }
 
-func sortedLangCounts(m map[string]int) []map[string]any {
-	out := make([]map[string]any, 0, len(m))
+func sortedLangCounts(m map[string]int) []LanguageCount {
+	out := make([]LanguageCount, 0, len(m))
 	for k, v := range m {
-		out = append(out, map[string]any{"language": k, "count": v})
+		out = append(out, LanguageCount{Language: k, Count: v})
 	}
 	sort.Slice(out, func(i, j int) bool {
-		ci, cj := out[i]["count"].(int), out[j]["count"].(int)
-		if ci != cj {
-			return ci > cj
+		if out[i].Count != out[j].Count {
+			return out[i].Count > out[j].Count
 		}
-		return out[i]["language"].(string) < out[j]["language"].(string)
+		return out[i].Language < out[j].Language
 	})
 	return out
 }

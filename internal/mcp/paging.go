@@ -83,19 +83,16 @@ type conciseRepo struct {
 // Both shapes are redacted: every string below is chosen by whoever owns
 // the repository, and this is the boundary where it stops being data on
 // disk and becomes text in a model's context.
-func projectRepos(entries []RepoEntry, format string) any {
+func projectRepos(entries []RepoEntry, format string) []RepoSummary {
+	out := make([]RepoSummary, 0, len(entries))
 	if format == formatDetailed {
-		return RedactedEntries(entries)
+		for _, r := range entries {
+			out = append(out, summarizeDetailed(r))
+		}
+		return out
 	}
-	out := make([]conciseRepo, 0, len(entries))
 	for _, r := range entries {
-		r = r.Redacted()
-		out = append(out, conciseRepo{
-			RelPath:    r.RelPath,
-			Name:       r.Name,
-			Visibility: r.Visibility,
-			Language:   r.Language,
-		})
+		out = append(out, summarizeConcise(r))
 	}
 	return out
 }
