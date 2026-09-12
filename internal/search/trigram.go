@@ -126,13 +126,8 @@ func BuildIndex(ctx context.Context, root string, allowed FileFilter) (*Index, e
 	// dropped at the end of this function. What survives is the frozen form.
 	postings := make(map[trigramKey][]uint32, 1<<12)
 
-	buf, _ := bufferPool.Get().(*fileBuffers)
-	defer func() {
-		if cap(buf.data) <= maxPooledBytes {
-			buf.data = buf.data[:0]
-			bufferPool.Put(buf)
-		}
-	}()
+	// One buffer for the whole build, reused for every file.
+	buf := newFileBuffer()
 
 	// seen is reused across files so one file's trigrams are recorded once
 	// without allocating a set per file.
@@ -143,8 +138,8 @@ func BuildIndex(ctx context.Context, root string, allowed FileFilter) (*Index, e
 			return nil, err
 		}
 		data, status := readForIndex(root, rel, buf)
-		if len(data) > cap(buf.data) {
-			buf.data = data
+		if cap(data) > cap(buf.data) {
+			buf.data = data[:0]
 		}
 		switch status {
 		case indexSkipBinary:
