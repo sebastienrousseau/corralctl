@@ -42,6 +42,11 @@ type ServerOptions struct {
 	// harm distinct from clone/sync mistakes, so it earns its own opt-in.
 	// Ignored unless EnableMutations is also true.
 	EnableDestructiveMutations bool
+	// IndexCacheDir is where the trigram index files are persisted between
+	// processes. Empty means the platform default; "off" disables the index,
+	// which makes every content search read every candidate file as it did
+	// before the index existed.
+	IndexCacheDir string
 	// SymbolCacheDir is where extracted symbols are persisted between
 	// processes. Empty means the platform default; "off" disables the
 	// cache, which is for a machine where the extra directory is
@@ -92,8 +97,12 @@ type Server struct {
 	extraFileExts map[string]struct{}
 
 	// indexCache holds per-repository trigram indexes, which decide which
-	// files a content search has to open.
+	// files a content search has to open. The indexes themselves live in
+	// mapped files under indexDir.
 	indexCache *indexCache
+	// indexDir is where those files are written. Empty means the platform
+	// default; "off" disables persistence and the index with it.
+	indexDir string
 
 	// symbolCache holds per-repository symbol extractions. Parsing is far
 	// more expensive than the workspace scan, and source changes far less
@@ -211,6 +220,7 @@ func NewServer(opts ServerOptions) (*Server, error) {
 		extraFileExts:  normalizeExtraExts(opts.AllowFileExts),
 		symbolCache:    newSymbolCache(),
 		indexCache:     newIndexCache(),
+		indexDir:       indexCacheDir(opts.IndexCacheDir),
 		symbolDisk:     newSymbolDiskCache(opts.SymbolCacheDir),
 		confirmDeletes: opts.ConfirmDeletes,
 		confirmer:      elicitConfirmer{},
@@ -463,6 +473,10 @@ func (s *Server) ServeHTTP(ctx context.Context, addr string) error {
 	defer func() {
 		stopWarm()
 		<-warmDone
+		// After the warmer has stopped and every request has finished, no
+		// reference to a mapping can remain, so this is the one safe point
+		// to release them.
+		s.indexCache.closeAll()
 	}()
 
 	srv := &http.Server{

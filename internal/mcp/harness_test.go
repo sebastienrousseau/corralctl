@@ -51,6 +51,12 @@ func newHarnessWithClient(t *testing.T, opts ServerOptions, clientOpts *mcp.Clie
 	if opts.SymbolCacheDir == "" {
 		opts.SymbolCacheDir = t.TempDir()
 	}
+	// Same reasoning as the symbol cache: without this every test run writes
+	// index files into ~/.cache, and a test asserting a cold index would pass
+	// or fail depending on what an earlier run left there.
+	if opts.IndexCacheDir == "" {
+		opts.IndexCacheDir = t.TempDir()
+	}
 	srv, err := NewServer(opts)
 	if err != nil {
 		t.Fatalf("NewServer: %v", err)
@@ -175,7 +181,10 @@ func asToolResult[T any](res *mcp.CallToolResult, _ T, err error) *mcp.CallToolR
 // internals (scan caching, option validation) rather than protocol behaviour.
 func newTestServer(t *testing.T, base string) *Server {
 	t.Helper()
-	srv, err := NewServer(ServerOptions{Root: base, Version: "test"})
+	srv, err := NewServer(ServerOptions{
+		Root: base, Version: "test",
+		SymbolCacheDir: t.TempDir(), IndexCacheDir: t.TempDir(),
+	})
 	if err != nil {
 		t.Fatal(err)
 	}

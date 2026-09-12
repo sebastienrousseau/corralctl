@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"context"
 	"os"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -216,21 +217,20 @@ func (ix *Index) freeze(postings map[trigramKey][]uint32) {
 // commonTrigramFraction is the point past which a trigram stops earning its
 // storage.
 //
-// A trigram in 5% of a repository's files narrows a search by twenty to one at
-// best, and in practice by nothing: a query is only as selective as its RAREST
-// trigram, so the common ones cost memory to restate what the rare ones have
-// already established. Measured on the reporting workspace, trigrams above this
-// fraction held 74% of all postings — 33 of 44 million.
+// A trigram in most of a repository's files narrows nothing: a query is only
+// as selective as its rarest trigram, and the common ones cost space to
+// restate what the rare ones have already established.
 //
-// Dropping them is why the whole workspace fits. They are dropped as
-// CONSTRAINTS, not as knowledge: the trigram stays in the table with an empty
-// posting list, so a query can tell "every file might have this" from "no file
-// has this". Confusing the two would turn the second into a wrong empty answer.
-// It is deliberately tunable. Raising it keeps more postings, narrows harder
-// and costs more memory; on the reporting workspace the index held 321MB of
-// RSS at 0.05 and roughly doubles at 0.20. The default favours fitting in
-// memory over narrowing, because an index too large to hold is worth nothing.
-var commonTrigramFraction = envFloat("CORRAL_INDEX_COMMON_FRACTION", 0.05)
+// The default was 0.05 while the index lived in the heap, where its size was a
+// budget to police — dropping 74% of postings was what let the workspace fit
+// in 181MB. It also dropped most of the selectivity: a search for "func main"
+// found every one of its trigrams pruned and fell back to reading everything.
+//
+// Mapped from a file, the index costs disk and page cache rather than heap, so
+// the trade moves. 0.5 keeps every posting that can narrow and drops only the
+// trigrams present in more than half a repository's files, which genuinely
+// cannot.
+var commonTrigramFraction = envFloat("CORRAL_INDEX_COMMON_FRACTION", 0.5)
 
 // lookup returns the posting list for one trigram, and whether the trigram is
 // known at all.
@@ -563,4 +563,31 @@ func envFloat(name string, def float64) float64 {
 		return def
 	}
 	return v
+}
+
+// Fingerprint summarises a repository's searchable files without reading one.
+//
+// A walk that stats each candidate is what an on-disk index is validated
+// against: it costs a directory traversal rather than a rebuild, which is the
+// difference between checking an index and recreating it.
+func Fingerprint(ctx context.Context, root string, allowed FileFilter) (DiskFingerprint, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	paths, _, err := discover(ctx, root, true, "", allowed)
+	if err != nil {
+		return DiskFingerprint{}, err
+	}
+	fp := DiskFingerprint{Files: int64(len(paths))}
+	for _, rel := range paths {
+		info, err := os.Lstat(filepath.Join(root, rel))
+		if err != nil {
+			continue
+		}
+		fp.Bytes += info.Size()
+		if mod := info.ModTime().UnixNano(); mod > fp.ModUnixNano {
+			fp.ModUnixNano = mod
+		}
+	}
+	return fp, nil
 }

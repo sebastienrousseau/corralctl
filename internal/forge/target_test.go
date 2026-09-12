@@ -190,8 +190,8 @@ func TestLostCreateRace(t *testing.T) {
 		&StatusError{Status: 400, Body: `{"message":{"name":["has already been taken"]}}`}: true,
 		&StatusError{Status: 400, Body: "Repository already exists."}:                      true,
 		&StatusError{Status: 400, Body: "name is invalid"}:                                 false,
-		&StatusError{Status: 500}: false,
-		errors.New("plain"):       false,
+		&StatusError{Status: 500}:                                                          false,
+		errors.New("plain"):                                                                false,
 	}
 	for err, want := range cases {
 		if got := lostCreateRace(err); got != want {
