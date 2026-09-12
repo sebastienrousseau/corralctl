@@ -745,3 +745,38 @@ func TestSearchRepoTruncatesAggregateAcrossWorkers(t *testing.T) {
 		}
 	}
 }
+
+// TestMatchBytesAgreesWithMatchLine pins the two forms to the same answer.
+//
+// MatchBytes exists only to avoid allocating a string per line, so any
+// difference between it and MatchLine is a bug by definition — and one that
+// would show up as a content search quietly missing or inventing matches,
+// which no other test in this package would catch.
+func TestMatchBytesAgreesWithMatchLine(t *testing.T) {
+	lines := []string{
+		"", "needle", "a needle here", "NEEDLE", "nee\ndle",
+		"the needle and the needle", "haystack", "  needle  ",
+		"日本語 needle unicode", "needle at end",
+	}
+	for _, q := range []Query{
+		{Pattern: "needle", CaseSensitive: true},
+		{Pattern: "needle"},               // case-insensitive: compiled to a regex
+		{Pattern: "need.e", Regex: true},  // regex
+		{Pattern: "^needle", Regex: true}, // anchored
+		{Pattern: "NEEDLE", CaseSensitive: true},
+	} {
+		q.MaxHits = 10
+		m, err := Compile(q)
+		if err != nil {
+			t.Fatalf("compile %+v: %v", q, err)
+		}
+		for _, line := range lines {
+			want := m.MatchLine(line)
+			got := m.MatchBytes([]byte(line))
+			if got != want {
+				t.Errorf("pattern %q line %q: MatchBytes=%d MatchLine=%d",
+					q.Pattern, line, got, want)
+			}
+		}
+	}
+}

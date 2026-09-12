@@ -28,6 +28,7 @@
 package search
 
 import (
+	"bytes"
 	"fmt"
 	"regexp"
 	"strings"
@@ -95,11 +96,22 @@ type Matcher struct {
 	re *regexp.Regexp
 	// literal is set only for a case-sensitive literal, which
 	// strings.Index handles faster than any regex.
-	literal  string
-	pathGlob string
-	maxHits  int
+	literal string
+	// literalBytes is literal pre-converted, because MatchBytes runs once
+	// per line read and converting there would allocate on every one —
+	// reintroducing, per line, exactly the cost MatchBytes exists to avoid.
+	literalBytes []byte
+	pathGlob     string
+	maxHits      int
 	// includeTests is carried here so a walker has one object to consult.
 	includeTests bool
+	// literalOnly records that the pattern is a literal, in either case
+	// sense, and therefore carries no anchors. That is what makes a
+	// whole-file prefilter sound: for an unanchored pattern, "matches
+	// somewhere in this file" and "matches on some line of this file" are
+	// the same question. A user-supplied regex may anchor with ^ or $,
+	// where the two differ, so it does not get the prefilter.
+	literalOnly bool
 }
 
 // maxPatternLen bounds a pattern. A regex is user input compiled into a
@@ -167,6 +179,8 @@ func Compile(q Query) (*Matcher, error) {
 
 	if q.CaseSensitive {
 		m.literal = q.Pattern
+		m.literalBytes = []byte(q.Pattern)
+		m.literalOnly = true
 		return m, nil
 	}
 
@@ -188,6 +202,9 @@ func Compile(q Query) (*Matcher, error) {
 	// test could ever reach.
 	re, err := regexp.Compile(casefoldFlag + regexp.QuoteMeta(q.Pattern))
 	m.re = re
+	// QuoteMeta escaped the pattern, so whatever the user typed it is a
+	// literal now and cannot anchor.
+	m.literalOnly = true
 	return m, err
 }
 
@@ -206,6 +223,45 @@ func (m *Matcher) MatchLine(line string) int {
 		return loc[0]
 	}
 	return strings.Index(line, m.literal)
+}
+
+// MatchBytes is MatchLine without turning the line into a string first.
+//
+// A content search reads far more lines than it reports — on a
+// 234-repository workspace, tens of millions of lines to return a handful —
+// so the allocation that MatchLine's string argument implies is paid on every
+// line and recovered on almost none. regexp and bytes both offer the same
+// search over []byte, so the conversion buys nothing.
+//
+// The string form is kept: it is what a caller with a line already in hand
+// should use, and the two must agree, which TestMatchBytesAgreesWithMatchLine
+// asserts over the same inputs.
+func (m *Matcher) MatchBytes(line []byte) int {
+	if m.re != nil {
+		loc := m.re.FindIndex(line)
+		if loc == nil {
+			return -1
+		}
+		return loc[0]
+	}
+	return bytes.Index(line, m.literalBytes)
+}
+
+// CanPrefilter reports whether a whole-file test is equivalent to testing
+// each line, which holds exactly when the pattern cannot anchor.
+func (m *Matcher) CanPrefilter() bool { return m.literalOnly }
+
+// MatchAny reports whether the pattern occurs anywhere in buf.
+//
+// This is the cheap question asked first. Almost every file in a workspace
+// contains no match, and answering "no" for the whole file at once skips
+// splitting it into lines and testing each one — which was the bulk of the
+// work in a content search, spent entirely on files that had nothing to say.
+func (m *Matcher) MatchAny(buf []byte) bool {
+	if m.re != nil {
+		return m.re.Match(buf)
+	}
+	return bytes.Contains(buf, m.literalBytes)
 }
 
 // MaxHits is the cap this matcher was compiled with.

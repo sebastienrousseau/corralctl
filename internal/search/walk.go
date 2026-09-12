@@ -4,7 +4,6 @@
 package search
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"io"
@@ -31,7 +30,16 @@ var (
 	maxFileBytes int64 = 2 << 20 // 2 MiB
 	// maxLineBytes bounds one line. A minified file is a single enormous
 	// line; matching in it is useless and buffering it is expensive.
-	maxLineBytes = 4096
+	//
+	// 64 KiB, not the 4096 this constant held before, because 4096 was never
+	// the limit that applied. It was passed as bufio.Scanner's maxTokenSize,
+	// and a Scanner only consults that when it has to GROW its buffer — the
+	// buffer here started at 64 KiB, so any line up to that size was returned
+	// whole and a hit on a 5000-byte line was reported. Reading the file
+	// directly makes whatever number is here the real one, so it is set to
+	// what the code actually did rather than to what the constant claimed.
+	// TestSearchCodeBoundsTheReportedLine pins that behaviour.
+	maxLineBytes = 64 << 10
 	// maxHitTextBytes bounds the reported text of a hit, before the MCP
 	// layer sanitises it further.
 	maxHitTextBytes = 400
@@ -292,6 +300,38 @@ func matchGlob(pattern, rel string) bool {
 // Errors are swallowed on purpose: a file that vanished between the walk
 // and the read, or that turned out to be unreadable, is not a reason to
 // fail a search across thousands of others.
+// fileBuffers is the per-file scratch a search needs.
+//
+// Pooled because it was allocated per file, and a workspace-wide query reads
+// tens of thousands of files: on a 234-repository workspace, 58,170 candidate
+// files at 8KB + 64KB each meant gigabytes of garbage to answer one question.
+// That is why a repeated search was no faster than a cold one — the cost was
+// never the disk, it was the allocator.
+type fileBuffers struct {
+	data []byte
+}
+
+// maxPooledBytes bounds what goes back into the pool. A 2 MiB buffer grown for
+// one unusually large file would otherwise be retained per worker forever,
+// turning a rare file into permanent resident memory.
+const maxPooledBytes = 128 << 10
+
+var bufferPool = sync.Pool{
+	New: func() any { return &fileBuffers{data: make([]byte, 0, 64*1024)} },
+}
+
+// searchFile reads one file and returns the lines matching m.
+//
+// The file is read once into memory and tested as a whole before it is split
+// into lines. That ordering is the point: almost every file in a workspace
+// contains no match, and the previous version still paid to walk every line of
+// every one of them through a scanner, calling the matcher once per line, to
+// discover that. Asking "is it in here at all" first answers for the whole file
+// in one pass and skips the rest.
+//
+// The prefilter applies only to a literal pattern. A user regex may anchor with
+// ^ or $, where "matches somewhere in the file" and "matches on some line" are
+// different questions, so those files are scanned as before.
 func searchFile(root, rel string, m *Matcher) (hits []Hit, more bool) {
 	f, err := os.Open(filepath.Join(root, rel)) // #nosec G304 -- rel is walk-derived and policy-filtered
 	if err != nil {
@@ -299,24 +339,55 @@ func searchFile(root, rel string, m *Matcher) (hits []Hit, more bool) {
 	}
 	defer func() { _ = f.Close() }()
 
-	// A binary file has no lines worth reporting, and a match inside one
-	// is noise at best. Sniffing the first block is what git itself does.
-	head := make([]byte, 8000)
-	n, _ := io.ReadFull(f, head)
-	if bytes.IndexByte(head[:n], 0) >= 0 {
+	buf, _ := bufferPool.Get().(*fileBuffers)
+	defer func() {
+		if cap(buf.data) <= maxPooledBytes {
+			buf.data = buf.data[:0]
+			bufferPool.Put(buf)
+		}
+	}()
+
+	data, readErr := readBounded(f, buf.data[:0])
+	buf.data = data
+	if readErr != nil {
 		return nil, false
 	}
-	// The sniffed bytes are put back in front of the rest rather than
-	// seeking to the start again: it saves re-reading the first block, and
-	// a Seek on a regular file has an error branch that cannot be taken
-	// and therefore cannot be tested.
-	sc := bufio.NewScanner(io.MultiReader(bytes.NewReader(head[:n]), f))
-	sc.Buffer(make([]byte, 0, 64*1024), maxLineBytes)
+
+	// A binary file has no lines worth reporting, and a match inside one is
+	// noise at best. Sniffing the first block is what git itself does.
+	head := data
+	if len(head) > 8000 {
+		head = head[:8000]
+	}
+	if bytes.IndexByte(head, 0) >= 0 {
+		return nil, false
+	}
+
+	if prefilterEnabled && m.CanPrefilter() && !m.MatchAny(data) {
+		return nil, false
+	}
+
 	line := 0
-	for sc.Scan() {
+	rest := data
+	for len(rest) > 0 {
+		var raw []byte
+		if i := bytes.IndexByte(rest, '\n'); i >= 0 {
+			raw, rest = rest[:i], rest[i+1:]
+		} else {
+			raw, rest = rest, nil
+		}
+		if n := len(raw); n > 0 && raw[n-1] == '\r' {
+			raw = raw[:n-1]
+		}
 		line++
-		text := sc.Text()
-		col := m.MatchLine(text)
+		if len(raw) > maxLineBytes {
+			// A line this long means a minified or generated file. The
+			// hits found so far are the useful half, and the answer is
+			// marked partial — the same contract the scanner's buffer
+			// limit gave before.
+			return hits, true
+		}
+		col := m.MatchBytes(raw)
 		if col < 0 {
 			continue
 		}
@@ -324,7 +395,7 @@ func searchFile(root, rel string, m *Matcher) (hits []Hit, more bool) {
 			File:   rel,
 			Line:   line,
 			Column: col + 1,
-			Text:   trimHitText(text),
+			Text:   trimHitText(string(raw)),
 		})
 		if len(hits) >= m.MaxHits() {
 			// There may or may not be more below; saying so is the safe
@@ -333,10 +404,38 @@ func searchFile(root, rel string, m *Matcher) (hits []Hit, more bool) {
 			return hits, true
 		}
 	}
-	// A scanner error — almost always a line longer than the buffer, which
-	// means a minified file — leaves the hits found so far, which is the
-	// useful half, and marks the answer partial.
-	return hits, sc.Err() != nil
+	return hits, false
+}
+
+// prefilterEnabled is a seam. A benchmark flips it to measure the same files,
+// the same reads and the same matcher with and without the whole-file test, in
+// one process — which is the only way to compare the two on a machine busy
+// with unrelated work, where wall-clock between separate runs says more about
+// the other processes than about this code.
+var prefilterEnabled = true
+
+// readBounded reads at most maxFileBytes from f, appending into dst.
+//
+// Bounded rather than io.ReadAll: the walk already skips files over the limit,
+// but a file can grow between being listed and being opened, and a search must
+// not be the thing that reads an unbounded amount into memory.
+func readBounded(f *os.File, dst []byte) ([]byte, error) {
+	for {
+		if len(dst) == cap(dst) {
+			dst = append(dst, 0)[:len(dst)]
+		}
+		n, err := f.Read(dst[len(dst):cap(dst)])
+		dst = dst[:len(dst)+n]
+		if err != nil {
+			if err == io.EOF {
+				return dst, nil
+			}
+			return dst, err
+		}
+		if int64(len(dst)) >= maxFileBytes {
+			return dst, nil
+		}
+	}
 }
 
 // trimHitText prepares a matching line for a caller: leading and trailing
