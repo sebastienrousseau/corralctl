@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/sebastienrousseau/corralctl/internal/search"
@@ -361,10 +362,13 @@ func TestSearchCodeBoundsTheReportedLine(t *testing.T) {
 func TestSearchCodeSurvivesAnUnreadableRepository(t *testing.T) {
 	h := searchWorkspace(t)
 
-	calls := 0
+	// Atomic because repositories are searched in parallel batches now. A
+	// plain counter here was safe while the loop was sequential and became a
+	// data race the moment it was not — the race detector caught it, which is
+	// the only reason this is a counter and not a silent flake.
+	var calls atomic.Int64
 	stubSeam(t, &searchRepo, func(ctx context.Context, root string, m *search.Matcher, f search.FileFilter) (*search.Result, error) {
-		calls++
-		if calls == 1 {
+		if calls.Add(1) == 1 {
 			return nil, errors.New("permission denied")
 		}
 		return search.SearchRepo(ctx, root, m, f)

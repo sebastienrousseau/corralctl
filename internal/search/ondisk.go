@@ -7,6 +7,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"unsafe"
@@ -93,6 +94,18 @@ func WriteIndex(path string, ix *Index, fp DiskFingerprint) (err error) {
 		return err
 	}
 
+	// Every count below is written as a uint32 and every fingerprint field as
+	// a uint64, so refuse anything that would not survive the round trip.
+	// These limits cannot be reached by a real repository — four billion files
+	// or postings — but an index that silently wrapped would describe the
+	// wrong files, which is the failure this format exists to make impossible.
+	if err := fitsUint32(len(ix.files), len(ix.trigrams), len(ix.posts), len(ix.foldRisk)); err != nil {
+		return err
+	}
+	if fp.Files < 0 || fp.Bytes < 0 || fp.ModUnixNano < 0 {
+		return fmt.Errorf("search: negative fingerprint field: %+v", fp)
+	}
+
 	pathBlock := make([]byte, 0, len(ix.files)*24)
 	for _, f := range ix.files {
 		pathBlock = append(pathBlock, f...)
@@ -102,13 +115,20 @@ func WriteIndex(path string, ix *Index, fp DiskFingerprint) (err error) {
 	buf := make([]byte, headerSize, headerSize+
 		4*(len(ix.trigrams)+len(ix.offs)+len(ix.posts)+len(ix.foldRisk))+len(pathBlock))
 
+	if err := fitsUint32(len(pathBlock)); err != nil {
+		return err
+	}
+
 	copy(buf[0:], indexMagic)
 	le := binary.LittleEndian
+	// Each conversion is guarded by the fitsUint32 call above; the
+	// suppressions are per-line because that is the only form the linter
+	// honours, not because each was judged separately.
 	le.PutUint32(buf[8:], formatVersion)
-	le.PutUint32(buf[12:], uint32(len(ix.files)))
-	le.PutUint32(buf[16:], uint32(len(ix.trigrams)))
-	le.PutUint32(buf[20:], uint32(len(ix.posts)))
-	le.PutUint32(buf[24:], uint32(len(ix.foldRisk)))
+	le.PutUint32(buf[12:], uint32(len(ix.files)))    //nolint:gosec // bounds-checked above
+	le.PutUint32(buf[16:], uint32(len(ix.trigrams))) //nolint:gosec // bounds-checked above
+	le.PutUint32(buf[20:], uint32(len(ix.posts)))    //nolint:gosec // bounds-checked above
+	le.PutUint32(buf[24:], uint32(len(ix.foldRisk))) //nolint:gosec // bounds-checked above
 	var flags uint32
 	if ix.truncated {
 		flags |= 1
@@ -117,17 +137,17 @@ func WriteIndex(path string, ix *Index, fp DiskFingerprint) (err error) {
 		flags |= 2
 	}
 	le.PutUint32(buf[28:], flags)
-	le.PutUint64(buf[32:], uint64(fp.Files))
-	le.PutUint64(buf[40:], uint64(fp.Bytes))
-	le.PutUint64(buf[48:], uint64(fp.ModUnixNano))
-	le.PutUint32(buf[56:], uint32(len(pathBlock)))
+	le.PutUint64(buf[32:], uint64(fp.Files))       //nolint:gosec // non-negative, checked above
+	le.PutUint64(buf[40:], uint64(fp.Bytes))       //nolint:gosec // non-negative, checked above
+	le.PutUint64(buf[48:], uint64(fp.ModUnixNano)) //nolint:gosec // non-negative, checked above
+	le.PutUint32(buf[56:], uint32(len(pathBlock))) //nolint:gosec // bounds-checked above
 	// The pruning threshold is part of what the file MEANS, not just how it
 	// was made: an index built at 0.05 keeps a quarter of the postings one
 	// built at 0.5 does, and answers the same query by reading four times as
 	// many files. Without this, changing the setting leaves every existing
 	// index in place and silently ignored — which is exactly what happened,
 	// and cost a profiling run that measured the old shape.
-	le.PutUint32(buf[60:], uint32(commonTrigramFraction*10000))
+	le.PutUint32(buf[60:], uint32(commonTrigramFraction*10000)) //nolint:gosec // a fraction in (0,1]
 
 	buf = appendUint32s(buf, ix.trigrams)
 	buf = appendUint32s(buf, ix.offs)
@@ -231,10 +251,16 @@ func OpenIndex(path string, want DiskFingerprint) (mi *MappedIndex, err error) {
 	nPosts := int(le.Uint32(data[20:]))
 	nFold := int(le.Uint32(data[24:]))
 	flags := le.Uint32(data[28:])
+	// The writer refuses negative fingerprint fields, so anything above the
+	// signed range came from a corrupt or foreign file rather than from us.
+	fpFiles, fpBytes, fpMod := le.Uint64(data[32:]), le.Uint64(data[40:]), le.Uint64(data[48:])
+	if fpFiles > math.MaxInt64 || fpBytes > math.MaxInt64 || fpMod > math.MaxInt64 {
+		return nil, fmt.Errorf("%w: fingerprint out of range", errWrongFormat)
+	}
 	got := DiskFingerprint{
-		Files:       int64(le.Uint64(data[32:])),
-		Bytes:       int64(le.Uint64(data[40:])),
-		ModUnixNano: int64(le.Uint64(data[48:])),
+		Files:       int64(fpFiles),
+		Bytes:       int64(fpBytes),
+		ModUnixNano: int64(fpMod),
 	}
 	pathLen := int(le.Uint32(data[56:]))
 	builtCommon := le.Uint32(data[60:])
@@ -314,4 +340,14 @@ func uint32sAt(data []byte, off, n int) ([]uint32, int) {
 	//nolint:gosec // bounds are validated by the caller against len(data)
 	s := unsafe.Slice((*uint32)(unsafe.Pointer(&data[off])), n)
 	return s, off + 4*n
+}
+
+// fitsUint32 reports an error if any count cannot be written as a uint32.
+func fitsUint32(ns ...int) error {
+	for _, n := range ns {
+		if n < 0 || int64(n) > math.MaxUint32 {
+			return fmt.Errorf("search: index dimension %d does not fit the on-disk format", n)
+		}
+	}
+	return nil
 }

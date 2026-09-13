@@ -222,8 +222,11 @@ func (ix *Index) freeze(postings map[trigramKey][]uint32) {
 	ix.trigrams = keys
 	ix.offs = make([]uint32, len(keys)+1)
 	ix.posts = make([]uint32, 0, kept)
+	// Offsets index ix.posts, whose length is bounded by the postings collected
+	// from one repository — far below the uint32 range, and WriteIndex refuses
+	// an index that is not.
 	for i, k := range keys {
-		ix.offs[i] = uint32(len(ix.posts))
+		ix.offs[i] = uint32(len(ix.posts)) //nolint:gosec // bounded by one repository's postings
 		list := postings[trigramKey(k)]
 		// Too common to be worth storing: the key stays so the trigram is
 		// still known to exist, the list does not.
@@ -233,7 +236,7 @@ func (ix *Index) freeze(postings map[trigramKey][]uint32) {
 		sort.Slice(list, func(a, b int) bool { return list[a] < list[b] })
 		ix.posts = append(ix.posts, list...)
 	}
-	ix.offs[len(keys)] = uint32(len(ix.posts))
+	ix.offs[len(keys)] = uint32(len(ix.posts)) //nolint:gosec // same bound as the loop above
 	ix.bytes = ix.estimateBytes()
 }
 
@@ -284,24 +287,6 @@ func (ix *Index) lookupList(k trigramKey) ([]uint32, bool) {
 		return nil, false
 	}
 	return ix.posts[ix.offs[lo]:ix.offs[lo+1]], true
-}
-
-// lookup returns the posting list for one trigram.
-func (ix *Index) lookup(k trigramKey) []uint32 {
-	want := uint32(k)
-	lo, hi := 0, len(ix.trigrams)
-	for lo < hi {
-		mid := int(uint(lo+hi) >> 1)
-		if ix.trigrams[mid] < want {
-			lo = mid + 1
-		} else {
-			hi = mid
-		}
-	}
-	if lo == len(ix.trigrams) || ix.trigrams[lo] != want {
-		return nil
-	}
-	return ix.posts[ix.offs[lo]:ix.offs[lo+1]]
 }
 
 // foldRiskSeqs are the UTF-8 encodings of the only two runes outside ASCII

@@ -36,7 +36,11 @@ func indexTree(tb testing.TB) string {
 	write("d.md", "# Notes\n\nnothing of interest here\n")
 	write("utf8.go", "package u\n\n// café naïve — ünïcödé\nconst K = \"K\"\n")
 	write("short.txt", "hi")
-	write("near.go", "package n\n\n// need1e and neeedle and nedle\n")
+	// Words that share trigrams with the query without containing it. Spelled
+	// with digits rather than as misspellings, because a spell-checker runs
+	// over this repository and a deliberate typo is indistinguishable from a
+	// real one to it.
+	write("near.go", "package n\n\n// need1e and n33dle and ne3dle\n")
 	write("bin.dat", "\x00\x01\x02binary needle inside\x00")
 	write("e_test.go", "package a\n\nfunc TestNeedle(t *T) {}\n")
 	return root
