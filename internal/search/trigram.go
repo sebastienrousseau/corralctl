@@ -6,6 +6,7 @@ package search
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
@@ -81,9 +82,15 @@ type Index struct {
 	// folds to an ASCII letter. So the set is files containing one of two
 	// byte sequences, which in practice is none of them.
 	foldRisk []uint32
-	// truncated records that the build hit a bound, so a caller knows the
-	// index does not describe the whole repository.
+	// truncated records that a bound was hit, so a search says its answer is
+	// partial. It does NOT decide whether the index may be used.
 	truncated bool
+	// incomplete records that the file list is missing entries a search would
+	// otherwise read, which is the only condition that makes narrowing unsafe.
+	// Set by the file-count cap and nothing else: a file skipped for being too
+	// large is skipped by the search on the same rule, so the index still
+	// describes exactly what a search would look at.
+	incomplete bool
 	// bytes is the approximate retained size, for the cache budget.
 	bytes int
 }
@@ -117,12 +124,16 @@ func BuildIndex(ctx context.Context, root string, allowed FileFilter) (*Index, e
 	// Everything discover would ever return: tests included and no path
 	// glob, because the index answers queries that have not been asked yet.
 	// The per-query filters are applied to the candidate list afterwards.
-	paths, truncated, err := discover(ctx, root, true, "", allowed)
+	paths, hitFileCap, skippedLarge, err := discover(ctx, root, true, "", allowed)
 	if err != nil {
 		return nil, err
 	}
 
-	ix := &Index{files: paths, truncated: truncated}
+	ix := &Index{
+		files:      paths,
+		truncated:  hitFileCap || skippedLarge,
+		incomplete: hitFileCap,
+	}
 	// The map is transient: it accumulates one repository's postings and is
 	// dropped at the end of this function. What survives is the frozen form.
 	postings := make(map[trigramKey][]uint32, 1<<12)
@@ -177,9 +188,21 @@ func BuildIndex(ctx context.Context, root string, allowed FileFilter) (*Index, e
 // Posting lists come out in file order already, because files are indexed in
 // order; the sort is belt and braces for the intersection, which relies on it.
 func (ix *Index) freeze(postings map[trigramKey][]uint32) {
+	// Prune by proportion AND by absolute size.
+	//
+	// A proportion alone is wrong for a small repository: at 0.5, a trigram in
+	// six files out of ten is "common" and loses its posting list, so a
+	// ten-file repository ends up with almost no constraints and every query
+	// reads all of it. Measured, that is most of a workspace — 196 of 200
+	// repositories used the index and it still opened 9,839 files for a term
+	// matching three.
+	//
+	// Pruning exists to save space, and a ten-entry posting list costs forty
+	// bytes. Below minPrunedPostings there is nothing worth saving and a great
+	// deal of selectivity to lose, so those lists are always kept.
 	common := int(float64(len(ix.files)) * commonTrigramFraction)
-	if common < 1 {
-		common = 1
+	if common < minPrunedPostings {
+		common = minPrunedPostings
 	}
 
 	keys := make([]uint32, 0, len(postings))
@@ -213,6 +236,12 @@ func (ix *Index) freeze(postings map[trigramKey][]uint32) {
 	ix.offs[len(keys)] = uint32(len(ix.posts))
 	ix.bytes = ix.estimateBytes()
 }
+
+// minPrunedPostings is the shortest posting list worth dropping.
+//
+// Chosen so a small repository keeps every list it has: below this, the space
+// saved is a rounding error against the selectivity lost.
+const minPrunedPostings = 64
 
 // commonTrigramFraction is the point past which a trigram stops earning its
 // storage.
@@ -331,7 +360,7 @@ func (ix *Index) estimateBytes() int {
 // which is what happens for a regex, for a pattern too short to yield a
 // trigram, and for a truncated index.
 func (ix *Index) Candidates(m *Matcher) ([]string, bool) {
-	if ix == nil || ix.truncated {
+	if ix == nil || ix.incomplete {
 		return nil, false
 	}
 	// Only a literal can be reduced to required trigrams. A regex may match
@@ -574,7 +603,7 @@ func Fingerprint(ctx context.Context, root string, allowed FileFilter) (DiskFing
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	paths, _, err := discover(ctx, root, true, "", allowed)
+	paths, _, _, err := discover(ctx, root, true, "", allowed)
 	if err != nil {
 		return DiskFingerprint{}, err
 	}
@@ -590,4 +619,36 @@ func Fingerprint(ctx context.Context, root string, allowed FileFilter) (DiskFing
 		}
 	}
 	return fp, nil
+}
+
+// DeclineReason explains why Candidates returned no opinion, for diagnostics.
+func (ix *Index) DeclineReason(m *Matcher) string {
+	if ix == nil {
+		return "no index"
+	}
+	if ix.incomplete {
+		return "file list incomplete (hit the per-repository file cap)"
+	}
+	if !m.CanPrefilter() {
+		return "not a literal"
+	}
+	p := m.indexPattern()
+	if len(p) < 3 {
+		return "pattern shorter than a trigram"
+	}
+	known, common, absent := 0, 0, 0
+	for j := 0; j+2 < len(p); j++ {
+		k := key(lowerASCII(p[j]), lowerASCII(p[j+1]), lowerASCII(p[j+2]))
+		list, ok := ix.lookupList(k)
+		switch {
+		case !ok:
+			absent++
+		case len(list) == 0:
+			common++
+		default:
+			known++
+		}
+	}
+	return fmt.Sprintf("trigrams: %d usable, %d too-common, %d absent (files=%d)",
+		known, common, absent, len(ix.files))
 }

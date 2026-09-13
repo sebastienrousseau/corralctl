@@ -247,3 +247,71 @@ func TestIndexIgnoresOrdinaryNonASCII(t *testing.T) {
 	}
 	t.Logf("narrowed %d files to %d despite every file containing non-ASCII", ix.Files(), len(cands))
 }
+
+// TestOneLargeFileDoesNotDisableTheIndex is the regression for the bug that
+// cost this feature most of its value.
+//
+// discover reports two different bounds and they were collapsed into one flag:
+// the per-repository file cap, which leaves the file list genuinely incomplete,
+// and a single file skipped for being over the size limit, which does not — the
+// search skips that file on exactly the same rule, so the index still describes
+// everything a search would read.
+//
+// Because Candidates refuses to narrow a "truncated" index, one oversized file
+// — a lockfile, a bundled asset, a fixture — turned the index off for the whole
+// repository. Measured on a real workspace, four repositories in that state
+// contributed 10,130 of the 10,373 files a query opened: 98% of the work, from
+// 2% of the repositories.
+func TestOneLargeFileDoesNotDisableTheIndex(t *testing.T) {
+	root := t.TempDir()
+	for i := 0; i < 40; i++ {
+		body := fmt.Sprintf("package p%d\n\nfunc Ordinary%d() {}\n", i, i)
+		if i == 3 {
+			body += "func TheSoughtName() {}\n"
+		}
+		if err := os.WriteFile(filepath.Join(root, fmt.Sprintf("f%02d.go", i)), []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// One file over the size limit, which the search will skip anyway.
+	big := make([]byte, maxFileBytes+1024)
+	for i := range big {
+		big[i] = 'x'
+	}
+	if err := os.WriteFile(filepath.Join(root, "bundle.js"), big, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	ix, err := BuildIndex(context.Background(), root, func(string) bool { return true })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ix.Truncated() {
+		t.Error("a skipped oversized file should still make the answer partial")
+	}
+	m, err := Compile(Query{Pattern: "TheSoughtName", MaxHits: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cands, ok := ix.Candidates(m)
+	if !ok {
+		t.Fatalf("the index declined because of one oversized file: %s", ix.DeclineReason(m))
+	}
+	if len(cands) > 3 {
+		t.Errorf("narrowed to %d of %d files, expected a handful", len(cands), ix.Files())
+	}
+
+	// And the results must still match an exhaustive search.
+	want, err := SearchRepo(context.Background(), root, m, func(string) bool { return true })
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := SearchRepoPaths(context.Background(), root, m, FilterCandidates(cands, m), ix.Truncated())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Hits) != len(want.Hits) {
+		t.Errorf("indexed found %d hits, exhaustive found %d", len(got.Hits), len(want.Hits))
+	}
+	t.Logf("narrowed %d files to %d with an oversized file present", ix.Files(), len(cands))
+}

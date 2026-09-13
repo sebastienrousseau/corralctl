@@ -39,12 +39,13 @@ import (
 //	trigrams  4   number of distinct trigrams
 //	postings  4   number of posting entries
 //	foldRisk  4   number of fold-risk file ids
-//	flags     4   bit 0: the index covers only part of the repository
+//	flags     4   bit 0: a bound was hit (answers are partial)
+//	              bit 1: the file list is incomplete (narrowing unsafe)
 //	fpFiles   8   fingerprint: file count at build time
 //	fpBytes   8   fingerprint: total bytes
 //	fpModNano 8   fingerprint: newest modification time
 //	pathLen   4   bytes of the path block
-//	_pad      4   so the arrays below start 8-byte aligned
+//	common    4   commonTrigramFraction x 10000 at build time
 //	trigrams  4 × trigrams
 //	offs      4 × (trigrams+1)
 //	posts     4 × postings
@@ -57,11 +58,11 @@ import (
 
 const (
 	indexMagic = "corralix"
-	// formatVersion is bumped whenever the layout changes. A file written by
+	// formatVersion is bumped whenever the layout or its meaning changes. A file written by
 	// a different version is discarded and rebuilt rather than misread —
 	// there is no migration, because the index is derived data and rebuilding
 	// costs less than being wrong about what the bytes mean.
-	formatVersion = 1
+	formatVersion = 3
 	headerSize    = 8 + 4*6 + 8*3 + 4 + 4
 )
 
@@ -112,11 +113,21 @@ func WriteIndex(path string, ix *Index, fp DiskFingerprint) (err error) {
 	if ix.truncated {
 		flags |= 1
 	}
+	if ix.incomplete {
+		flags |= 2
+	}
 	le.PutUint32(buf[28:], flags)
 	le.PutUint64(buf[32:], uint64(fp.Files))
 	le.PutUint64(buf[40:], uint64(fp.Bytes))
 	le.PutUint64(buf[48:], uint64(fp.ModUnixNano))
 	le.PutUint32(buf[56:], uint32(len(pathBlock)))
+	// The pruning threshold is part of what the file MEANS, not just how it
+	// was made: an index built at 0.05 keeps a quarter of the postings one
+	// built at 0.5 does, and answers the same query by reading four times as
+	// many files. Without this, changing the setting leaves every existing
+	// index in place and silently ignored — which is exactly what happened,
+	// and cost a profiling run that measured the old shape.
+	le.PutUint32(buf[60:], uint32(commonTrigramFraction*10000))
 
 	buf = appendUint32s(buf, ix.trigrams)
 	buf = appendUint32s(buf, ix.offs)
@@ -226,7 +237,11 @@ func OpenIndex(path string, want DiskFingerprint) (mi *MappedIndex, err error) {
 		ModUnixNano: int64(le.Uint64(data[48:])),
 	}
 	pathLen := int(le.Uint32(data[56:]))
+	builtCommon := le.Uint32(data[60:])
 
+	if builtCommon != uint32(commonTrigramFraction*10000) {
+		return nil, fmt.Errorf("search: index was built with a different pruning threshold")
+	}
 	if got != want {
 		return nil, fmt.Errorf("search: index is stale")
 	}
@@ -270,12 +285,13 @@ func OpenIndex(path string, want DiskFingerprint) (mi *MappedIndex, err error) {
 	}
 
 	ix := &Index{
-		files:     files,
-		trigrams:  trigrams,
-		offs:      offs,
-		posts:     posts,
-		foldRisk:  foldRisk,
-		truncated: flags&1 != 0,
+		files:      files,
+		trigrams:   trigrams,
+		offs:       offs,
+		posts:      posts,
+		foldRisk:   foldRisk,
+		truncated:  flags&1 != 0,
+		incomplete: flags&2 != 0,
 	}
 	// The mapped arrays are not on the heap, so they do not count toward the
 	// in-memory budget. What the process holds is the path list.
