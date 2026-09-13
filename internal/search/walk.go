@@ -132,11 +132,12 @@ func SearchRepo(ctx context.Context, root string, m *Matcher, allowed FileFilter
 		ctx = context.Background()
 	}
 
-	paths, truncated, err := discover(ctx, root, m.IncludeTests(), m.pathGlob, allowed)
+	paths, hitFileCap, skippedLarge, err := discover(ctx, root, m.IncludeTests(), m.pathGlob, allowed)
 	if err != nil {
 		return nil, err
 	}
-	return searchPaths(ctx, root, m, paths, truncated), nil
+	// Either bound means the answer is partial, and a caller is told so.
+	return searchPaths(ctx, root, m, paths, hitFileCap || skippedLarge), nil
 }
 
 // SearchRepoPaths searches only the listed files.
@@ -244,10 +245,19 @@ func searchPaths(ctx context.Context, root string, m *Matcher, paths []string, t
 }
 
 // discover collects the searchable files, in walk order.
-func discover(ctx context.Context, root string, includeTests bool, pathGlob string, allowed FileFilter) ([]string, bool, error) {
+func discover(ctx context.Context, root string, includeTests bool, pathGlob string, allowed FileFilter) ([]string, bool, bool, error) {
 	var (
-		paths     []string
-		truncated bool
+		paths []string
+		// hitFileCap means the walk stopped early, so this list is NOT every
+		// file a search would read. An index built from it cannot be used to
+		// rule files out, because the ones it never saw would be ruled out too.
+		hitFileCap bool
+		// skippedLarge means a file was passed over for being too big. That is
+		// not the same thing at all: the search skips it on exactly the same
+		// rule, so the list is still complete with respect to what a search
+		// reads. Conflating the two is what disabled the index for a whole
+		// repository because it contained one lockfile.
+		skippedLarge bool
 	)
 	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, walkErr error) error {
 		if ctx.Err() != nil {
@@ -267,7 +277,7 @@ func discover(ctx context.Context, root string, includeTests bool, pathGlob stri
 			return nil
 		}
 		if len(paths) >= maxFilesPerRepo {
-			truncated = true
+			hitFileCap = true
 			return fs.SkipAll
 		}
 		// WalkDir yields paths under root, so the prefix is always there
@@ -287,19 +297,19 @@ func discover(ctx context.Context, root string, includeTests bool, pathGlob stri
 			return nil
 		}
 		if info, statErr := d.Info(); statErr == nil && info.Size() > maxFileBytes {
-			truncated = true
+			skippedLarge = true
 			return nil
 		}
 		paths = append(paths, rel)
 		return nil
 	})
 	if err != nil && ctx.Err() != nil {
-		return nil, false, err
+		return nil, false, false, err
 	}
 	// Any other walk error is best-effort: a partial file list still
 	// produces a useful answer, and an unreadable root shows up as zero
 	// files rather than as a failure the agent has to interpret.
-	return paths, truncated, nil
+	return paths, hitFileCap, skippedLarge, nil
 }
 
 // matchGlob reports whether rel matches the pattern, against both the full
