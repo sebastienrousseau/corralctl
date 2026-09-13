@@ -67,16 +67,6 @@ func paginate(entries []RepoEntry, limit, offset int) ([]RepoEntry, pageMeta) {
 	return page, meta
 }
 
-// conciseRepo is the orientation-pass projection: enough to identify and locate
-// a repository, without the origin URL and sync timestamps that dominate the
-// payload. Roughly a tenth the size of the full entry.
-type conciseRepo struct {
-	RelPath    string `json:"rel_path"`
-	Name       string `json:"name"`
-	Visibility string `json:"visibility,omitempty"`
-	Language   string `json:"language,omitempty"`
-}
-
 // projectRepos renders entries in the requested shape. Any value other than
 // "detailed" is treated as concise, so a model that invents a format name gets
 // the cheap response rather than an error.

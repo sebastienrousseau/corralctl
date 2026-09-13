@@ -456,6 +456,17 @@ func (s *Server) httpHandler() http.Handler {
 	return jsonrpcHTTP(handler)
 }
 
+// ServeHTTP runs the server on the Streamable HTTP transport, the MCP
+// standard for anything not launched as a subprocess.
+//
+// Blocks until the listener fails or ctx is cancelled.
+//
+// The address should stay on loopback unless the caller has thought about it.
+// This server reads a developer's whole workspace and, when mutations are
+// enabled, writes to it; there is no authentication here, so binding it to a
+// routable interface publishes that. The cmd layer refuses a non-loopback bind
+// without an explicit flag, and this logs what it is listening on so an
+// operator can see which it got.
 func (s *Server) ServeHTTP(ctx context.Context, addr string) error {
 	// Warm the symbol cache off the request path. HTTP only: this server is
 	// long-lived and serves many sessions, so the scan pays for itself, while

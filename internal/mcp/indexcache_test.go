@@ -130,6 +130,26 @@ func TestIndexCacheConcurrentUse(t *testing.T) {
 	wg.Wait()
 }
 
+// TestIndexCacheStatsReflectContents checks the cache can account for what it
+// holds, which is what any future diagnostic would read.
+func TestIndexCacheStatsReflectContents(t *testing.T) {
+	c := newIndexCache()
+	if n, b := c.stats(); n != 0 || b != 0 {
+		t.Errorf("empty cache reports %d entries / %d bytes", n, b)
+	}
+	c.put("repo", mappedFor(t, t.TempDir()))
+	t.Cleanup(c.closeAll)
+	n, b := c.stats()
+	if n != 1 {
+		t.Errorf("after one put, %d entries", n)
+	}
+	// Mapped pages are the kernel's; what this counts is the heap the index
+	// still holds, which is its path list.
+	if b <= 0 {
+		t.Errorf("a mapped index reports %d heap bytes, want the path list", b)
+	}
+}
+
 // TestIndexCacheDeclinesWhenFull checks a full cache does not evict a live
 // entry, which would unmap something a query could be holding.
 func TestIndexCacheDeclinesWhenFull(t *testing.T) {

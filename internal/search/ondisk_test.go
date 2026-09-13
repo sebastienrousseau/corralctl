@@ -129,7 +129,7 @@ func TestOnDiskIndexRejectsDamage(t *testing.T) {
 	if err := WriteIndex(good, ix, testFP); err != nil {
 		t.Fatal(err)
 	}
-	sound, err := os.ReadFile(good)
+	sound, err := os.ReadFile(good) //nolint:gosec // a path this test just wrote
 	if err != nil {
 		t.Fatal(err)
 	}

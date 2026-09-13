@@ -357,8 +357,8 @@ func (s *Server) handleDeleteRepo(ctx context.Context, req *mcp.CallToolRequest,
 			if auditErr := s.auditRefusal(rec, rec.Message); auditErr != nil {
 				return nil, MutationOutput{}, fmt.Errorf("%s; audit failed: %v", rec.Message, auditErr)
 			}
-			return nil, MutationOutput{}, fmt.Errorf("%s\n\nStart the server with --no-confirm-deletes to delete without asking, "+
-				"which is only appropriate for an unattended workspace you are willing to lose.", rec.Message)
+			return nil, MutationOutput{}, fmt.Errorf("%s; start the server with --no-confirm-deletes to delete "+
+				"without asking, which is only appropriate for an unattended workspace you are willing to lose", rec.Message)
 		case confirmDenied:
 			rec.Message = "declined by the user"
 			if auditErr := s.auditRefusal(rec, rec.Message); auditErr != nil {
