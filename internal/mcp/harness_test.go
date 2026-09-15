@@ -188,6 +188,10 @@ func newTestServer(t *testing.T, base string) *Server {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Registered last, so it runs first: cleanups are LIFO, and on Windows a
+	// mapped file cannot be deleted, so every mapping has to go before the
+	// TempDir holding the index files is removed.
+	t.Cleanup(srv.indexCache.closeAll)
 	return srv
 }
 

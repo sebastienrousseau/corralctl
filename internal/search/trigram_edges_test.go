@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -109,13 +110,6 @@ func TestBuildIndexHandlesAwkwardFiles(t *testing.T) {
 	// Larger than the read buffer, so the buffer has to grow and be kept.
 	writeFile(t, root, "big.go", "package b\n"+strings.Repeat("// filler line\n", 6000))
 
-	// Unreadable: it must become an always-read candidate, never dropped.
-	writeFile(t, root, "denied.go", "package c\nfunc Hidden() {}\n")
-	if err := os.Chmod(filepath.Join(root, "denied.go"), 0o000); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.Chmod(filepath.Join(root, "denied.go"), 0o600) })
-
 	// Binary: never searched, so it belongs in no candidate list.
 	writeFile(t, root, "blob.go", "package d\n\x00\x01\x02binary\n")
 
@@ -134,9 +128,6 @@ func TestBuildIndexHandlesAwkwardFiles(t *testing.T) {
 	joined := strings.Join(cands, " ")
 	if !strings.Contains(joined, "ok.go") {
 		t.Errorf("the matching file is not a candidate: %v", cands)
-	}
-	if !strings.Contains(joined, "denied.go") {
-		t.Errorf("an unreadable file must stay a candidate, it cannot be ruled out: %v", cands)
 	}
 	if strings.Contains(joined, "blob.go") {
 		t.Errorf("a binary file is never searched and should not be a candidate: %v", cands)
@@ -431,5 +422,46 @@ func TestDeclineReasonCountsAbsentTrigrams(t *testing.T) {
 	}
 	if r := ix.DeclineReason(m); !strings.Contains(r, "absent") {
 		t.Errorf("DeclineReason = %q, want it to count the absent trigrams", r)
+	}
+}
+
+// TestBuildIndexKeepsUnreadableFilesAsCandidates covers the branch where a file
+// cannot be read at index time: it has no posting list, so it must be treated
+// as always-matching rather than silently ruled out of every search.
+//
+// Windows is skipped because the premise cannot be set up there. os.Chmod on
+// Windows toggles only the read-only attribute; it cannot deny read access, so
+// the file would be indexed normally and the test would assert nothing. The
+// branch is still covered — the coverage gate runs on Linux.
+func TestBuildIndexKeepsUnreadableFilesAsCandidates(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("os.Chmod cannot make a file unreadable on Windows")
+	}
+	root := t.TempDir()
+	writeFile(t, root, "ok.go", "package a\nfunc Findable() {}\n")
+	writeFile(t, root, "denied.go", "package c\nfunc Hidden() {}\n")
+	if err := os.Chmod(filepath.Join(root, "denied.go"), 0o000); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(filepath.Join(root, "denied.go"), 0o600) })
+
+	ix, err := BuildIndex(context.Background(), root, allowAll)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m, err := Compile(Query{Pattern: "Findable", MaxHits: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cands, ok := ix.Candidates(m)
+	if !ok {
+		t.Fatal("index declined a plain literal")
+	}
+	joined := strings.Join(cands, " ")
+	if !strings.Contains(joined, "denied.go") {
+		t.Errorf("an unreadable file must stay a candidate, it cannot be ruled out: %v", cands)
+	}
+	if !strings.Contains(joined, "ok.go") {
+		t.Errorf("the matching file is not a candidate: %v", cands)
 	}
 }

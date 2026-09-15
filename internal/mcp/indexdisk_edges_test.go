@@ -73,6 +73,8 @@ func repoForIndexing(t *testing.T, indexDir string) (*Server, *RepoEntry) {
 	if len(idx.Repos) != 1 {
 		t.Fatalf("expected one repository, got %d", len(idx.Repos))
 	}
+	// See newTestServer: unmap before Windows tries to delete the files.
+	t.Cleanup(srv.indexCache.closeAll)
 	return srv, &idx.Repos[0]
 }
 
