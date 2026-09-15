@@ -533,35 +533,6 @@ func FilterCandidates(paths []string, m *Matcher) []string {
 	return out
 }
 
-// Stats reports the index's internal sizes, for tuning and diagnostics.
-func (ix *Index) Stats() (trigrams, postings, files int) {
-	return len(ix.trigrams), len(ix.posts), len(ix.files)
-}
-
-// PostingHistogram reports how postings are distributed across trigrams,
-// bucketed by the fraction of the repository's files a trigram appears in.
-func (ix *Index) PostingHistogram() map[string]int {
-	out := map[string]int{}
-	n := len(ix.files)
-	if n == 0 {
-		return out
-	}
-	for i := range ix.trigrams {
-		l := int(ix.offs[i+1] - ix.offs[i])
-		switch frac := float64(l) / float64(n); {
-		case frac > 0.5:
-			out[">50%"] += l
-		case frac > 0.2:
-			out["20-50%"] += l
-		case frac > 0.05:
-			out["5-20%"] += l
-		default:
-			out["<5%"] += l
-		}
-	}
-	return out
-}
-
 // envFloat reads a fraction in (0,1] from the environment, falling back to def.
 //
 // A value outside that range, or one that will not parse, falls back rather
@@ -594,7 +565,7 @@ func Fingerprint(ctx context.Context, root string, allowed FileFilter) (DiskFing
 	}
 	fp := DiskFingerprint{Files: int64(len(paths))}
 	for _, rel := range paths {
-		info, err := os.Lstat(filepath.Join(root, rel))
+		info, err := osLstat(filepath.Join(root, rel))
 		if err != nil {
 			continue
 		}

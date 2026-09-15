@@ -47,7 +47,11 @@ const warmIdleAfter = 10 * time.Minute
 // warmInterval is how often the cache is topped up while in use. Half the TTL,
 // so an entry is refreshed before it expires rather than after a client has
 // already missed on it.
-const warmInterval = symbolCacheTTL / 2
+//
+// A variable so a test can shorten it: the refresh branch is the one that
+// decides whether an idle laptop keeps scanning, and waiting a real minute to
+// observe it would make that a test nobody runs.
+var warmInterval = symbolCacheTTL / 2
 
 // noteSymbolQuery records that a client asked something a warmed cache serves.
 // Called from the symbol tools and from the content search.

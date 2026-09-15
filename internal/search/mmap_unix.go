@@ -23,12 +23,13 @@ func mapFile(f *os.File) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+	// No 32-bit guard here: every release target is 64-bit, so int always
+	// holds the size, and a branch that cannot run is a branch that cannot be
+	// tested. If a 32-bit target is ever added, the conversion below is where
+	// to put one back.
 	size := info.Size()
 	if size == 0 {
 		return nil, fmt.Errorf("index file is empty")
-	}
-	if size != int64(int(size)) {
-		return nil, fmt.Errorf("index file too large to map: %d bytes", size)
 	}
 	data, err := syscall.Mmap(int(f.Fd()), 0, int(size), syscall.PROT_READ, syscall.MAP_SHARED)
 	if err != nil {

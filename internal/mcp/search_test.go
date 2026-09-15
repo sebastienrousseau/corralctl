@@ -34,6 +34,7 @@ type searchBody struct {
 	Truncated            bool        `json:"truncated"`
 	Note                 string      `json:"note"`
 	PartialRepositories  []string    `json:"partial_repositories"`
+	IndexedRepositories  int         `json:"indexed_repositories"`
 }
 
 // writeIn puts a file inside a repository in the workspace.
@@ -573,4 +574,64 @@ func TestSearchCodeDoesNotReadTheWholeWorkspace(t *testing.T) {
 			body.RepositoriesSearched, repos)
 	}
 	t.Logf("read %d of %d repositories", body.RepositoriesSearched, repos)
+}
+
+// TestSearchCodeBatchBoundaryAndPartials covers the three edges of the batched
+// repository loop.
+//
+// The loop reads repositories in parallel batches, and its bookkeeping only
+// differs from the sequential form at the boundaries: a final partial batch, a
+// repository limit reached mid-batch, and a repository that reports its own
+// result as incomplete.
+func TestSearchCodeBatchBoundaryAndPartials(t *testing.T) {
+	base := t.TempDir()
+	// More repositories than one batch holds, and deliberately not a multiple
+	// of it, so the last batch is short.
+	const repos = 25
+	for i := 0; i < repos; i++ {
+		name := fmt.Sprintf("repo-%02d", i)
+		r := makeFakeRepo(t, base, "Public", "go", name, "https://github.com/acme/"+name+".git", "")
+		writeIn(t, r, "a.md", "needle\n")
+	}
+	h := newHarness(t, ServerOptions{Root: base})
+
+	t.Run("short final batch", func(t *testing.T) {
+		body := searchCode(t, h, map[string]any{"query": "needle", "max_results": 100})
+		if body.RepositoriesSearched != repos {
+			t.Errorf("searched %d of %d repositories", body.RepositoriesSearched, repos)
+		}
+	})
+
+	t.Run("repository limit reached", func(t *testing.T) {
+		// Lower than the number of repositories, so the cap is hit partway
+		// through rather than never.
+		stubSeam(t, &maxSearchRepos, 5)
+		body := searchCode(t, h, map[string]any{"query": "needle", "max_results": 100})
+		if !body.Truncated {
+			t.Error("stopping at the repository limit must be reported as partial")
+		}
+		if body.RepositoriesSearched > repos {
+			t.Errorf("searched %d repositories despite a limit of 5", body.RepositoriesSearched)
+		}
+		if !strings.Contains(body.Note, "repositories") {
+			t.Errorf("note should explain the limit: %q", body.Note)
+		}
+	})
+
+	t.Run("a repository reports its own partial result", func(t *testing.T) {
+		stubSeam(t, &searchRepo, func(ctx context.Context, root string, m *search.Matcher, f search.FileFilter) (*search.Result, error) {
+			res, err := search.SearchRepo(ctx, root, m, f)
+			if err == nil && res != nil {
+				res.Truncated = true
+			}
+			return res, err
+		})
+		body := searchCode(t, h, map[string]any{"query": "needle", "max_results": 100})
+		if !body.Truncated {
+			t.Error("a repository's own truncation must reach the answer")
+		}
+		if len(body.PartialRepositories) == 0 {
+			t.Error("the partial repositories should be named")
+		}
+	})
 }

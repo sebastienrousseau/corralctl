@@ -69,6 +69,31 @@ const (
 
 var errWrongFormat = errors.New("search: index file is not a usable corral index")
 
+// Filesystem seams.
+//
+// Writing an index is a sequence of operations that can each fail for reasons
+// a test cannot arrange on a real disk — a full device, a revoked permission
+// mid-write, a rename across a boundary. The failure paths matter more than
+// most: a half-written index that still maps is the one outcome this format
+// is built to prevent, so they are exercised rather than assumed.
+var (
+	osMkdirAll   = os.MkdirAll
+	osCreateTemp = os.CreateTemp
+	osRename     = os.Rename
+	osOpen       = os.Open
+	osLstat      = os.Lstat
+	mapFileFn    = mapFile
+	// closeFile is seamed because a Close that fails after a successful write
+	// is the case that decides whether a truncated file gets renamed into
+	// place, and no portable filesystem arrangement produces it on demand.
+	closeFile = (*os.File).Close
+)
+
+// maxIndexDimension is the largest count the format can hold. A variable so a
+// test can lower it: an index with four billion entries cannot be allocated to
+// prove the guard works.
+var maxIndexDimension int64 = math.MaxUint32
+
 // DiskFingerprint identifies the state of a repository an index was built from.
 //
 // The same three facts the symbol cache uses, and for the same reason: a walk
@@ -90,7 +115,7 @@ func WriteIndex(path string, ix *Index, fp DiskFingerprint) (err error) {
 	if ix == nil {
 		return errors.New("search: no index to write")
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
+	if err := osMkdirAll(filepath.Dir(path), 0o750); err != nil {
 		return err
 	}
 
@@ -155,7 +180,7 @@ func WriteIndex(path string, ix *Index, fp DiskFingerprint) (err error) {
 	buf = appendUint32s(buf, ix.foldRisk)
 	buf = append(buf, pathBlock...)
 
-	tmp, err := os.CreateTemp(filepath.Dir(path), ".idx-*")
+	tmp, err := osCreateTemp(filepath.Dir(path), ".idx-*")
 	if err != nil {
 		return err
 	}
@@ -169,10 +194,10 @@ func WriteIndex(path string, ix *Index, fp DiskFingerprint) (err error) {
 		_ = tmp.Close()
 		return err
 	}
-	if err = tmp.Close(); err != nil {
+	if err = closeFile(tmp); err != nil {
 		return err
 	}
-	return os.Rename(tmpName, path)
+	return osRename(tmpName, path)
 }
 
 func appendUint32s(dst []byte, v []uint32) []byte {
@@ -219,7 +244,7 @@ func (m *MappedIndex) Close() error {
 // and the caller's fallback — rebuild, or search exhaustively — is always
 // correct where this would not be.
 func OpenIndex(path string, want DiskFingerprint) (mi *MappedIndex, err error) {
-	f, err := os.Open(path) // #nosec G304 -- path is derived from the cache dir and a repository hash
+	f, err := osOpen(path) // #nosec G304 -- path is derived from the cache dir and a repository hash
 	if err != nil {
 		return nil, err
 	}
@@ -229,7 +254,7 @@ func OpenIndex(path string, want DiskFingerprint) (mi *MappedIndex, err error) {
 		}
 	}()
 
-	data, err := mapFile(f)
+	data, err := mapFileFn(f)
 	if err != nil {
 		return nil, err
 	}
@@ -345,7 +370,7 @@ func uint32sAt(data []byte, off, n int) ([]uint32, int) {
 // fitsUint32 reports an error if any count cannot be written as a uint32.
 func fitsUint32(ns ...int) error {
 	for _, n := range ns {
-		if n < 0 || int64(n) > math.MaxUint32 {
+		if n < 0 || int64(n) > maxIndexDimension {
 			return fmt.Errorf("search: index dimension %d does not fit the on-disk format", n)
 		}
 	}
