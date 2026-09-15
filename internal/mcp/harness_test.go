@@ -76,6 +76,12 @@ func newHarnessWithClient(t *testing.T, opts ServerOptions, clientOpts *mcp.Clie
 	t.Cleanup(func() {
 		_ = session.Close()
 		<-serverDone
+		// Unmap only once the server has stopped and nothing can still be
+		// reading an index. This runs before any TempDir this function created
+		// is removed (cleanups are LIFO) and before one passed in as an
+		// argument, since that TempDir was registered before the call. Windows
+		// cannot delete a mapped file.
+		srv.indexCache.closeAll()
 	})
 	return &harness{t: t, server: srv, session: session}
 }
