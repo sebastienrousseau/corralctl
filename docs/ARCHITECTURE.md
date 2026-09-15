@@ -25,6 +25,8 @@ already-cloned local mirror.
 cmd/corralctl        main(); nothing but a call into cmd
 cmd/                 cobra commands, flag validation, config file
 internal/engine      the reconciliation loop: workers, layout, migration
+internal/forge       one adapter per forge: list an owner (Forge) and hold a mirror (Target)
+internal/mirror      `corralctl sync`: walk the tree, guard, push in parallel
 internal/github      GitHub API client, paging, retry, token resolution
 internal/git         every `git` subprocess, credentials, remote identity
 internal/tui         Bubble Tea progress view and interactive selector

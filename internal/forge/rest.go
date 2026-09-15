@@ -4,6 +4,7 @@
 package forge
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -319,4 +320,84 @@ func pageQueryNamed(page int, sizeParam string, extra url.Values) url.Values {
 	q.Set("page", strconv.Itoa(page))
 	q.Set(sizeParam, strconv.Itoa(perPage))
 	return q
+}
+
+// StatusError reports a response the caller has to interpret: a 404 that
+// means "create it", a 409 that means "somebody already did", or anything
+// else that means stop.
+type StatusError struct {
+	// Status is the HTTP status returned.
+	Status int
+	// URL is the request, with any credential removed.
+	URL string
+	// Body is a short excerpt of the response.
+	Body string
+}
+
+// Error implements error.
+func (e *StatusError) Error() string {
+	return fmt.Sprintf("HTTP %d from %s: %s", e.Status, e.URL, e.Body)
+}
+
+// statusIs reports whether err is a StatusError with the given status.
+func statusIs(err error, status int) bool {
+	var se *StatusError
+	return errors.As(err, &se) && se.Status == status
+}
+
+// call performs one request — GET, POST, whatever — with an optional JSON
+// body and decodes a JSON response into out. It returns the status code
+// alongside the error so a caller can act on a 404 or a 409.
+//
+// Unlike getPage it never retries. A listing can be asked again; a create
+// cannot be, because the first attempt may have succeeded on the far side
+// after the response was lost, and the retry then fails on a conflict the
+// caller has to resolve anyway.
+func (c *restClient) call(ctx context.Context, method, path string, in, out any) (int, error) {
+	u := *c.base
+	u.Path = strings.TrimRight(u.Path, "/") + path
+
+	var body io.Reader
+	if in != nil {
+		b, err := json.Marshal(in)
+		if err != nil {
+			return 0, fmt.Errorf("encoding the request to %s: %w", u.Redacted(), err)
+		}
+		body = bytes.NewReader(b)
+	}
+	req, err := http.NewRequestWithContext(ctx, method, u.String(), body)
+	if err != nil {
+		return 0, err
+	}
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("User-Agent", c.userAgent)
+	if in != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	if c.token != "" {
+		req.Header.Set(c.tokenHeader, c.tokenPrefix+c.token)
+	}
+
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return 0, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, maxBodyBytes))
+	if err != nil {
+		return resp.StatusCode, err
+	}
+	switch {
+	case resp.StatusCode == http.StatusUnauthorized, resp.StatusCode == http.StatusForbidden:
+		return resp.StatusCode, &AuthError{Status: resp.StatusCode, URL: u.Redacted(), Body: snippet(raw)}
+	case resp.StatusCode >= 400:
+		return resp.StatusCode, &StatusError{Status: resp.StatusCode, URL: u.Redacted(), Body: snippet(raw)}
+	}
+	if out != nil && len(bytes.TrimSpace(raw)) > 0 {
+		if err := json.Unmarshal(raw, out); err != nil {
+			return resp.StatusCode, fmt.Errorf("decoding %s: %w", u.Redacted(), err)
+		}
+	}
+	return resp.StatusCode, nil
 }
