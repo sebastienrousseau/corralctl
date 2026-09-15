@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 
 	"github.com/sebastienrousseau/corralctl/internal/mcp"
+	"github.com/sebastienrousseau/corralctl/internal/version"
 	"github.com/spf13/cobra"
 )
 
@@ -187,8 +188,8 @@ func runMCP(cmd *cobra.Command, args []string) error {
 	if p := srv.AuditLogPath(); p != "" {
 		auditNote = p
 	}
-	fmt.Fprintf(os.Stderr, "corral-mcp v%s starting; root=%s mutations=%t destructive=%t audit=%s\n",
-		Version, srv.Root(), srv.MutationsEnabled(), mcpEnableDestructiveMutations, auditNote)
+	fmt.Fprintf(os.Stderr, "corral-mcp %s starting; root=%s mutations=%t destructive=%t audit=%s\n",
+		version.Display(Version), srv.Root(), srv.MutationsEnabled(), mcpEnableDestructiveMutations, auditNote)
 
 	if mcpHTTP != "" {
 		fmt.Fprintf(os.Stderr, "corral-mcp listening on http://%s\n", mcpHTTP)
