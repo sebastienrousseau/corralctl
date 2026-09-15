@@ -34,3 +34,7 @@ docs-site/content/reference.md
 
 # Generated manpages and completions (see scripts/gen_docs.go)
 build/
+
+# Compiled test binaries. `go test -c` and `go test -o` leave these behind, and
+# one (mcp.test, 16.6MB) was committed before this rule existed.
+*.test
