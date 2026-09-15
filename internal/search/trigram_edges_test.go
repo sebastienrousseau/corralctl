@@ -62,6 +62,10 @@ func allowAll(string) bool { return true }
 func TestBuildIndexAcceptsNilContext(t *testing.T) {
 	root := t.TempDir()
 	writeFile(t, root, "a.go", "package a\nfunc Alpha() {}\n")
+	// Both directives are needed: CI runs staticcheck standalone, which reads
+	// //lint:ignore and not //nolint; `make lint` runs it under golangci-lint,
+	// which reads //nolint and strips //lint:ignore.
+	//lint:ignore SA1012 a nil context is exactly what is under test
 	//nolint:staticcheck // a nil context is exactly what is under test
 	ix, err := BuildIndex(nil, root, allowAll)
 	if err != nil {
@@ -235,6 +239,7 @@ func TestFingerprintDescribesTheTree(t *testing.T) {
 	writeFile(t, root, "a.go", "package a\n")
 	writeFile(t, root, "b.go", "package b\nfunc B() {}\n")
 
+	//lint:ignore SA1012 nil context is part of the contract
 	//nolint:staticcheck // nil context is part of the contract
 	fp, err := Fingerprint(nil, root, allowAll)
 	if err != nil {
@@ -297,6 +302,7 @@ func TestSearchRepoPathsAcceptsNilContext(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	//lint:ignore SA1012 a nil context is part of the contract
 	//nolint:staticcheck // a nil context is part of the contract
 	res, err := SearchRepoPaths(nil, root, m, []string{"a.go"}, false)
 	if err != nil {
