@@ -17,6 +17,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/sebastienrousseau/corralctl/internal/github"
+	"github.com/sebastienrousseau/corralctl/internal/version"
 )
 
 // Version is the build version of Corral, rendered in the TUI footer.
@@ -805,12 +806,8 @@ func (m *selectorModel) renderHelpPanel() string {
 }
 
 func (m *selectorModel) renderFooter() string {
-	vStr := Version
-	if vStr == "" {
-		vStr = "dev"
-	}
 	left := " ? for commands"
-	right := fmt.Sprintf("Made with ❤️ in London, UK (v%s)", vStr)
+	right := fmt.Sprintf("Made with ❤️ in London, UK (%s)", version.Display(Version))
 
 	leftLen := len(left)
 	rightRunes := []rune(right)
