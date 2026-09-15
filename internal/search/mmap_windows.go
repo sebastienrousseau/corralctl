@@ -44,6 +44,21 @@ func mapFile(f *os.File) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("MapViewOfFile: %w", err)
 	}
+	// `GOOS=windows go vet` reports "possible misuse of unsafe.Pointer" on the
+	// line below, and there is no formulation that avoids it: MapViewOfFile
+	// returns a uintptr and Windows offers no variant that returns a pointer.
+	// Every mmap package in the ecosystem converts here.
+	//
+	// The conversion is sound. `addr` names a kernel mapping, not Go-managed
+	// memory: the garbage collector neither moves it nor reclaims it, and it
+	// stays valid until UnmapViewOfFile. The uintptr is converted immediately,
+	// in the same statement it is produced, so there is no window in which the
+	// address is held as an integer across something that could invalidate it —
+	// which is the hazard the check exists to catch.
+	//
+	// It does not fail CI today: the Vet step runs on Linux, which does not
+	// compile this file. It is recorded here so the next person to run a
+	// Windows vet knows it was seen and judged, not missed.
 	return unsafe.Slice((*byte)(unsafe.Pointer(addr)), int(size)), nil
 }
 

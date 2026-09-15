@@ -95,6 +95,13 @@ func TestIndexCacheHoldsMappingWhileInUse(t *testing.T) {
 // rather than as a wrong answer.
 func TestIndexCacheConcurrentUse(t *testing.T) {
 	dir := t.TempDir()
+	// Every directory the replacements will use exists before closeAll is
+	// registered, so closeAll (cleanups are LIFO) unmaps before any of them is
+	// removed. Windows cannot delete a mapped file.
+	spare := make([]string, 10)
+	for i := range spare {
+		spare[i] = t.TempDir()
+	}
 	c := newIndexCache()
 	c.put("repo", mappedFor(t, dir))
 	t.Cleanup(c.closeAll)
@@ -124,7 +131,7 @@ func TestIndexCacheConcurrentUse(t *testing.T) {
 	go func() {
 		defer wg.Done()
 		for j := 0; j < 10; j++ {
-			c.put("repo", mappedFor(t, t.TempDir()))
+			c.put("repo", mappedFor(t, spare[j]))
 		}
 	}()
 	wg.Wait()

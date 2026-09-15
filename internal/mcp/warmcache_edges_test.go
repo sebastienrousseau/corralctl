@@ -100,14 +100,18 @@ func TestIndexCacheExpiryDropsTheEntry(t *testing.T) {
 }
 
 func TestIndexCachePutIgnoresNilAndReplaces(t *testing.T) {
+	// Both directories exist before the cache does, so closeAll — registered
+	// after them — unmaps before they are removed. Windows cannot delete a
+	// mapped file.
+	first, second := t.TempDir(), t.TempDir()
 	c := newIndexCache()
 	t.Cleanup(c.closeAll)
 	c.put("repo", nil)
 	if n, _ := c.stats(); n != 0 {
 		t.Errorf("a nil index was stored: %d entries", n)
 	}
-	c.put("repo", mappedFor(t, t.TempDir()))
-	c.put("repo", mappedFor(t, t.TempDir())) // replaces, unmapping the first
+	c.put("repo", mappedFor(t, first))
+	c.put("repo", mappedFor(t, second)) // replaces, unmapping the first
 	if n, _ := c.stats(); n != 1 {
 		t.Errorf("replacing an entry left %d", n)
 	}
