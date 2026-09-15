@@ -1,0 +1,74 @@
+# SPDX-FileCopyrightText: 2026 Sebastien Rousseau <sebastian.rousseau@gmail.com>
+# SPDX-License-Identifier: GPL-3.0-only
+
+name: Repo Hygiene
+
+# No build output may be committed.
+#
+# On 2026-09-15, PR #147 landed `mcp.test` on `main`: a 16.6MB compiled test
+# binary left behind by `go test -c` and swept up by a `git add`. It passed all
+# thirty-one checks on that pull request, because none of them looked at what
+# the diff contained — only at whether the code built, tested, linted and
+# scanned clean. It did.
+#
+# Removing it from HEAD does not undo the cost. A blob in history is downloaded
+# by every future `git clone`, and purging it would mean rewriting `main`, which
+# is not worth doing for 16MB. The cheap fix is to never accept a second one.
+#
+# `.gitignore` carries `*.test`, but .gitignore is a convenience, not a control:
+# it is silent about files already tracked, and `git add -f` walks straight past
+# it. This job is the control.
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+
+permissions: {}
+
+jobs:
+  no-build-output:
+    name: No committed build output
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v6.0.1
+        with:
+          persist-credentials: false
+          show-progress: false
+
+      - name: Reject compiled artefacts and oversized blobs
+        env:
+          MAX_BYTES: "1048576" # 1MiB. Nothing legitimate here is close.
+        run: |
+          set -euo pipefail
+
+          fail=0
+
+          # Compiled Go test binaries. `go test -c` names them <pkg>.test, and
+          # that is the artefact which actually got committed.
+          while IFS= read -r f; do
+            [ -n "$f" ] || continue
+            echo "::error file=${f}::${f} is a compiled test binary (go test -c output). Delete it; *.test is gitignored."
+            fail=1
+          done < <(git ls-tree -r --name-only HEAD | grep '\.test$' || true)
+
+          # Anything unreasonably large, whatever it is called. Read from the
+          # tree rather than the worktree, so a build artefact generated during
+          # CI cannot mask or trigger it.
+          # Fields are: mode type object size <TAB> path. Named `blob_path`,
+          # not `path`: in zsh that name is tied to $PATH, so anyone who pastes
+          # this loop into their shell to try it loses every command on it.
+          while read -r _ _ _ size blob_path; do
+            [ -n "${blob_path:-}" ] || continue
+            [ "$size" -gt "$MAX_BYTES" ] || continue
+            echo "::error file=${blob_path}::${blob_path} is ${size} bytes, over the ${MAX_BYTES}-byte limit for a tracked file. If it genuinely belongs in the repository, raise MAX_BYTES in this workflow in the same pull request and say why."
+            fail=1
+          done < <(git ls-tree -r --long HEAD)
+
+          if [ "$fail" -ne 0 ]; then
+            exit 1
+          fi
+          echo "No compiled artefacts, nothing over ${MAX_BYTES} bytes."
