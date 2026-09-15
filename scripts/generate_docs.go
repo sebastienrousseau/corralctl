@@ -254,8 +254,8 @@ func formatDecl(fset *token.FileSet, decl ast.Decl) string {
 }
 
 const (
-	modulePath = "github.com/sebastienrousseau/corral"
-	sourceRoot = "https://github.com/sebastienrousseau/corral/tree/main"
+	modulePath = "github.com/sebastienrousseau/corralctl"
+	sourceRoot = "https://github.com/sebastienrousseau/corralctl/tree/main"
 )
 
 // skipDirs are directories that hold Go files which are not part of the

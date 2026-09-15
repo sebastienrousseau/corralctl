@@ -27,9 +27,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/sebastienrousseau/corral/internal/diag"
-	"github.com/sebastienrousseau/corral/internal/git"
-	"github.com/sebastienrousseau/corral/internal/sanitize"
+	"github.com/sebastienrousseau/corralctl/internal/diag"
+	"github.com/sebastienrousseau/corralctl/internal/git"
+	"github.com/sebastienrousseau/corralctl/internal/sanitize"
 )
 
 // RepoEntry is one row in the workspace index. It captures the information

@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sebastienrousseau/corral/internal/engine"
+	"github.com/sebastienrousseau/corralctl/internal/engine"
 )
 
 func TestCloneRunsTheSameOperationAsTheRoot(t *testing.T) {

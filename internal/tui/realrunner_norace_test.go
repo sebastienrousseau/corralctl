@@ -10,7 +10,7 @@ import (
 	"runtime"
 	"testing"
 
-	"github.com/sebastienrousseau/corral/internal/github"
+	"github.com/sebastienrousseau/corralctl/internal/github"
 )
 
 // assertCancelledRunnerErrors exercises the real runSelectorProgram — the thin

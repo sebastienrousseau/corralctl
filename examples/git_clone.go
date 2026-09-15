@@ -11,13 +11,13 @@ import (
 	"log"
 	"os"
 
-	"github.com/sebastienrousseau/corral/internal/git"
+	"github.com/sebastienrousseau/corralctl/internal/git"
 )
 
 func main() {
 	ctx := context.Background()
 
-	repoURL := "https://github.com/sebastienrousseau/corral.git"
+	repoURL := "https://github.com/sebastienrousseau/corralctl.git"
 	targetDir := "./tmp_corral_clone"
 
 	defer func() {

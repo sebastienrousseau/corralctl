@@ -9,8 +9,8 @@ import "testing"
 // panic when processing arbitrary malformed remote URL inputs.
 func FuzzParseOwnerFromURL(f *testing.F) {
 	for _, seed := range []string{
-		"https://github.com/sebastienrousseau/corral.git",
-		"git@github.com:sebastienrousseau/corral.git",
+		"https://github.com/sebastienrousseau/corralctl.git",
+		"git@github.com:sebastienrousseau/corralctl.git",
 		"https://git.company.com/parent/sub/owner/repo.git",
 		"git@github-personal:owner/repo.git",
 		"",

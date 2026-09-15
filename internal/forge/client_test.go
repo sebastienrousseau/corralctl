@@ -16,7 +16,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sebastienrousseau/corral/internal/github"
+	"github.com/sebastienrousseau/corralctl/internal/github"
 )
 
 // The clients are driven against a real HTTP server rather than a stubbed

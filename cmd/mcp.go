@@ -10,7 +10,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/sebastienrousseau/corral/internal/mcp"
+	"github.com/sebastienrousseau/corralctl/internal/mcp"
 	"github.com/spf13/cobra"
 )
 

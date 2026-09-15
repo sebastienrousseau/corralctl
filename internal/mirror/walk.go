@@ -10,7 +10,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/sebastienrousseau/corral/internal/git"
+	"github.com/sebastienrousseau/corralctl/internal/git"
 )
 
 // Seams for the walk, so the error branches are reachable without a

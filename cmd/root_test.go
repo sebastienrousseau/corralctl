@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sebastienrousseau/corral/internal/engine"
+	"github.com/sebastienrousseau/corralctl/internal/engine"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 )

@@ -11,7 +11,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sebastienrousseau/corral/internal/mcp"
+	"github.com/sebastienrousseau/corralctl/internal/mcp"
 )
 
 // stubMCPServer is the mcpServer implementation the tests inject via

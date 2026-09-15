@@ -11,8 +11,8 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/sebastienrousseau/corral/cmd"
-	"github.com/sebastienrousseau/corral/internal/git"
+	"github.com/sebastienrousseau/corralctl/cmd"
+	"github.com/sebastienrousseau/corralctl/internal/git"
 )
 
 var (

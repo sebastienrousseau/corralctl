@@ -11,7 +11,7 @@
  * preference at all — which is most readers. The gate checks each of them
  * independently, because the third is the one a recolour forgets.
  *
- * The palette is Corral's own: the coral gradient from assets/logo.svg
+ * The palette is corralctl's own: the coral gradient from assets/logo.svg
  * (#F87171 → #F56B5E → #9F1239). It was the Lucid theme's default blue until
  * the site was checked against the logo it sits beside.
  */

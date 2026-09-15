@@ -1,6 +1,6 @@
 <!-- SPDX-License-Identifier: GPL-3.0-only -->
 
-# Working on Corral as an AI agent
+# Working on corralctl as an AI agent
 
 Invariants for AI-assisted contributions. These are the things that are
 expensive to discover from the diff alone, and the ones where a plausible

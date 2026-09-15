@@ -19,7 +19,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sebastienrousseau/corral/internal/diag"
+	"github.com/sebastienrousseau/corralctl/internal/diag"
 )
 
 // TokenProvider, when set, returns a GitHub token used to authenticate HTTPS

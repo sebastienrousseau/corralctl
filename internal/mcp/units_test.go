@@ -14,7 +14,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sebastienrousseau/corral/internal/diag"
+	"github.com/sebastienrousseau/corralctl/internal/diag"
 )
 
 // Unit tests for helpers that do not touch the MCP protocol. Carried over

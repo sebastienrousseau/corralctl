@@ -1,4 +1,4 @@
-module github.com/sebastienrousseau/corral
+module github.com/sebastienrousseau/corralctl
 
 go 1.26.6
 

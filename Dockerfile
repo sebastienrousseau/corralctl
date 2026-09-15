@@ -3,7 +3,7 @@
 
 # syntax=docker/dockerfile:1.7@sha256:a57df69d0ea827fb7266491f2813635de6f17269be881f696fbfdf2d83dda33e
 #
-# Runtime image for the Corral MCP server.
+# Runtime image for the corralctl MCP server.
 #
 # The binary is expected to already be built by goreleaser and dropped at
 # the build context root as `corralctl`. Do NOT compile from source in this
@@ -12,8 +12,8 @@
 #
 # The `io.modelcontextprotocol.server.name` LABEL is the ownership marker
 # the MCP registry uses to verify that
-# https://ghcr.io/sebastienrousseau/corral belongs to the
-# io.github.sebastienrousseau/corral server entry.
+# https://ghcr.io/sebastienrousseau/corralctl belongs to the
+# io.github.sebastienrousseau/corralctl server entry.
 #
 # Base image is pinned to a digest per OpenSSF Scorecard
 # PinnedDependenciesID: an immutable reference protects the release
@@ -34,15 +34,15 @@ RUN apk add --no-cache git ca-certificates \
 COPY corralctl /usr/local/bin/corralctl
 
 # OCI-standard labels for image indexing.
-LABEL org.opencontainers.image.source="https://github.com/sebastienrousseau/corral" \
-      org.opencontainers.image.description="Corral: local index for AI coding agents. MCP server exposes the Corral-organised workspace to Claude Code, Cursor, Cline, and other MCP clients." \
+LABEL org.opencontainers.image.source="https://github.com/sebastienrousseau/corralctl" \
+      org.opencontainers.image.description="corralctl: local index for AI coding agents. MCP server exposes the corralctl-organised workspace to Claude Code, Cursor, Cline, and other MCP clients." \
       org.opencontainers.image.licenses="GPL-3.0" \
       org.opencontainers.image.title="corral" \
       org.opencontainers.image.vendor="Sebastien Rousseau"
 
 # MCP registry ownership label. MUST match the `name` field in server.json;
 # the registry rejects publish attempts when they diverge.
-LABEL io.modelcontextprotocol.server.name="io.github.sebastienrousseau/corral"
+LABEL io.modelcontextprotocol.server.name="io.github.sebastienrousseau/corralctl"
 
 USER 65532:65532
 WORKDIR /home/corral
