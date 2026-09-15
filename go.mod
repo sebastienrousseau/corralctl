@@ -12,7 +12,7 @@ require (
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/pflag v1.0.10
 	go.uber.org/goleak v1.3.0
-	golang.org/x/sys v0.47.0
+	golang.org/x/sys v0.48.0
 	howett.net/plist v1.0.1
 )
 
