@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -38,9 +39,54 @@ import (
 // an agent's session re-parsing files that had not changed.
 const symbolCacheTTL = 2 * time.Minute
 
-// maxCachedRepos bounds the symbol cache. An agent sweeping a large
-// workspace would otherwise hold every repository's symbols at once.
-const maxCachedRepos = 24
+// The symbol cache is bounded by symbols held, not by repositories held, and
+// it declines to evict a fresh entry in order to admit another.
+//
+// It used to cap at 24 repositories and evict by earliest expiry. Both were
+// wrong for the access pattern that dominates — an unfiltered query, which
+// touches every repository in the workspace.
+//
+// A repository count bounds entries, not memory: measured on a 234-repository
+// workspace, one repository held 200,000 symbols and the median held 2,307.
+//
+// Equal TTLs make "evict the earliest expiry" into FIFO, and FIFO against a
+// sequential sweep of N items through a cache of M < N is the pessimal case:
+// it evicts precisely what the next call asks for first, so the hit rate is
+// zero however large M is, short of N. That is why the old cache did not merely
+// help less than it could — it could not help at all with the call that needed
+// it most, and each query left the cache no warmer than the last.
+//
+// A miss is expensive even when the on-disk cache holds the answer, because the
+// fingerprint keying that cache is computed by walking and stat-ing every source
+// file in the repository, so a miss pays the walk whether or not it avoids the
+// parse. That is what put corral_find_symbol at a 20.1s p95, and what made it
+// 60s on a busy machine.
+//
+// The budget is in symbols because that is what occupies memory. Measured on
+// the same workspace: 539,879 symbols retained 260.5MB, or 506 bytes each —
+// so the default below is about 126MB. It is deliberately not large enough to
+// hold every workspace; what stops a cache that cannot fit everything from
+// being useless is the admission policy, not the size.
+const defaultMaxCachedSymbols = 250_000
+
+// maxCachedSymbols is the budget in force. Overridable because the right
+// number depends on how much memory the machine can spare, and a server
+// indexing someone's whole workspace should not be the thing that decides.
+var maxCachedSymbols = envInt("CORRAL_SYMBOL_CACHE_SYMBOLS", defaultMaxCachedSymbols)
+
+// maxEntryShare caps how much of the budget a single repository may occupy.
+//
+// Without it one outlier evicts the workspace: the 200,000-symbol repository
+// above is 80% of the default budget on its own, so caching it would drop
+// almost everything else, and the next query would re-extract all of it. A
+// repository over this share is simply not cached — it pays its own cost
+// rather than charging it to the other 233.
+const maxEntryShare = 4
+
+// maxCachedRepos is a ceiling on entries regardless of how small each is, so a
+// workspace of thousands of tiny repositories cannot grow the map without
+// bound.
+const maxCachedRepos = 2048
 
 // symbolEntry is one repository's cached extraction.
 type symbolEntry struct {
@@ -57,6 +103,9 @@ type symbolEntry struct {
 type symbolCache struct {
 	mu      sync.Mutex
 	entries map[string]symbolEntry
+	// symbols tracks the total held, so the budget does not require walking
+	// every entry on each insert.
+	symbols int
 }
 
 func newSymbolCache() *symbolCache {
@@ -68,34 +117,81 @@ func (c *symbolCache) get(path string) (*symbols.Result, bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	e, ok := c.entries[path]
-	if !ok || time.Now().After(e.expires) {
+	if !ok {
+		return nil, false
+	}
+	if time.Now().After(e.expires) {
+		// Drop it here rather than leave it to the next insert, so the
+		// counter cannot drift above what is actually reachable.
+		c.symbols -= len(e.result.Symbols)
+		delete(c.entries, path)
 		return nil, false
 	}
 	return e.result, true
 }
 
-// put stores an extraction, evicting to stay within maxCachedRepos.
+// put stores an extraction if it fits.
+//
+// Expired entries are dropped first — they are free to release. If the cache is
+// still at budget after that, the new entry is NOT admitted: everything left is
+// fresh, and evicting a fresh entry to make room is what turned a full-workspace
+// sweep into a cache that never held anything. Declining instead gives a stable
+// resident set, so a sweep that cannot fit still hits on the part that does.
 func (c *symbolCache) put(path string, res *symbols.Result) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	now := time.Now()
-	if len(c.entries) >= maxCachedRepos {
+	incoming := len(res.Symbols)
+
+	// One repository must not be able to evict the workspace.
+	if incoming > maxCachedSymbols/maxEntryShare {
+		return
+	}
+
+	// Replacing an entry must not double-count its symbols.
+	if old, ok := c.entries[path]; ok {
+		c.symbols -= len(old.result.Symbols)
+		delete(c.entries, path)
+	}
+
+	if c.overBudget(incoming) {
 		for k, e := range c.entries {
 			if now.After(e.expires) {
+				c.symbols -= len(e.result.Symbols)
 				delete(c.entries, k)
 			}
 		}
 	}
-	for len(c.entries) >= maxCachedRepos {
-		oldest, at := "", time.Time{}
-		for k, e := range c.entries {
-			if at.IsZero() || e.expires.Before(at) {
-				oldest, at = k, e.expires
-			}
-		}
-		delete(c.entries, oldest)
+	if c.overBudget(incoming) {
+		// Full of fresh entries. Keep them.
+		return
 	}
+
 	c.entries[path] = symbolEntry{result: res, expires: now.Add(symbolCacheTTL)}
+	c.symbols += incoming
+}
+
+// overBudget reports whether admitting n more symbols would exceed either
+// bound.
+func (c *symbolCache) overBudget(incoming int) bool {
+	return c.symbols+incoming > maxCachedSymbols || len(c.entries) >= maxCachedRepos
+}
+
+// envInt reads a positive integer from the environment, falling back to def.
+//
+// A zero, negative or unparseable value falls back rather than erroring: a
+// typo in an environment variable should not stop the server from starting,
+// and the cost of the fallback is a cache of the default size.
+func envInt(name string, def int) int {
+	raw := strings.TrimSpace(os.Getenv(name))
+	if raw == "" {
+		return def
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil || n <= 0 {
+		return def
+	}
+	return n
 }
 
 // symbolsFor extracts one repository's symbols through two caches.
@@ -186,9 +282,10 @@ func (s *Server) registerSymbolTools() {
 }
 
 // handleFindSymbol resolves a symbol across one repository or all of them.
-func (s *Server) handleFindSymbol(ctx context.Context, _ *mcp.CallToolRequest, in findSymbolInput) (*mcp.CallToolResult, any, error) {
+func (s *Server) handleFindSymbol(ctx context.Context, _ *mcp.CallToolRequest, in findSymbolInput) (*mcp.CallToolResult, FindSymbolOutput, error) {
+	s.noteSymbolQuery()
 	if strings.TrimSpace(in.Name) == "" {
-		return toolError("name must not be empty"), nil, nil
+		return nil, FindSymbolOutput{}, fmt.Errorf("name must not be empty")
 	}
 
 	query := symbols.Query{
@@ -202,34 +299,23 @@ func (s *Server) handleFindSymbol(ctx context.Context, _ *mcp.CallToolRequest, i
 		if err != nil {
 			// A filter that cannot be honoured is an error, never an empty
 			// result: the two are indistinguishable to the caller.
-			return toolError("%v", err), nil, nil
+			return nil, FindSymbolOutput{}, err
 		}
 		query.Kind = kind
 	}
 
 	idx, err := s.scan()
 	if err != nil {
-		return toolError("scan workspace: %v", err), nil, nil
+		return nil, FindSymbolOutput{}, fmt.Errorf("scan workspace: %v", err)
 	}
 
 	targets := idx.Repos
 	if in.Repo != "" {
 		match, err := idx.Find(in.Repo)
 		if err != nil {
-			return toolError("%v", err), nil, nil
+			return nil, FindSymbolOutput{}, err
 		}
 		targets = []RepoEntry{*match}
-	}
-
-	type hit struct {
-		Repo     string       `json:"repo"`
-		Symbol   string       `json:"symbol"`
-		Kind     symbols.Kind `json:"kind"`
-		File     string       `json:"file"`
-		Line     int          `json:"line"`
-		Exported bool         `json:"exported"`
-		Language string       `json:"language"`
-		Test     bool         `json:"test,omitempty"`
 	}
 
 	// Repositories are searched concurrently.
@@ -245,7 +331,7 @@ func (s *Server) handleFindSymbol(ctx context.Context, _ *mcp.CallToolRequest, i
 	// into contention and makes the whole thing slower.
 	var (
 		mu        sync.Mutex
-		hits      []hit
+		hits      []SymbolHit
 		truncated []string
 		scanned   int
 		next      atomic.Int64
@@ -276,12 +362,12 @@ func (s *Server) handleFindSymbol(ctx context.Context, _ *mcp.CallToolRequest, i
 
 				// Filtering happens outside the lock, so the shared state
 				// is held only for the append.
-				var local []hit
+				var local []SymbolHit
 				for _, sym := range res.Symbols {
 					if !query.Match(sym) {
 						continue
 					}
-					local = append(local, hit{
+					local = append(local, SymbolHit{
 						Repo:     red.RelPath,
 						Symbol:   sanitize.Untrusted(sym.Qualified(), maxEntryName),
 						Kind:     sym.Kind,
@@ -312,7 +398,12 @@ func (s *Server) handleFindSymbol(ctx context.Context, _ *mcp.CallToolRequest, i
 		// still act on. This is the protocol's convention, not an
 		// oversight.
 		//nolint:nilerr // deliberate: cancellation is a tool result, not an error
-		return toolError("cancelled after %d repositories", scanned), nil, nil
+		return toolError("cancelled after %d repositories", scanned), FindSymbolOutput{
+			Query:              in.Name,
+			RepositoriesSearch: scanned,
+			Symbols:            []SymbolHit{},
+			Note:               "Cancelled before every repository was searched; the counts are partial.",
+		}, nil
 	}
 	// Workers finish in an arbitrary order, so this list is arbitrary
 	// until the sort below. The truncation list needs its own ordering for
@@ -346,42 +437,49 @@ func (s *Server) handleFindSymbol(ctx context.Context, _ *mcp.CallToolRequest, i
 		hits = hits[:limit]
 	}
 
-	body := map[string]any{
-		"query":               in.Name,
-		"repositories_search": scanned,
-		"total_matched":       total,
-		"returned":            len(hits),
-		"symbols":             hits,
+	// Empty, not null: the schema says `array`, and "no match" is the answer
+	// this tool gives most often.
+	if hits == nil {
+		hits = []SymbolHit{}
+	}
+
+	body := FindSymbolOutput{
+		Query:              in.Name,
+		RepositoriesSearch: scanned,
+		TotalMatched:       total,
+		Returned:           len(hits),
+		Symbols:            hits,
 	}
 	if total == 0 {
-		body["note"] = "No match. Symbols come from " + strings.Join(symbols.Languages(), ", ") +
+		body.Note = "No match. Symbols come from " + strings.Join(symbols.Languages(), ", ") +
 			" sources only; try substring:true, or include_tests:true if it is declared in a test."
 	}
 	if total > len(hits) {
-		body["note"] = "More matches than the limit; narrow with kind, repo or exported_only."
+		body.Note = "More matches than the limit; narrow with kind, repo or exported_only."
 	}
 	if len(truncated) > 0 {
 		// A silently partial index is worse than a slow one: the caller
 		// cannot tell a missing symbol from an absent one.
-		body["indexes_truncated"] = truncated
-		body["indexes_truncated_note"] = "These repositories exceeded the per-repository file or symbol cap; their results are incomplete."
+		body.IndexesTruncated = truncated
+		body.IndexesTruncatedNote = "These repositories exceeded the per-repository file or symbol cap; their results are incomplete."
 	}
-	return jsonResult(body), nil, nil
+	return jsonResult(body), body, nil
 }
 
 // handleRepoOverview summarises one repository in a single call.
-func (s *Server) handleRepoOverview(ctx context.Context, _ *mcp.CallToolRequest, in repoOverviewInput) (*mcp.CallToolResult, any, error) {
+func (s *Server) handleRepoOverview(ctx context.Context, _ *mcp.CallToolRequest, in repoOverviewInput) (*mcp.CallToolResult, RepoOverviewOutput, error) {
+	s.noteSymbolQuery()
 	idx, err := s.scan()
 	if err != nil {
-		return toolError("scan workspace: %v", err), nil, nil
+		return nil, RepoOverviewOutput{}, fmt.Errorf("scan workspace: %v", err)
 	}
 	match, err := idx.Find(in.Query)
 	if err != nil {
-		return toolError("%v", err), nil, nil
+		return nil, RepoOverviewOutput{}, err
 	}
 	res, err := s.symbolsFor(ctx, match)
 	if err != nil {
-		return toolError("index %s: %v", match.Redacted().RelPath, err), nil, nil
+		return nil, RepoOverviewOutput{}, fmt.Errorf("index %s: %v", match.Redacted().RelPath, err)
 	}
 
 	byKind := map[symbols.Kind]int{}
@@ -407,29 +505,29 @@ func (s *Server) handleRepoOverview(ctx context.Context, _ *mcp.CallToolRequest,
 
 	const maxListed = 25
 	red := match.Redacted()
-	body := map[string]any{
-		"repo":       red.RelPath,
-		"path":       red.Path,
-		"remote_url": red.RemoteURL,
-		"language":   red.Language,
-		"visibility": red.Visibility,
-		"files":      res.Files,
-		"declarations": map[string]int{
-			"func": byKind[symbols.KindFunc], "method": byKind[symbols.KindMethod],
-			"type": byKind[symbols.KindType], "interface": byKind[symbols.KindInterface],
-			"const": byKind[symbols.KindConst], "var": byKind[symbols.KindVar],
+	body := RepoOverviewOutput{
+		Repo:       red.RelPath,
+		Path:       red.Path,
+		RemoteURL:  red.RemoteURL,
+		Language:   red.Language,
+		Visibility: red.Visibility,
+		Files:      res.Files,
+		Declarations: DeclarationCounts{
+			Func: byKind[symbols.KindFunc], Method: byKind[symbols.KindMethod],
+			Type: byKind[symbols.KindType], Interface: byKind[symbols.KindInterface],
+			Const: byKind[symbols.KindConst], Var: byKind[symbols.KindVar],
 		},
-		"exported_types":     capList(exportedTypes, maxListed),
-		"exported_functions": capList(exportedFuncs, maxListed),
+		ExportedTypes:     emptyIfNil(capList(exportedTypes, maxListed)),
+		ExportedFunctions: emptyIfNil(capList(exportedFuncs, maxListed)),
 	}
 	if res.Truncated {
-		body["truncated"] = true
-		body["truncated_note"] = "This repository exceeded the per-repository file or symbol cap; the counts are a lower bound."
+		body.Truncated = true
+		body.TruncatedNote = "This repository exceeded the per-repository file or symbol cap; the counts are a lower bound."
 	}
 	if len(exportedTypes) > maxListed || len(exportedFuncs) > maxListed {
-		body["note"] = fmt.Sprintf("Lists are capped at %d; use corral_find_symbol for the rest.", maxListed)
+		body.Note = fmt.Sprintf("Lists are capped at %d; use corral_find_symbol for the rest.", maxListed)
 	}
-	return jsonResult(body), nil, nil
+	return jsonResult(body), body, nil
 }
 
 // capList truncates a list to at most n entries.

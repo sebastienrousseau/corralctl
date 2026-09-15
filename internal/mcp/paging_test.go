@@ -111,9 +111,21 @@ func TestProjectReposConciseIsMuchSmaller(t *testing.T) {
 // An unrecognised format must degrade to the cheap shape rather than erroring,
 // so a model that invents a value does not get a failure it must recover from.
 func TestProjectReposUnknownFormatIsConcise(t *testing.T) {
+	// Asserted on the projection's content rather than its Go type. Both
+	// shapes are now one struct — which is what lets a single output schema
+	// describe either — so "is it concise" is a question about which fields
+	// were filled, not about which type came back.
 	out := projectRepos(makeEntries(2), "verbose-please")
-	if _, ok := out.([]conciseRepo); !ok {
-		t.Errorf("unknown format returned %T, want the concise projection", out)
+	if len(out) != 2 {
+		t.Fatalf("got %d entries, want 2", len(out))
+	}
+	for i, r := range out {
+		if r.RelPath == "" || r.Name == "" {
+			t.Errorf("entry %d lost its identity: %+v", i, r)
+		}
+		if r.Path != "" || r.RemoteURL != "" || r.State != nil {
+			t.Errorf("entry %d carries detailed fields for an unknown format: %+v", i, r)
+		}
 	}
 }
 

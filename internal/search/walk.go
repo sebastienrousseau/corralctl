@@ -4,7 +4,6 @@
 package search
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"io"
@@ -31,7 +30,16 @@ var (
 	maxFileBytes int64 = 2 << 20 // 2 MiB
 	// maxLineBytes bounds one line. A minified file is a single enormous
 	// line; matching in it is useless and buffering it is expensive.
-	maxLineBytes = 4096
+	//
+	// 64 KiB, not the 4096 this constant held before, because 4096 was never
+	// the limit that applied. It was passed as bufio.Scanner's maxTokenSize,
+	// and a Scanner only consults that when it has to GROW its buffer — the
+	// buffer here started at 64 KiB, so any line up to that size was returned
+	// whole and a hit on a 5000-byte line was reported. Reading the file
+	// directly makes whatever number is here the real one, so it is set to
+	// what the code actually did rather than to what the constant claimed.
+	// TestSearchCodeBoundsTheReportedLine pins that behaviour.
+	maxLineBytes = 64 << 10
 	// maxHitTextBytes bounds the reported text of a hit, before the MCP
 	// layer sanitises it further.
 	maxHitTextBytes = 400
@@ -124,14 +132,36 @@ func SearchRepo(ctx context.Context, root string, m *Matcher, allowed FileFilter
 		ctx = context.Background()
 	}
 
-	paths, truncated, err := discover(ctx, root, m, allowed)
+	paths, hitFileCap, skippedLarge, err := discover(ctx, root, m.IncludeTests(), m.pathGlob, allowed)
 	if err != nil {
 		return nil, err
 	}
+	// Either bound means the answer is partial, and a caller is told so.
+	return searchPaths(ctx, root, m, paths, hitFileCap || skippedLarge), nil
+}
 
+// SearchRepoPaths searches only the listed files.
+//
+// Used with a trigram index, which decides which files could possibly match so
+// the rest are never opened. Everything after that point — reading, matching,
+// bounding, ordering — is the same code the full walk runs, so an indexed
+// search and an exhaustive one cannot disagree about a file they both read.
+// TestIndexedSearchMatchesExhaustive asserts that over a tree of both.
+//
+// paths must be in walk order and already filtered by the query's path_glob
+// and include_tests, since those are per-query and the index is not.
+func SearchRepoPaths(ctx context.Context, root string, m *Matcher, paths []string, truncated bool) (*Result, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return searchPaths(ctx, root, m, paths, truncated), nil
+}
+
+// searchPaths is the shared body: read these files, report the matches.
+func searchPaths(ctx context.Context, root string, m *Matcher, paths []string, truncated bool) *Result {
 	res := &Result{Files: len(paths), Truncated: truncated}
 	if len(paths) == 0 {
-		return res, nil
+		return res
 	}
 
 	var (
@@ -149,12 +179,22 @@ func SearchRepo(ctx context.Context, root string, m *Matcher, allowed FileFilter
 			// Each worker accumulates locally and merges once, so the
 			// mutex is contended per worker rather than per file.
 			var local []Hit
+			// One read buffer per worker, not per file.
+			//
+			// This was a sync.Pool, which looked right and was not: a
+			// workspace search runs hundreds of goroutines, a Pool is
+			// per-P with a shared overflow, and GC drains it every cycle,
+			// so Get missed far more often than it hit. Every miss
+			// allocated 64KB, and readBounded became 2.15GB — 55% of all
+			// allocation in a query. A worker outlives every file it
+			// reads, so the buffer belongs to it.
+			buf := &fileBuffers{data: make([]byte, 0, 64*1024)}
 			for {
 				i := int(next.Add(1)) - 1
 				if i >= len(paths) || ctx.Err() != nil || hitsCap.Load() {
 					break
 				}
-				fileHits, more := searchFile(root, paths[i], m)
+				fileHits, more := searchFile(root, paths[i], m, buf)
 				local = append(local, fileHits...)
 				if more {
 					// The file had matches this result will not carry, so
@@ -201,14 +241,23 @@ func SearchRepo(ctx context.Context, root string, m *Matcher, allowed FileFilter
 	if hitsCap.Load() {
 		res.Truncated = true
 	}
-	return res, nil
+	return res
 }
 
 // discover collects the searchable files, in walk order.
-func discover(ctx context.Context, root string, m *Matcher, allowed FileFilter) ([]string, bool, error) {
+func discover(ctx context.Context, root string, includeTests bool, pathGlob string, allowed FileFilter) ([]string, bool, bool, error) {
 	var (
-		paths     []string
-		truncated bool
+		paths []string
+		// hitFileCap means the walk stopped early, so this list is NOT every
+		// file a search would read. An index built from it cannot be used to
+		// rule files out, because the ones it never saw would be ruled out too.
+		hitFileCap bool
+		// skippedLarge means a file was passed over for being too big. That is
+		// not the same thing at all: the search skips it on exactly the same
+		// rule, so the list is still complete with respect to what a search
+		// reads. Conflating the two is what disabled the index for a whole
+		// repository because it contained one lockfile.
+		skippedLarge bool
 	)
 	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, walkErr error) error {
 		if ctx.Err() != nil {
@@ -228,7 +277,7 @@ func discover(ctx context.Context, root string, m *Matcher, allowed FileFilter) 
 			return nil
 		}
 		if len(paths) >= maxFilesPerRepo {
-			truncated = true
+			hitFileCap = true
 			return fs.SkipAll
 		}
 		// WalkDir yields paths under root, so the prefix is always there
@@ -236,10 +285,10 @@ func discover(ctx context.Context, root string, m *Matcher, allowed FileFilter) 
 		// could never be taken and so could never be tested.
 		rel := filepath.ToSlash(strings.TrimPrefix(path, root+string(filepath.Separator)))
 
-		if !m.IncludeTests() && IsTestFile(rel) {
+		if !includeTests && IsTestFile(rel) {
 			return nil
 		}
-		if m.pathGlob != "" && !matchGlob(m.pathGlob, rel) {
+		if pathGlob != "" && !matchGlob(pathGlob, rel) {
 			return nil
 		}
 		// The file policy is the caller's, and it is what stops a search
@@ -248,19 +297,19 @@ func discover(ctx context.Context, root string, m *Matcher, allowed FileFilter) 
 			return nil
 		}
 		if info, statErr := d.Info(); statErr == nil && info.Size() > maxFileBytes {
-			truncated = true
+			skippedLarge = true
 			return nil
 		}
 		paths = append(paths, rel)
 		return nil
 	})
 	if err != nil && ctx.Err() != nil {
-		return nil, false, err
+		return nil, false, false, err
 	}
 	// Any other walk error is best-effort: a partial file list still
 	// produces a useful answer, and an unreadable root shows up as zero
 	// files rather than as a failure the agent has to interpret.
-	return paths, truncated, nil
+	return paths, hitFileCap, skippedLarge, nil
 }
 
 // matchGlob reports whether rel matches the pattern, against both the full
@@ -292,31 +341,109 @@ func matchGlob(pattern, rel string) bool {
 // Errors are swallowed on purpose: a file that vanished between the walk
 // and the read, or that turned out to be unreadable, is not a reason to
 // fail a search across thousands of others.
-func searchFile(root, rel string, m *Matcher) (hits []Hit, more bool) {
+// fileBuffers is the per-file scratch a search needs.
+//
+// Pooled because it was allocated per file, and a workspace-wide query reads
+// tens of thousands of files: on a 234-repository workspace, 58,170 candidate
+// files at 8KB + 64KB each meant gigabytes of garbage to answer one question.
+// That is why a repeated search was no faster than a cold one — the cost was
+// never the disk, it was the allocator.
+type fileBuffers struct {
+	data []byte
+}
+
+// newFileBuffer is the per-worker read scratch.
+func newFileBuffer() *fileBuffers {
+	return &fileBuffers{data: make([]byte, 0, 64*1024)}
+}
+
+// searchFile reads one file and returns the lines matching m.
+//
+// The file is read once into memory and tested as a whole before it is split
+// into lines. That ordering is the point: almost every file in a workspace
+// contains no match, and the previous version still paid to walk every line of
+// every one of them through a scanner, calling the matcher once per line, to
+// discover that. Asking "is it in here at all" first answers for the whole file
+// in one pass and skips the rest.
+//
+// The prefilter applies only to a literal pattern. A user regex may anchor with
+// ^ or $, where "matches somewhere in the file" and "matches on some line" are
+// different questions, so those files are scanned as before.
+func searchFile(root, rel string, m *Matcher, buf *fileBuffers) (hits []Hit, more bool) {
 	f, err := os.Open(filepath.Join(root, rel)) // #nosec G304 -- rel is walk-derived and policy-filtered
 	if err != nil {
 		return nil, false
 	}
 	defer func() { _ = f.Close() }()
 
-	// A binary file has no lines worth reporting, and a match inside one
-	// is noise at best. Sniffing the first block is what git itself does.
-	head := make([]byte, 8000)
-	n, _ := io.ReadFull(f, head)
-	if bytes.IndexByte(head[:n], 0) >= 0 {
+	data, readErr := readBounded(f, buf.data[:0])
+	// Keep whatever growth happened, so the next file this worker reads
+	// starts from the larger buffer rather than growing again.
+	if cap(data) > cap(buf.data) {
+		buf.data = data[:0]
+	}
+	if readErr != nil {
 		return nil, false
 	}
-	// The sniffed bytes are put back in front of the rest rather than
-	// seeking to the start again: it saves re-reading the first block, and
-	// a Seek on a regular file has an error branch that cannot be taken
-	// and therefore cannot be tested.
-	sc := bufio.NewScanner(io.MultiReader(bytes.NewReader(head[:n]), f))
-	sc.Buffer(make([]byte, 0, 64*1024), maxLineBytes)
+
+	// A binary file has no lines worth reporting, and a match inside one is
+	// noise at best. Sniffing the first block is what git itself does.
+	head := data
+	if len(head) > 8000 {
+		head = head[:8000]
+	}
+	if bytes.IndexByte(head, 0) >= 0 {
+		return nil, false
+	}
+
+	// Decide once per file which matcher to use.
+	//
+	// The regex engine is needed only for a file containing a rune that folds
+	// onto an ASCII letter — two exist in all of Unicode — or for a pattern
+	// the byte path cannot express. Everything else, which is effectively
+	// every file, takes the byte path and skips the engine that a profile
+	// showed was costing 45% of a query's CPU, against 37% for the file reads
+	// the search exists to do.
+	fold := m.CanFoldASCII() && !NeedsUnicodeFold(data)
+
+	if prefilterEnabled && m.CanPrefilter() {
+		hit := false
+		if fold {
+			hit = m.containsFold(data)
+		} else {
+			hit = m.MatchAny(data)
+		}
+		if !hit {
+			return nil, false
+		}
+	}
+
 	line := 0
-	for sc.Scan() {
+	rest := data
+	for len(rest) > 0 {
+		var raw []byte
+		if i := bytes.IndexByte(rest, '\n'); i >= 0 {
+			raw, rest = rest[:i], rest[i+1:]
+		} else {
+			raw, rest = rest, nil
+		}
+		if n := len(raw); n > 0 && raw[n-1] == '\r' {
+			raw = raw[:n-1]
+		}
 		line++
-		text := sc.Text()
-		col := m.MatchLine(text)
+		if len(raw) > maxLineBytes {
+			// A line this long means a minified or generated file. The
+			// hits found so far are the useful half, and the answer is
+			// marked partial — the same contract the scanner's buffer
+			// limit gave before.
+			return hits, true
+		}
+		var col int
+		if fold {
+			col = m.indexFold(raw)
+		} else {
+			col = m.MatchBytes(raw)
+		}
 		if col < 0 {
 			continue
 		}
@@ -324,7 +451,7 @@ func searchFile(root, rel string, m *Matcher) (hits []Hit, more bool) {
 			File:   rel,
 			Line:   line,
 			Column: col + 1,
-			Text:   trimHitText(text),
+			Text:   trimHitText(string(raw)),
 		})
 		if len(hits) >= m.MaxHits() {
 			// There may or may not be more below; saying so is the safe
@@ -333,10 +460,48 @@ func searchFile(root, rel string, m *Matcher) (hits []Hit, more bool) {
 			return hits, true
 		}
 	}
-	// A scanner error — almost always a line longer than the buffer, which
-	// means a minified file — leaves the hits found so far, which is the
-	// useful half, and marks the answer partial.
-	return hits, sc.Err() != nil
+	return hits, false
+}
+
+// prefilterEnabled is a seam. A benchmark flips it to measure the same files,
+// the same reads and the same matcher with and without the whole-file test, in
+// one process — which is the only way to compare the two on a machine busy
+// with unrelated work, where wall-clock between separate runs says more about
+// the other processes than about this code.
+var prefilterEnabled = true
+
+// readFileBounded opens root/rel and reads it, bounded.
+func readFileBounded(root, rel string, dst []byte) ([]byte, error) {
+	f, err := os.Open(filepath.Join(root, rel)) // #nosec G304 -- rel is walk-derived and policy-filtered
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = f.Close() }()
+	return readBounded(f, dst)
+}
+
+// readBounded reads at most maxFileBytes from f, appending into dst.
+//
+// Bounded rather than io.ReadAll: the walk already skips files over the limit,
+// but a file can grow between being listed and being opened, and a search must
+// not be the thing that reads an unbounded amount into memory.
+func readBounded(f *os.File, dst []byte) ([]byte, error) {
+	for {
+		if len(dst) == cap(dst) {
+			dst = append(dst, 0)[:len(dst)]
+		}
+		n, err := f.Read(dst[len(dst):cap(dst)])
+		dst = dst[:len(dst)+n]
+		if err != nil {
+			if err == io.EOF {
+				return dst, nil
+			}
+			return dst, err
+		}
+		if int64(len(dst)) >= maxFileBytes {
+			return dst, nil
+		}
+	}
 }
 
 // trimHitText prepares a matching line for a caller: leading and trailing

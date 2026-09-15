@@ -407,7 +407,7 @@ func TestSortedLangCountsOrdering(t *testing.T) {
 	m := map[string]int{"go": 3, "rust": 3, "python": 2}
 	out := sortedLangCounts(m)
 	// Sorted by count desc, then alpha. go and rust both have 3 → go first.
-	if out[0]["language"] != "go" || out[1]["language"] != "rust" || out[2]["language"] != "python" {
+	if out[0].Language != "go" || out[1].Language != "rust" || out[2].Language != "python" {
 		t.Errorf("unexpected ordering: %+v", out)
 	}
 }

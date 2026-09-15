@@ -165,21 +165,21 @@ func (s *Server) auditRefusal(rec AuditRecord, message string) error {
 // `corralctl <owner>` sync path — no separate write-through cache to
 // maintain. Refuses when the repo is not in the workspace index or
 // when the operation cannot be sandboxed to the configured Root.
-func (s *Server) handleSyncRepo(ctx context.Context, _ *mcp.CallToolRequest, in queryInput) (*mcp.CallToolResult, any, error) {
+func (s *Server) handleSyncRepo(ctx context.Context, _ *mcp.CallToolRequest, in queryInput) (*mcp.CallToolResult, MutationOutput, error) {
 	query := in.Query
 	idx, err := s.scan()
 	if err != nil {
-		return toolError("scan workspace: %v", err), nil, nil
+		return nil, MutationOutput{}, fmt.Errorf("scan workspace: %v", err)
 	}
 	repo, err := idx.Find(query)
 	if err != nil {
-		return toolError("%v", err), nil, nil
+		return nil, MutationOutput{}, fmt.Errorf("%v", err)
 	}
 	// Belt-and-braces sandbox check — Index.Find already returns
 	// only Root-relative repos, but a future refactor might not.
 	safe, err := idx.SafeMutationPath(repo.Path)
 	if err != nil {
-		return toolError("%v", err), nil, nil
+		return nil, MutationOutput{}, fmt.Errorf("%v", err)
 	}
 
 	rec := AuditRecord{
@@ -189,53 +189,50 @@ func (s *Server) handleSyncRepo(ctx context.Context, _ *mcp.CallToolRequest, in 
 	}
 	rec, err = s.beginMutation(rec)
 	if err != nil {
-		return toolError("audit intent failed: %v", err), nil, nil
+		return nil, MutationOutput{}, fmt.Errorf("audit intent failed: %v", err)
 	}
 	pullErr := gitPull(ctx, safe, git.PullOptions{})
 	if pullErr != nil {
 		if auditErr := s.completeMutation(rec, "error", pullErr.Error()); auditErr != nil {
-			return toolError("%v; audit completion failed: %v", pullErr, auditErr), nil, nil
+			return nil, MutationOutput{}, fmt.Errorf("%v; audit completion failed: %v", pullErr, auditErr)
 		}
-		return toolError("%v", pullErr), nil, nil
+		return nil, MutationOutput{}, fmt.Errorf("%v", pullErr)
 	}
 	if err := markSynced(safe); err != nil {
 		if auditErr := s.completeMutation(rec, "error", err.Error()); auditErr != nil {
-			return toolError("state update failed: %v; audit completion failed: %v", err, auditErr), nil, nil
+			return nil, MutationOutput{}, fmt.Errorf("state update failed: %v; audit completion failed: %v", err, auditErr)
 		}
-		return toolError("state update failed: %v", err), nil, nil
+		return nil, MutationOutput{}, fmt.Errorf("state update failed: %v", err)
 	}
 	if err := s.completeMutation(rec, "ok", ""); err != nil {
-		return toolError("audit completion failed: %v", err), nil, nil
+		return nil, MutationOutput{}, fmt.Errorf("audit completion failed: %v", err)
 	}
 	s.invalidateScanCache()
-	return jsonResult(map[string]any{
-		"tool":   "corral_sync_repo",
-		"repo":   repo.RelPath,
-		"result": "synced",
-	}), nil, nil
+	out := MutationOutput{Tool: "corral_sync_repo", Repo: repo.RelPath, Result: "synced"}
+	return jsonResult(out), out, nil
 }
 
 // cloneRepoTool returns corral_clone_repo. Wraps git.Clone into the
 // layout-templated target directory. Refuses if the target already
 // exists (never silently overwrites) or if the destination would
 // escape the sandbox root.
-func (s *Server) handleCloneRepo(ctx context.Context, _ *mcp.CallToolRequest, in cloneInput) (*mcp.CallToolResult, any, error) {
+func (s *Server) handleCloneRepo(ctx context.Context, _ *mcp.CallToolRequest, in cloneInput) (*mcp.CallToolResult, MutationOutput, error) {
 	url := in.URL
 	target := in.Target
 	depth := in.Depth
 	blobless := in.Blobless
 
 	if err := validateCloneURL(url); err != nil {
-		return toolError("%v", err), nil, nil
+		return nil, MutationOutput{}, fmt.Errorf("%v", err)
 	}
 
 	idx := &Index{Root: s.opts.Root}
 	safeTarget, err := idx.SafeMutationPath(target)
 	if err != nil {
-		return toolError("%v", err), nil, nil
+		return nil, MutationOutput{}, fmt.Errorf("%v", err)
 	}
 	if _, err := statMutation(safeTarget); err == nil {
-		return toolError("target %s already exists", safeTarget), nil, nil
+		return nil, MutationOutput{}, fmt.Errorf("target %s already exists", safeTarget)
 	}
 
 	rec := AuditRecord{
@@ -245,13 +242,13 @@ func (s *Server) handleCloneRepo(ctx context.Context, _ *mcp.CallToolRequest, in
 	}
 	rec, err = s.beginMutation(rec)
 	if err != nil {
-		return toolError("audit intent failed: %v", err), nil, nil
+		return nil, MutationOutput{}, fmt.Errorf("audit intent failed: %v", err)
 	}
 	if err := mkdirMutation(filepath.Dir(safeTarget), 0o750); err != nil {
 		if auditErr := s.completeMutation(rec, "error", err.Error()); auditErr != nil {
-			return toolError("create target parent: %v; audit completion failed: %v", err, auditErr), nil, nil
+			return nil, MutationOutput{}, fmt.Errorf("create target parent: %v; audit completion failed: %v", err, auditErr)
 		}
-		return toolError("create target parent: %v", err), nil, nil
+		return nil, MutationOutput{}, fmt.Errorf("create target parent: %v", err)
 	}
 	cloneErr := gitClone(ctx, url, safeTarget, git.CloneOptions{
 		Depth:    depth,
@@ -259,19 +256,16 @@ func (s *Server) handleCloneRepo(ctx context.Context, _ *mcp.CallToolRequest, in
 	})
 	if cloneErr != nil {
 		if auditErr := s.completeMutation(rec, "error", cloneErr.Error()); auditErr != nil {
-			return toolError("%v; audit completion failed: %v", cloneErr, auditErr), nil, nil
+			return nil, MutationOutput{}, fmt.Errorf("%v; audit completion failed: %v", cloneErr, auditErr)
 		}
-		return toolError("%v", cloneErr), nil, nil
+		return nil, MutationOutput{}, fmt.Errorf("%v", cloneErr)
 	}
 	if err := s.completeMutation(rec, "ok", ""); err != nil {
-		return toolError("audit completion failed: %v", err), nil, nil
+		return nil, MutationOutput{}, fmt.Errorf("audit completion failed: %v", err)
 	}
 	s.invalidateScanCache()
-	return jsonResult(map[string]any{
-		"tool":   "corral_clone_repo",
-		"target": safeTarget,
-		"result": "cloned",
-	}), nil, nil
+	out := MutationOutput{Tool: "corral_clone_repo", Target: safeTarget, Result: "cloned"}
+	return jsonResult(out), out, nil
 }
 
 // deleteRepoTool returns corral_delete_repo. This is the highest-risk
@@ -297,19 +291,19 @@ func (s *Server) handleCloneRepo(ctx context.Context, _ *mcp.CallToolRequest, in
 // request and no content, the client puts the question to a person, and
 // the same call arrives again carrying the answer. Every check runs on
 // both passes, and nothing is written until the approved one.
-func (s *Server) handleDeleteRepo(ctx context.Context, req *mcp.CallToolRequest, in queryInput) (*mcp.CallToolResult, any, error) {
+func (s *Server) handleDeleteRepo(ctx context.Context, req *mcp.CallToolRequest, in queryInput) (*mcp.CallToolResult, MutationOutput, error) {
 	query := in.Query
 	idx, err := s.scan()
 	if err != nil {
-		return toolError("scan workspace: %v", err), nil, nil
+		return nil, MutationOutput{}, fmt.Errorf("scan workspace: %v", err)
 	}
 	repo, err := idx.Find(query)
 	if err != nil {
-		return toolError("%v", err), nil, nil
+		return nil, MutationOutput{}, fmt.Errorf("%v", err)
 	}
 	safe, err := idx.SafeMutationPath(repo.Path)
 	if err != nil {
-		return toolError("%v", err), nil, nil
+		return nil, MutationOutput{}, fmt.Errorf("%v", err)
 	}
 
 	// One deletion at a time per clone. Over stdio there was one session
@@ -331,9 +325,9 @@ func (s *Server) handleDeleteRepo(ctx context.Context, req *mcp.CallToolRequest,
 	if reason, ok := deleteGuards(ctx, safe); !ok {
 		rec.Message = reason
 		if auditErr := s.auditRefusal(rec, reason); auditErr != nil {
-			return toolError("%s; audit failed: %v", reason, auditErr), nil, nil
+			return nil, MutationOutput{}, fmt.Errorf("%s; audit failed: %v", reason, auditErr)
 		}
-		return toolError("%s", reason), nil, nil
+		return nil, MutationOutput{}, fmt.Errorf("%s", reason)
 	}
 
 	// Per-call authority. The cascade above stops mistakes; this is what
@@ -356,21 +350,21 @@ func (s *Server) handleDeleteRepo(ctx context.Context, req *mcp.CallToolRequest,
 			// Not an outcome: the client now puts the question to a person
 			// and calls the tool again with the answer. Nothing is audited
 			// yet because nothing has been decided.
-			return ask, nil, nil
+			return ask, MutationOutput{}, nil
 		case confirmUnavailable:
 			// Fail closed. If nobody can be asked, nobody has approved.
 			rec.Message = "could not obtain confirmation: " + noElicitationMessage
 			if auditErr := s.auditRefusal(rec, rec.Message); auditErr != nil {
-				return toolError("%s; audit failed: %v", rec.Message, auditErr), nil, nil
+				return nil, MutationOutput{}, fmt.Errorf("%s; audit failed: %v", rec.Message, auditErr)
 			}
-			return toolError("%s\n\nStart the server with --no-confirm-deletes to delete without asking, "+
-				"which is only appropriate for an unattended workspace you are willing to lose.", rec.Message), nil, nil
+			return nil, MutationOutput{}, fmt.Errorf("%s; start the server with --no-confirm-deletes to delete "+
+				"without asking, which is only appropriate for an unattended workspace you are willing to lose", rec.Message)
 		case confirmDenied:
 			rec.Message = "declined by the user"
 			if auditErr := s.auditRefusal(rec, rec.Message); auditErr != nil {
-				return toolError("%s; audit failed: %v", rec.Message, auditErr), nil, nil
+				return nil, MutationOutput{}, fmt.Errorf("%s; audit failed: %v", rec.Message, auditErr)
 			}
-			return toolError("deletion of %s was declined", repo.Redacted().RelPath), nil, nil
+			return nil, MutationOutput{}, fmt.Errorf("deletion of %s was declined", repo.Redacted().RelPath)
 		case confirmApproved:
 			// Fall through to the deletion.
 		}
@@ -378,7 +372,7 @@ func (s *Server) handleDeleteRepo(ctx context.Context, req *mcp.CallToolRequest,
 
 	rec, err = s.beginMutation(rec)
 	if err != nil {
-		return toolError("audit intent failed: %v", err), nil, nil
+		return nil, MutationOutput{}, fmt.Errorf("audit intent failed: %v", err)
 	}
 	// Stage the clone aside before removing it (SEC-5).
 	//
@@ -393,9 +387,9 @@ func (s *Server) handleDeleteRepo(ctx context.Context, req *mcp.CallToolRequest,
 	staged, stageErr := stageForRemoval(safe)
 	if stageErr != nil {
 		if auditErr := s.completeMutation(rec, "error", stageErr.Error()); auditErr != nil {
-			return toolError("staging for removal failed: %v; audit completion failed: %v", stageErr, auditErr), nil, nil
+			return nil, MutationOutput{}, fmt.Errorf("staging for removal failed: %v; audit completion failed: %v", stageErr, auditErr)
 		}
-		return toolError("staging for removal failed: %v", stageErr), nil, nil
+		return nil, MutationOutput{}, fmt.Errorf("staging for removal failed: %v", stageErr)
 	}
 	if reason, ok := deleteGuards(ctx, staged); !ok {
 		// Something changed under us. Put it back exactly where it was and
@@ -407,9 +401,9 @@ func (s *Server) handleDeleteRepo(ctx context.Context, req *mcp.CallToolRequest,
 		}
 		msg := reason + " (detected after staging, so the clone was not deleted and was " + restored + ")"
 		if auditErr := s.completeMutation(rec, "refused", msg); auditErr != nil {
-			return toolError("%s; audit completion failed: %v", msg, auditErr), nil, nil
+			return nil, MutationOutput{}, fmt.Errorf("%s; audit completion failed: %v", msg, auditErr)
 		}
-		return toolError("%s", msg), nil, nil
+		return nil, MutationOutput{}, fmt.Errorf("%s", msg)
 	}
 	if err := removeMutation(staged); err != nil {
 		// The clone is staged but not removed. Try to put it back rather
@@ -418,19 +412,16 @@ func (s *Server) handleDeleteRepo(ctx context.Context, req *mcp.CallToolRequest,
 			err = fmt.Errorf("%w; and the staged copy at %s could not be restored: %v", err, staged, unstageErr)
 		}
 		if auditErr := s.completeMutation(rec, "error", err.Error()); auditErr != nil {
-			return toolError("remove failed: %v; audit completion failed: %v", err, auditErr), nil, nil
+			return nil, MutationOutput{}, fmt.Errorf("remove failed: %v; audit completion failed: %v", err, auditErr)
 		}
-		return toolError("remove failed: %v", err), nil, nil
+		return nil, MutationOutput{}, fmt.Errorf("remove failed: %v", err)
 	}
 	if err := s.completeMutation(rec, "ok", ""); err != nil {
-		return toolError("audit completion failed: %v", err), nil, nil
+		return nil, MutationOutput{}, fmt.Errorf("audit completion failed: %v", err)
 	}
 	s.invalidateScanCache()
-	return jsonResult(map[string]any{
-		"tool":   "corral_delete_repo",
-		"target": safe,
-		"result": "deleted",
-	}), nil, nil
+	out := MutationOutput{Tool: "corral_delete_repo", Target: safe, Result: "deleted"}
+	return jsonResult(out), out, nil
 }
 
 // hasDirtyWorkingTree reports tracked, staged or untracked modifications in the
