@@ -75,10 +75,7 @@ func symbolWorkspace(t *testing.T) string {
 // callFindSymbol runs the tool and decodes its JSON body.
 func callFindSymbol(t *testing.T, s *Server, in findSymbolInput) (map[string]any, bool) {
 	t.Helper()
-	res, _, err := s.handleFindSymbol(context.Background(), nil, in)
-	if err != nil {
-		t.Fatalf("handleFindSymbol returned a protocol error: %v", err)
-	}
+	res := asToolResult(s.handleFindSymbol(context.Background(), nil, in))
 	if res.IsError {
 		return nil, true
 	}
@@ -186,10 +183,7 @@ func TestFindSymbolFiltersAndForms(t *testing.T) {
 // an empty result is indistinguishable from a correct one.
 func TestFindSymbolRefusesUnsupportedKind(t *testing.T) {
 	s, _ := NewServer(ServerOptions{Root: symbolWorkspace(t)})
-	res, _, err := s.handleFindSymbol(context.Background(), nil, findSymbolInput{Name: "Shared", Kind: "macro"})
-	if err != nil {
-		t.Fatalf("protocol error: %v", err)
-	}
+	res := asToolResult(s.handleFindSymbol(context.Background(), nil, findSymbolInput{Name: "Shared", Kind: "macro"}))
 	if !res.IsError {
 		t.Fatal("an unknown kind must be refused, not answered with an empty result")
 	}
@@ -203,7 +197,7 @@ func TestFindSymbolRefusesUnsupportedKind(t *testing.T) {
 
 func TestFindSymbolRejectsEmptyName(t *testing.T) {
 	s, _ := NewServer(ServerOptions{Root: symbolWorkspace(t)})
-	res, _, _ := s.handleFindSymbol(context.Background(), nil, findSymbolInput{Name: "   "})
+	res := asToolResult(s.handleFindSymbol(context.Background(), nil, findSymbolInput{Name: "   "}))
 	if !res.IsError {
 		t.Error("an empty name should be refused")
 	}
@@ -300,10 +294,7 @@ func TestFindSymbolHonoursCancellation(t *testing.T) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	res, _, err := s.handleFindSymbol(ctx, nil, findSymbolInput{Name: "Shared"})
-	if err != nil {
-		t.Fatalf("protocol error: %v", err)
-	}
+	res := asToolResult(s.handleFindSymbol(ctx, nil, findSymbolInput{Name: "Shared"}))
 	if !res.IsError {
 		t.Error("a cancelled lookup should report rather than pretend to succeed")
 	}
@@ -314,10 +305,7 @@ func TestFindSymbolHonoursCancellation(t *testing.T) {
 func TestRepoOverview(t *testing.T) {
 	s, _ := NewServer(ServerOptions{Root: symbolWorkspace(t)})
 
-	res, _, err := s.handleRepoOverview(context.Background(), nil, repoOverviewInput{Query: "alpha"})
-	if err != nil {
-		t.Fatalf("protocol error: %v", err)
-	}
+	res := asToolResult(s.handleRepoOverview(context.Background(), nil, repoOverviewInput{Query: "alpha"}))
 	if res.IsError {
 		t.Fatalf("overview failed: %s", resultText(res))
 	}
@@ -348,7 +336,7 @@ func TestRepoOverview(t *testing.T) {
 
 func TestRepoOverviewUnknownRepository(t *testing.T) {
 	s, _ := NewServer(ServerOptions{Root: symbolWorkspace(t)})
-	res, _, _ := s.handleRepoOverview(context.Background(), nil, repoOverviewInput{Query: "nope"})
+	res := asToolResult(s.handleRepoOverview(context.Background(), nil, repoOverviewInput{Query: "nope"}))
 	if !res.IsError {
 		t.Error("an unknown repository should be an error")
 	}
@@ -362,7 +350,7 @@ func TestRepoOverviewExtractionFailure(t *testing.T) {
 	}
 	t.Cleanup(func() { extractSymbols = old })
 
-	res, _, _ := s.handleRepoOverview(context.Background(), nil, repoOverviewInput{Query: "alpha"})
+	res := asToolResult(s.handleRepoOverview(context.Background(), nil, repoOverviewInput{Query: "alpha"}))
 	if !res.IsError {
 		t.Error("a failed extraction should be reported")
 	}
@@ -384,7 +372,7 @@ func TestRepoOverviewSurfacesTruncationAndCaps(t *testing.T) {
 	}
 	t.Cleanup(func() { extractSymbols = old })
 
-	res, _, _ := s.handleRepoOverview(context.Background(), nil, repoOverviewInput{Query: "alpha"})
+	res := asToolResult(s.handleRepoOverview(context.Background(), nil, repoOverviewInput{Query: "alpha"}))
 	var body map[string]any
 	if err := json.Unmarshal([]byte(resultText(res)), &body); err != nil {
 		t.Fatal(err)
@@ -547,11 +535,11 @@ func TestFindSymbolScanFailure(t *testing.T) {
 	t.Cleanup(func() { scanWorkspace = old })
 	s.invalidateScanCache()
 
-	res, _, _ := s.handleFindSymbol(context.Background(), nil, findSymbolInput{Name: "Shared"})
+	res := asToolResult(s.handleFindSymbol(context.Background(), nil, findSymbolInput{Name: "Shared"}))
 	if !res.IsError {
 		t.Error("a failed scan should be reported")
 	}
-	res, _, _ = s.handleRepoOverview(context.Background(), nil, repoOverviewInput{Query: "alpha"})
+	res = asToolResult(s.handleRepoOverview(context.Background(), nil, repoOverviewInput{Query: "alpha"}))
 	if !res.IsError {
 		t.Error("a failed scan should be reported by the overview too")
 	}

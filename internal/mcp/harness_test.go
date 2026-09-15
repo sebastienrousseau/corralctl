@@ -51,6 +51,12 @@ func newHarnessWithClient(t *testing.T, opts ServerOptions, clientOpts *mcp.Clie
 	if opts.SymbolCacheDir == "" {
 		opts.SymbolCacheDir = t.TempDir()
 	}
+	// Same reasoning as the symbol cache: without this every test run writes
+	// index files into ~/.cache, and a test asserting a cold index would pass
+	// or fail depending on what an earlier run left there.
+	if opts.IndexCacheDir == "" {
+		opts.IndexCacheDir = t.TempDir()
+	}
 	srv, err := NewServer(opts)
 	if err != nil {
 		t.Fatalf("NewServer: %v", err)
@@ -70,6 +76,12 @@ func newHarnessWithClient(t *testing.T, opts ServerOptions, clientOpts *mcp.Clie
 	t.Cleanup(func() {
 		_ = session.Close()
 		<-serverDone
+		// Unmap only once the server has stopped and nothing can still be
+		// reading an index. This runs before any TempDir this function created
+		// is removed (cleanups are LIFO) and before one passed in as an
+		// argument, since that TempDir was registered before the call. Windows
+		// cannot delete a mapped file.
+		srv.indexCache.closeAll()
 	})
 	return &harness{t: t, server: srv, session: session}
 }
@@ -150,14 +162,42 @@ func (h *harness) prompt(name string, args map[string]string) *mcp.GetPromptResu
 	return res
 }
 
+// asToolResult applies the SDK's own rule for a handler's return values, so a
+// test asserts what a client receives rather than which of two equivalent
+// conventions the handler happened to use.
+//
+// AddTool turns a returned error into a CallToolResult with IsError set and the
+// error's text as content (see CallToolResult.SetError), so a handler may refuse
+// either by returning a toolError result or by returning an error — both reach
+// the client as the same bytes. Tests that hard-coded the first form failed when
+// handlers moved to the second to gain typed output, though nothing observable
+// had changed.
+// Generic over the output value so a handler's three return values can be
+// passed straight in: asToolResult(s.handleX(...)).
+func asToolResult[T any](res *mcp.CallToolResult, _ T, err error) *mcp.CallToolResult {
+	if err != nil {
+		var out mcp.CallToolResult
+		out.SetError(err)
+		return &out
+	}
+	return res
+}
+
 // newTestServer builds a Server without a client session, for tests that poke
 // internals (scan caching, option validation) rather than protocol behaviour.
 func newTestServer(t *testing.T, base string) *Server {
 	t.Helper()
-	srv, err := NewServer(ServerOptions{Root: base, Version: "test"})
+	srv, err := NewServer(ServerOptions{
+		Root: base, Version: "test",
+		SymbolCacheDir: t.TempDir(), IndexCacheDir: t.TempDir(),
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Registered last, so it runs first: cleanups are LIFO, and on Windows a
+	// mapped file cannot be deleted, so every mapping has to go before the
+	// TempDir holding the index files is removed.
+	t.Cleanup(srv.indexCache.closeAll)
 	return srv
 }
 

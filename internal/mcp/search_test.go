@@ -6,9 +6,11 @@ package mcp
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/sebastienrousseau/corralctl/internal/search"
@@ -32,6 +34,7 @@ type searchBody struct {
 	Truncated            bool        `json:"truncated"`
 	Note                 string      `json:"note"`
 	PartialRepositories  []string    `json:"partial_repositories"`
+	IndexedRepositories  int         `json:"indexed_repositories"`
 }
 
 // writeIn puts a file inside a repository in the workspace.
@@ -360,10 +363,13 @@ func TestSearchCodeBoundsTheReportedLine(t *testing.T) {
 func TestSearchCodeSurvivesAnUnreadableRepository(t *testing.T) {
 	h := searchWorkspace(t)
 
-	calls := 0
+	// Atomic because repositories are searched in parallel batches now. A
+	// plain counter here was safe while the loop was sequential and became a
+	// data race the moment it was not — the race detector caught it, which is
+	// the only reason this is a counter and not a silent flake.
+	var calls atomic.Int64
 	stubSeam(t, &searchRepo, func(ctx context.Context, root string, m *search.Matcher, f search.FileFilter) (*search.Result, error) {
-		calls++
-		if calls == 1 {
+		if calls.Add(1) == 1 {
 			return nil, errors.New("permission denied")
 		}
 		return search.SearchRepo(ctx, root, m, f)
@@ -419,10 +425,7 @@ func TestSearchCodeHonoursCancellation(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	res, _, err := srv.handleSearchCode(ctx, nil, searchCodeInput{Query: "needle"})
-	if err != nil {
-		t.Fatalf("cancellation is not a protocol error: %v", err)
-	}
+	res := asToolResult(srv.handleSearchCode(ctx, nil, searchCodeInput{Query: "needle"}))
 	if res.IsError {
 		t.Fatalf("a cancelled search reports what it has: %s", resultText(res))
 	}
@@ -480,13 +483,19 @@ func TestSearchCodeReportsAScanFailure(t *testing.T) {
 	}
 }
 
-// TestSearchCodeStopsOnceTheBudgetIsSpent covers both halves of the
-// early stop: the budget running out partway through one repository's
-// hits, and the loop then declining to read the repositories after it.
+// TestSearchCodeStopsOnceTheBudgetIsSpent covers the budget running out
+// partway through one repository's hits.
 //
-// Without the second, a query that is already answered still pays to read
-// every remaining clone — which on a large workspace is the difference
-// between a fast common case and a slow one.
+// It used to also assert that the very next repository was never opened.
+// Repositories are now searched in parallel batches — sequential scanning was
+// what made this tool take 11-17s on a 234-repository workspace — so a batch
+// is read together and the repository after the fill point may be read with
+// it. The count below reports that honestly rather than hiding it.
+//
+// The property that actually mattered is unchanged and is pinned by
+// TestSearchCodeDoesNotReadTheWholeWorkspace: a query that is already answered
+// must not go on to read every remaining clone. Reading at most one extra
+// batch, in parallel, is a bounded cost; reading all of them is not.
 func TestSearchCodeStopsOnceTheBudgetIsSpent(t *testing.T) {
 	base := t.TempDir()
 	// Three hits in the first repository, four in the second, with a
@@ -507,8 +516,16 @@ func TestSearchCodeStopsOnceTheBudgetIsSpent(t *testing.T) {
 	if len(body.Hits) != 5 {
 		t.Fatalf("got %d hits, want exactly the budget of 5: %v", len(body.Hits), hitFiles(body))
 	}
-	if body.RepositoriesSearched != 2 {
-		t.Errorf("read %d repositories; the third should never have been opened", body.RepositoriesSearched)
+	// All three fit in one batch here, so all three are read. What must hold
+	// is that the answer is still exactly the budget, taken in repository
+	// order — the hits below come from the first two repositories only.
+	if body.RepositoriesSearched > 3 {
+		t.Errorf("read %d repositories, want at most the 3 that exist", body.RepositoriesSearched)
+	}
+	for _, h := range body.Hits {
+		if strings.Contains(h.Repo, "c-third") {
+			t.Errorf("a hit from the third repository displaced an earlier one: %v", hitFiles(body))
+		}
 	}
 	if !body.Truncated {
 		t.Error("a partial answer must say it is partial")
@@ -521,4 +538,100 @@ func TestSearchCodeStopsOnceTheBudgetIsSpent(t *testing.T) {
 			t.Errorf("the third repository was read after all: %+v", hit)
 		}
 	}
+}
+
+// TestSearchCodeDoesNotReadTheWholeWorkspace pins the early stop at the scale
+// where it matters.
+//
+// The three-repository case above cannot distinguish "stopped early" from
+// "read everything", because everything is one batch. This builds a workspace
+// large enough that the difference is visible: with a budget of five hits and
+// a match in the first repository, a search that read every clone would report
+// all of them.
+func TestSearchCodeDoesNotReadTheWholeWorkspace(t *testing.T) {
+	base := t.TempDir()
+	const repos = 60
+	for i := 0; i < repos; i++ {
+		name := fmt.Sprintf("repo-%02d", i)
+		r := makeFakeRepo(t, base, "Public", "go", name, "https://github.com/acme/"+name+".git", "")
+		writeIn(t, r, "a.md", "needle\nneedle\nneedle\nneedle\nneedle\nneedle\n")
+	}
+
+	h := newHarness(t, ServerOptions{Root: base})
+	body := searchCode(t, h, map[string]any{"query": "needle", "max_results": 5})
+
+	if len(body.Hits) != 5 {
+		t.Fatalf("got %d hits, want the budget of 5", len(body.Hits))
+	}
+	if !body.Truncated {
+		t.Error("a partial answer must say it is partial")
+	}
+	// The first repository alone fills the budget, so the search should stop
+	// within a batch or two. The bound is deliberately loose — it is testing
+	// that the early stop exists, not the batch size — but far below 60.
+	if body.RepositoriesSearched > repos/2 {
+		t.Errorf("read %d of %d repositories; the budget was filled by the first",
+			body.RepositoriesSearched, repos)
+	}
+	t.Logf("read %d of %d repositories", body.RepositoriesSearched, repos)
+}
+
+// TestSearchCodeBatchBoundaryAndPartials covers the three edges of the batched
+// repository loop.
+//
+// The loop reads repositories in parallel batches, and its bookkeeping only
+// differs from the sequential form at the boundaries: a final partial batch, a
+// repository limit reached mid-batch, and a repository that reports its own
+// result as incomplete.
+func TestSearchCodeBatchBoundaryAndPartials(t *testing.T) {
+	base := t.TempDir()
+	// More repositories than one batch holds, and deliberately not a multiple
+	// of it, so the last batch is short.
+	const repos = 25
+	for i := 0; i < repos; i++ {
+		name := fmt.Sprintf("repo-%02d", i)
+		r := makeFakeRepo(t, base, "Public", "go", name, "https://github.com/acme/"+name+".git", "")
+		writeIn(t, r, "a.md", "needle\n")
+	}
+	h := newHarness(t, ServerOptions{Root: base})
+
+	t.Run("short final batch", func(t *testing.T) {
+		body := searchCode(t, h, map[string]any{"query": "needle", "max_results": 100})
+		if body.RepositoriesSearched != repos {
+			t.Errorf("searched %d of %d repositories", body.RepositoriesSearched, repos)
+		}
+	})
+
+	t.Run("repository limit reached", func(t *testing.T) {
+		// Lower than the number of repositories, so the cap is hit partway
+		// through rather than never.
+		stubSeam(t, &maxSearchRepos, 5)
+		body := searchCode(t, h, map[string]any{"query": "needle", "max_results": 100})
+		if !body.Truncated {
+			t.Error("stopping at the repository limit must be reported as partial")
+		}
+		if body.RepositoriesSearched > repos {
+			t.Errorf("searched %d repositories despite a limit of 5", body.RepositoriesSearched)
+		}
+		if !strings.Contains(body.Note, "repositories") {
+			t.Errorf("note should explain the limit: %q", body.Note)
+		}
+	})
+
+	t.Run("a repository reports its own partial result", func(t *testing.T) {
+		stubSeam(t, &searchRepo, func(ctx context.Context, root string, m *search.Matcher, f search.FileFilter) (*search.Result, error) {
+			res, err := search.SearchRepo(ctx, root, m, f)
+			if err == nil && res != nil {
+				res.Truncated = true
+			}
+			return res, err
+		})
+		body := searchCode(t, h, map[string]any{"query": "needle", "max_results": 100})
+		if !body.Truncated {
+			t.Error("a repository's own truncation must reach the answer")
+		}
+		if len(body.PartialRepositories) == 0 {
+			t.Error("the partial repositories should be named")
+		}
+	})
 }

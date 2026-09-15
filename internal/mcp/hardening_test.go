@@ -141,13 +141,10 @@ func TestCloneRepoRejectsUnsafeURL(t *testing.T) {
 		"--upload-pack=/bin/sh",
 		"",
 	} {
-		res, _, err := s.handleCloneRepo(context.Background(), nil, cloneInput{
+		res := asToolResult(s.handleCloneRepo(context.Background(), nil, cloneInput{
 			URL:    url,
 			Target: "Public/go/newrepo",
-		})
-		if err != nil {
-			t.Fatalf("handleCloneRepo returned a protocol error for %q: %v", url, err)
-		}
+		}))
 		if !res.IsError {
 			t.Errorf("handleCloneRepo accepted unsafe url %q", url)
 		}

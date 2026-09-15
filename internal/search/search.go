@@ -28,6 +28,7 @@
 package search
 
 import (
+	"bytes"
 	"fmt"
 	"regexp"
 	"strings"
@@ -95,11 +96,35 @@ type Matcher struct {
 	re *regexp.Regexp
 	// literal is set only for a case-sensitive literal, which
 	// strings.Index handles faster than any regex.
-	literal  string
-	pathGlob string
-	maxHits  int
+	literal string
+	// literalBytes is literal pre-converted, because MatchBytes runs once
+	// per line read and converting there would allocate on every one —
+	// reintroducing, per line, exactly the cost MatchBytes exists to avoid.
+	literalBytes []byte
+	pathGlob     string
+	maxHits      int
 	// includeTests is carried here so a walker has one object to consult.
 	includeTests bool
+	// rawLiteral is the user's pattern when it is a literal, in either case
+	// sense. literalBytes is empty for the case-insensitive form, which is
+	// searched as a regex, so the index needs its own copy.
+	rawLiteral []byte
+	// foldNeedle is the lowercased pattern for the ASCII fast path, set only
+	// when the pattern is a literal with no byte above 0x7F. nil means every
+	// line goes through the regex engine.
+	foldNeedle     []byte
+	foldFirstUpper byte
+	// caseFolded records that matching is case-insensitive, which the
+	// trigram index needs to know: folding is a Unicode operation and a byte
+	// index cannot model it.
+	caseFolded bool
+	// literalOnly records that the pattern is a literal, in either case
+	// sense, and therefore carries no anchors. That is what makes a
+	// whole-file prefilter sound: for an unanchored pattern, "matches
+	// somewhere in this file" and "matches on some line of this file" are
+	// the same question. A user-supplied regex may anchor with ^ or $,
+	// where the two differ, so it does not get the prefilter.
+	literalOnly bool
 }
 
 // maxPatternLen bounds a pattern. A regex is user input compiled into a
@@ -167,6 +192,9 @@ func Compile(q Query) (*Matcher, error) {
 
 	if q.CaseSensitive {
 		m.literal = q.Pattern
+		m.literalBytes = []byte(q.Pattern)
+		m.literalOnly = true
+		m.rawLiteral = []byte(q.Pattern)
 		return m, nil
 	}
 
@@ -188,6 +216,22 @@ func Compile(q Query) (*Matcher, error) {
 	// test could ever reach.
 	re, err := regexp.Compile(casefoldFlag + regexp.QuoteMeta(q.Pattern))
 	m.re = re
+	// QuoteMeta escaped the pattern, so whatever the user typed it is a
+	// literal now and cannot anchor.
+	m.literalOnly = true
+	m.rawLiteral = []byte(q.Pattern)
+	m.caseFolded = true
+	if asciiFoldable(m.rawLiteral) {
+		lower := make([]byte, len(m.rawLiteral))
+		for i, b := range m.rawLiteral {
+			lower[i] = lowerASCII(b)
+		}
+		m.foldNeedle = lower
+		m.foldFirstUpper = lower[0]
+		if lower[0] >= 'a' && lower[0] <= 'z' {
+			m.foldFirstUpper = lower[0] - ('a' - 'A')
+		}
+	}
 	return m, err
 }
 
@@ -207,6 +251,53 @@ func (m *Matcher) MatchLine(line string) int {
 	}
 	return strings.Index(line, m.literal)
 }
+
+// MatchBytes is MatchLine without turning the line into a string first.
+//
+// A content search reads far more lines than it reports — on a
+// 234-repository workspace, tens of millions of lines to return a handful —
+// so the allocation that MatchLine's string argument implies is paid on every
+// line and recovered on almost none. regexp and bytes both offer the same
+// search over []byte, so the conversion buys nothing.
+//
+// The string form is kept: it is what a caller with a line already in hand
+// should use, and the two must agree, which TestMatchBytesAgreesWithMatchLine
+// asserts over the same inputs.
+func (m *Matcher) MatchBytes(line []byte) int {
+	if m.re != nil {
+		loc := m.re.FindIndex(line)
+		if loc == nil {
+			return -1
+		}
+		return loc[0]
+	}
+	return bytes.Index(line, m.literalBytes)
+}
+
+// CanPrefilter reports whether a whole-file test is equivalent to testing
+// each line, which holds exactly when the pattern cannot anchor.
+func (m *Matcher) CanPrefilter() bool { return m.literalOnly }
+
+// MatchAny reports whether the pattern occurs anywhere in buf.
+//
+// This is the cheap question asked first. Almost every file in a workspace
+// contains no match, and answering "no" for the whole file at once skips
+// splitting it into lines and testing each one — which was the bulk of the
+// work in a content search, spent entirely on files that had nothing to say.
+func (m *Matcher) MatchAny(buf []byte) bool {
+	if m.re != nil {
+		return m.re.Match(buf)
+	}
+	return bytes.Contains(buf, m.literalBytes)
+}
+
+// indexPattern is the literal this matcher searches for, as bytes.
+//
+// Only meaningful when CanPrefilter reports true; the trigram index uses it to
+// derive the trigrams a matching file must contain. For the case-insensitive
+// form the literal was QuoteMeta'd into a regex, so the original is kept
+// alongside it purely for this.
+func (m *Matcher) indexPattern() []byte { return m.rawLiteral }
 
 // MaxHits is the cap this matcher was compiled with.
 func (m *Matcher) MaxHits() int { return m.maxHits }
