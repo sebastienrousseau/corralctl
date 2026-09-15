@@ -319,3 +319,48 @@ func TestOneLargeFileDoesNotDisableTheIndex(t *testing.T) {
 	}
 	t.Logf("narrowed %d files to %d with an oversized file present", ix.Files(), len(cands))
 }
+
+// TestDeclineReasonExplainsEachRefusal covers the diagnostic that found the
+// truncation bug.
+//
+// Candidates returning "no opinion" is the difference between a fast query and
+// a slow one, and for a long time the only way to tell which of five reasons
+// applied was to add a print statement and re-run. Two wrong guesses at a
+// real slowdown cost more than this function does; it is worth keeping, and
+// worth keeping honest.
+func TestDeclineReasonExplainsEachRefusal(t *testing.T) {
+	root := indexTree(t)
+	ix, err := BuildIndex(context.Background(), root, func(string) bool { return true })
+	if err != nil {
+		t.Fatal(err)
+	}
+	mustCompile := func(q Query) *Matcher {
+		t.Helper()
+		q.MaxHits = 10
+		m, err := Compile(q)
+		if err != nil {
+			t.Fatalf("compile %+v: %v", q, err)
+		}
+		return m
+	}
+
+	for _, tc := range []struct {
+		name string
+		ix   *Index
+		m    *Matcher
+		want string
+	}{
+		{"nil index", nil, mustCompile(Query{Pattern: "needle"}), "no index"},
+		{"incomplete", &Index{incomplete: true}, mustCompile(Query{Pattern: "needle"}), "file list incomplete"},
+		{"regex", ix, mustCompile(Query{Pattern: "nee.le", Regex: true}), "not a literal"},
+		{"too short", ix, mustCompile(Query{Pattern: "ne"}), "shorter than a trigram"},
+		{"usable", ix, mustCompile(Query{Pattern: "needle"}), "trigrams:"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := tc.ix.DeclineReason(tc.m)
+			if !strings.Contains(got, tc.want) {
+				t.Errorf("DeclineReason = %q, want it to mention %q", got, tc.want)
+			}
+		})
+	}
+}
