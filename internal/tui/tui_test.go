@@ -615,10 +615,13 @@ func TestRemainingSelectorStates(t *testing.T) {
 
 	oldVersion := Version
 	t.Cleanup(func() { Version = oldVersion })
+	// "(dev)", not "(vdev)": a build with no version does not get a "v" glued
+	// to the placeholder. See internal/version.
 	Version = ""
-	if footer := m.renderFooter(); !strings.Contains(footer, "vdev") {
+	if footer := m.renderFooter(); !strings.Contains(footer, "(dev)") {
 		t.Fatalf("development footer = %q", footer)
 	}
+	// A version that already carries a "v" keeps exactly the one it has.
 	Version = strings.Repeat("v", 100)
 	if footer := m.renderFooter(); !strings.Contains(footer, Version) {
 		t.Fatalf("long-version footer = %q", footer)
