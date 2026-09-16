@@ -93,6 +93,26 @@ Use imperative commit messages: "Add dry-run flag", not "Added dry-run flag."
 - [ ] All commits are signed (`git log --show-signature`)
 - [ ] All commits carry a DCO sign-off (`git commit -s`)
 
+## Dependency updates
+
+`SBOM.md` lists every direct requirement in `go.mod`, and `make sbom-check`
+fails if the two disagree in either direction. Dependabot updates `go.mod` and
+cannot touch `SBOM.md`, so **every Go-module bump it opens fails that check and
+cannot go green on its own.** (GitHub Actions bumps are unaffected — they do not
+touch `go.mod`.)
+
+To land one, add a commit to the branch that brings the SBOM row along:
+
+```sh
+make sbom-fix     # rewrites the version cells go.mod has moved past
+git commit -s -am "chore(deps): update SBOM.md for the bump"
+```
+
+`sbom-fix` only updates versions of modules already listed. Adding or removing
+a dependency still needs a person: a new row carries a Purpose and a Licence,
+and inventing either would defeat the point of the file. Those cases are
+reported, never applied.
+
 ## Code Style
 
 - Use standard Go formatting (`gofmt -w .`).
