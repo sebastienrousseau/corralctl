@@ -37,7 +37,7 @@ LDFLAGS = -s -w \
 	-X $(VERSION_PKG)/internal/tui.Version=$(VERSION)
 
 .PHONY: all build docs install uninstall install-smoke test test-race vet lint \
-        clean format sbom-check example-check doc-check spdx-check pkg-check eval staticcheck race-hard bench claims-check \
+        clean format sbom-check sbom-fix example-check doc-check spdx-check pkg-check eval staticcheck race-hard bench claims-check \
         docs-lint help
 
 all: format vet staticcheck spdx-check sbom-check pkg-check claims-check example-check test test-race build
@@ -143,6 +143,10 @@ lint:
 ## sbom-check: verify SBOM.md and server.json against go.mod and CHANGELOG
 sbom-check:
 	go run scripts/manifest_check.go
+
+## sbom-fix: bring SBOM.md's versions back in line with go.mod, then verify
+sbom-fix:
+	go run scripts/manifest_check.go -fix
 
 ## example-check: compile every program under examples/
 example-check:

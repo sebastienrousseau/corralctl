@@ -20,6 +20,18 @@
 //
 //	go run scripts/manifest_check.go
 //
+// With -fix, the one class of drift that has an unambiguous repair is repaired
+// rather than reported: a module already listed in SBOM.md whose version has
+// moved on in go.mod. That is the dependabot case — dependabot updates go.mod
+// and cannot touch SBOM.md, so every Go-module bump it opens fails this check
+// and can never go green on its own.
+//
+//	go run scripts/manifest_check.go -fix
+//
+// Adding or removing a dependency is deliberately NOT repaired: a new row
+// needs a Purpose and a Licence, and inventing either would defeat the point
+// of the file. Those are still reported for a human.
+//
 // Checks performed:
 //
 //  1. SBOM.md's dependency table matches go.mod's direct requirements
@@ -34,6 +46,7 @@ package main
 
 import (
 	"encoding/json"
+	"flag"
 	"fmt"
 	"net/url"
 	"os"
@@ -55,6 +68,24 @@ var sbomRow = regexp.MustCompile("^\\|\\s*`([^`]+)`\\s*\\|\\s*(v\\S+)\\s*\\|")
 var changelogHeading = regexp.MustCompile(`^## \[(\d+\.\d+\.\d+)\]`)
 
 func main() {
+	fix := flag.Bool("fix", false,
+		"rewrite SBOM.md versions that go.mod has moved past, then re-check")
+	flag.Parse()
+
+	if *fix {
+		fixed, err := fixSBOMVersions()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "manifest fix failed: %v\n", err)
+			os.Exit(1)
+		}
+		for _, f := range fixed {
+			fmt.Printf("fixed: %s\n", f)
+		}
+		if len(fixed) == 0 {
+			fmt.Println("fix: nothing to change in SBOM.md")
+		}
+	}
+
 	var problems []string
 	problems = append(problems, checkSBOM()...)
 	problems = append(problems, checkServerManifest()...)
@@ -302,6 +333,54 @@ var anyChangelogHeading = regexp.MustCompile(`^## \[([^\]]+)\]`)
 
 // changelogLinkRef matches a Markdown link reference definition.
 var changelogLinkRef = regexp.MustCompile(`^\[([^\]]+)\]:\s+http`)
+
+// fixSBOMVersions rewrites the version cell of every SBOM.md row whose module
+// is still a direct requirement but at a different version in go.mod, and
+// returns a line describing each change.
+//
+// It repairs only versions of rows that already exist. A module in go.mod with
+// no row, or a row for a module no longer required, is left alone: the first
+// needs a Purpose and a Licence that only a person can supply, and the second
+// is a removal that should be seen rather than done silently. checkSBOM still
+// reports both.
+//
+// The file is rewritten only when something actually changed, so running this
+// twice is a no-op rather than a no-op-shaped write.
+func fixSBOMVersions() ([]string, error) {
+	goMod, err := parseDirectRequires("go.mod")
+	if err != nil {
+		return nil, err
+	}
+	body, err := os.ReadFile("SBOM.md")
+	if err != nil {
+		return nil, fmt.Errorf("reading SBOM.md: %w", err)
+	}
+
+	var changed []string
+	lines := strings.Split(string(body), "\n")
+	for i, line := range lines {
+		m := sbomRow.FindStringSubmatch(line)
+		if m == nil {
+			continue
+		}
+		mod, have := m[1], m[2]
+		want, required := goMod[mod]
+		if !required || want == have {
+			continue
+		}
+		// Replace only the version cell. The row is matched by the same regex
+		// the checker uses, so the token being replaced is the one it read.
+		lines[i] = strings.Replace(line, have, want, 1)
+		changed = append(changed, fmt.Sprintf("SBOM.md: %s %s -> %s", mod, have, want))
+	}
+	if len(changed) == 0 {
+		return nil, nil
+	}
+	if err := os.WriteFile("SBOM.md", []byte(strings.Join(lines, "\n")), 0o644); err != nil {
+		return nil, fmt.Errorf("writing SBOM.md: %w", err)
+	}
+	return changed, nil
+}
 
 // checkSBOM compares SBOM.md's table with go.mod's direct requirements.
 func checkSBOM() []string {
