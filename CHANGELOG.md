@@ -8,6 +8,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Three transports from one command line.** `corralctl mcp` still speaks
+  stdio by default; `--transport streamable-http --host 127.0.0.1 --port 8000`
+  serves Streamable HTTP at `/mcp`, and `--transport sse --port 8001` serves
+  the legacy HTTP+SSE transport (protocol 2024-11-05) at `/sse`, for a host
+  that still expects it. The loopback guard that covered `--http` covers
+  `--host` too. See ADR 0007.
+- **One Streamable HTTP endpoint, both current protocol revisions.** `/mcp`
+  answers a `2026-07-28` client (stateless: `server/discover`, per-request
+  `_meta`, mirrored headers) and a `2025-11-25` client (`initialize` and
+  `Mcp-Session-Id`) alike, telling them apart by the `Mcp-Protocol-Version`
+  header and, without one, by whether the request opens or names a session.
+  An idle session is closed after an hour, and every session is ended when
+  the listener stops. Verified with an external auditor at 100/100 in both
+  revisions, and over SSE with the reference client.
+- **An unknown tool is a result, not a transport failure.** A call to a tool
+  the server does not have — a guessed name, or a write tool on a server
+  started without `--enable-mutations` — now returns an `isError` tool result
+  saying so, on every transport and revision. Under `2026-07-28` the SDK's
+  protocol error would have carried HTTP 400, which a client's transport
+  layer retries rather than reads.
+
+### Changed
+
+- `--http HOST:PORT` is deprecated in favour of `--transport streamable-http`
+  with `--host` and `--port`. It still works, prints a notice on stderr, and
+  its address wins whole over the new flags' defaults.
+- The JSON-RPC rewrite on the HTTP transport now reshapes only what the SDK
+  refused at the JSON-RPC layer (an unknown method, a malformed envelope). A
+  refusal of the HTTP request itself — an unsupported `Mcp-Protocol-Version`,
+  a session the server does not know — keeps its status, since a client is
+  meant to re-initialise on a 404 and would not on a 200.
+
 - `glama.json`, the Glama directory manifest, so the corralctl listing there
   carries the same title, description, install commands and version as the
   registry's `server.json`. CI now fails when the two manifests disagree with
