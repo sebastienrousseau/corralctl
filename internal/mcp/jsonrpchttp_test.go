@@ -17,11 +17,20 @@ import (
 // It deliberately goes through Server.httpHandler rather than wrapping a stub:
 // this layer exists to reshape responses the SDK produced, so a stand-in inner
 // handler would test the wrapper against fiction.
+//
+// A bare `initialize` opens a 2025-11-25 session that nothing in these tests
+// ends, so the cleanup closes whatever sessions are left: the package's
+// goroutine-leak check would otherwise find the session's reader.
 func newHTTPTestServer(t *testing.T) *httptest.Server {
 	t.Helper()
 	srv := newTestServer(t, t.TempDir())
 	ts := httptest.NewServer(srv.httpHandler())
-	t.Cleanup(ts.Close)
+	t.Cleanup(func() {
+		ts.Close()
+		for session := range srv.mcp.Sessions() {
+			_ = session.Close()
+		}
+	})
 	return ts
 }
 

@@ -244,7 +244,48 @@ func NewServer(opts ServerOptions) (*Server, error) {
 	if s.opts.EnableDestructiveMutations && s.opts.EnableMutations {
 		s.registerDestructiveTools()
 	}
+	// Registered after every tool is, since it answers by that list.
+	s.mcp.AddReceivingMiddleware(s.unknownToolMiddleware())
 	return s, nil
+}
+
+// unknownToolMiddleware answers a call to a tool this server does not have
+// with a tool result that says so, rather than the SDK's protocol error.
+//
+// The SDK reports an unknown name as -32602, and under 2026-07-28 that
+// carries HTTP 400 — the same status a mangled request gets, which is what
+// a client's transport layer reads, and a transport failure is retried
+// rather than read. An agent that guessed a tool name, or asked for a write
+// tool on a server started without --enable-mutations, has made an
+// application-level mistake, and a result it can read is what lets it
+// correct course: the same answer, on every transport and revision.
+func (s *Server) unknownToolMiddleware() mcp.Middleware {
+	return func(next mcp.MethodHandler) mcp.MethodHandler {
+		return func(ctx context.Context, method string, req mcp.Request) (mcp.Result, error) {
+			// An empty name is not an unknown tool but a malformed call,
+			// and stays the SDK's -32602 Invalid params.
+			call, ok := req.(*mcp.CallToolRequest)
+			if !ok || method != "tools/call" || call.Params.Name == "" || s.hasTool(call.Params.Name) {
+				return next(ctx, method, req)
+			}
+			return &mcp.CallToolResult{
+				IsError: true,
+				Content: []mcp.Content{&mcp.TextContent{
+					Text: fmt.Sprintf("unknown tool %q: tools/list names the tools this server offers", call.Params.Name),
+				}},
+			}, nil
+		}
+	}
+}
+
+// hasTool reports whether a tool of that name was registered on this server.
+func (s *Server) hasTool(name string) bool {
+	for _, n := range s.toolNames {
+		if n == name {
+			return true
+		}
+	}
+	return false
 }
 
 // AuditLogPath returns the audit log path when mutations are enabled;
@@ -423,41 +464,8 @@ func serverInstructions(opts ServerOptions) string {
 var listenAndServe = func(srv *http.Server) error { return srv.ListenAndServe() }
 
 // ServeHTTP runs the server on the Streamable HTTP transport, the MCP
-// standard for anything not launched as a subprocess.
-//
-// Blocks until the listener fails or ctx is cancelled.
-//
-// The address should stay on loopback unless the caller has thought about
-// it. This server reads a developer's whole workspace and, when mutations
-// are enabled, writes to it; there is no authentication here, so binding
-// it to a routable interface publishes that. The cmd layer refuses a
-// non-loopback bind without an explicit flag, and this logs what it is
-// listening on so an operator can see which it got.
-// httpHandler builds the HTTP handler chain the server serves.
-//
-// Separate from ServeHTTP so a test can drive the real chain rather than
-// assemble a lookalike: the whole point of the jsonrpcHTTP wrapper is what it
-// does to responses the SDK produced, which a hand-rolled stand-in would not
-// reproduce.
-func (s *Server) httpHandler() http.Handler {
-	handler := mcp.NewStreamableHTTPHandler(
-		func(*http.Request) *mcp.Server { return s.mcp },
-		// Stateless: every request carries its own identity, so any
-		// instance can serve any request and there is no session to leak
-		// between clients. It is also what the 2026-07-28 protocol moved
-		// to, so this matches where clients are heading rather than
-		// where they have been.
-		&mcp.StreamableHTTPOptions{Stateless: true},
-	)
-	// jsonrpcHTTP turns the transport's HTTP error pages for unknown methods
-	// back into JSON-RPC error responses, which is what a client can parse.
-	// It delegates first and only rewrites what the SDK refused, so a served
-	// request never passes through its logic.
-	return jsonrpcHTTP(handler)
-}
-
-// ServeHTTP runs the server on the Streamable HTTP transport, the MCP
-// standard for anything not launched as a subprocess.
+// standard for anything not launched as a subprocess. Both current protocol
+// revisions are served on StreamableEndpoint; see eraRouter.
 //
 // Blocks until the listener fails or ctx is cancelled.
 //
@@ -468,6 +476,13 @@ func (s *Server) httpHandler() http.Handler {
 // without an explicit flag, and this logs what it is listening on so an
 // operator can see which it got.
 func (s *Server) ServeHTTP(ctx context.Context, addr string) error {
+	return s.serve(ctx, addr, s.httpHandler())
+}
+
+// serve is the listener behind ServeHTTP and ServeSSE: one http.Server, the
+// given handler, the symbol warmer for as long as it runs, and an orderly
+// stop when ctx is cancelled.
+func (s *Server) serve(ctx context.Context, addr string, handler http.Handler) error {
 	// Warm the symbol cache off the request path. HTTP only: this server is
 	// long-lived and serves many sessions, so the scan pays for itself, while
 	// a stdio server is started per session and may never be asked about
@@ -492,7 +507,7 @@ func (s *Server) ServeHTTP(ctx context.Context, addr string) error {
 
 	srv := &http.Server{
 		Addr:    addr,
-		Handler: s.httpHandler(),
+		Handler: handler,
 		// A workspace scan on a large tree is the slowest thing here, and
 		// a symbol extraction is slower still, so the read and write
 		// budgets are generous. ReadHeaderTimeout is not: it is the one
@@ -518,6 +533,15 @@ func (s *Server) ServeHTTP(ctx context.Context, addr string) error {
 		// mutation off mid-write.
 		shutdownCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 		defer cancel()
-		return srv.Shutdown(shutdownCtx)
+		err := srv.Shutdown(shutdownCtx)
+		// A 2025-11-25 session outlives the HTTP request that created it,
+		// and Shutdown knows nothing about it: the session sits in the
+		// transport's table with its goroutines until its idle timeout.
+		// The listener is gone, so nothing can reach it again; end it now
+		// rather than leave the process to exit around it.
+		for session := range s.mcp.Sessions() {
+			_ = session.Close()
+		}
+		return err
 	}
 }
