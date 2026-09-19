@@ -6,6 +6,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `glama.json`, the Glama directory manifest, so the corralctl listing there
+  carries the same title, description, install commands and version as the
+  registry's `server.json`. CI now fails when the two manifests disagree with
+  `internal/version/version.go`.
+
 ## [0.0.37] — 2026-09-06
 
 One binary, one base command. `corralctl` now carries both halves of the
