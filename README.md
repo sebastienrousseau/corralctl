@@ -15,6 +15,7 @@
   <a href="https://pkg.go.dev/github.com/sebastienrousseau/corralctl"><img src="https://img.shields.io/badge/go.dev-reference-007d9c?style=for-the-badge&logo=go&logoColor=white" alt="Go Reference" /></a>
   <a href="https://golangci-lint.run/"><img src="https://img.shields.io/badge/lint-golangci--lint-00ADD8?style=for-the-badge&logo=go&logoColor=white" alt="golangci-lint" /></a>
   <a href="https://codecov.io/gh/sebastienrousseau/corralctl"><img src="https://img.shields.io/codecov/c/github/sebastienrousseau/corralctl?style=for-the-badge&logo=codecov" alt="Code Coverage" /></a>
+  <a href="https://glama.ai/mcp/servers/sebastienrousseau/corralctl"><img src="https://glama.ai/mcp/servers/sebastienrousseau/corralctl/badges/score.svg" alt="Glama MCP server score" /></a>
   <a href="https://scorecard.dev/viewer/?uri=github.com/sebastienrousseau/corralctl"><img src="https://img.shields.io/ossf-scorecard/github.com/sebastienrousseau/corralctl?style=for-the-badge&label=OpenSSF%20Scorecard&logo=openssf" alt="OpenSSF Scorecard" /></a>
   <a href="https://www.bestpractices.dev/projects/13455"><img src="https://img.shields.io/cii/level/13455?style=for-the-badge&label=OpenSSF%20Best%20Practices&logo=openssf" alt="OpenSSF Best Practices" /></a>
   <a href="https://doc.corrallib.com"><img src="https://img.shields.io/badge/docs-doc.corrallib.com-brightgreen?style=for-the-badge&logo=github" alt="Documentation" /></a>

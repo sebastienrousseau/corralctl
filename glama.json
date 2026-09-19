@@ -1,0 +1,44 @@
+{
+  "$schema": "https://glama.ai/api/mcp/v1/schemas/glama.json",
+  "maintainers": [
+    "sebastienrousseau"
+  ],
+  "title": "corralctl",
+  "display_name": "corralctl MCP",
+  "description": "Model Context Protocol server over a corralctl-organised workspace of git clones. Lets AI coding agents search code and symbols across every clone on disk, list repositories by forge, visibility and language, and read files, with zero network calls in the default read-only mode; an opt-in mode adds clone and sync tools that shell out to git.",
+  "version": "0.0.37",
+  "repository": "https://github.com/sebastienrousseau/corralctl",
+  "homepage": "https://doc.corrallib.com",
+  "license": "GPL-3.0-only",
+  "language": "Go",
+  "runtime": "docker",
+  "categories": [
+    "developer-tools"
+  ],
+  "tags": [
+    "git",
+    "code-search",
+    "symbols",
+    "monorepo",
+    "workspace",
+    "local-first",
+    "offline",
+    "github",
+    "gitlab",
+    "codeberg",
+    "go",
+    "mcp"
+  ],
+  "mcpServers": {
+    "corral": {
+      "command": "corralctl",
+      "args": [
+        "mcp"
+      ]
+    }
+  },
+  "installation": {
+    "go": "go install github.com/sebastienrousseau/corralctl/cmd/corralctl@latest",
+    "docker": "docker run --rm -i ghcr.io/sebastienrousseau/corralctl:0.0.37"
+  }
+}

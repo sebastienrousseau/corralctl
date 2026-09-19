@@ -89,6 +89,7 @@ func main() {
 	var problems []string
 	problems = append(problems, checkSBOM()...)
 	problems = append(problems, checkServerManifest()...)
+	problems = append(problems, checkGlamaManifest()...)
 	problems = append(problems, checkBaseImage()...)
 	problems = append(problems, checkOSPSConsistency()...)
 	problems = append(problems, checkChangelogLinks()...)
@@ -103,7 +104,7 @@ func main() {
 		}
 		os.Exit(1)
 	}
-	fmt.Println("Manifest check: SBOM.md, server.json and the prose docs agree with go.mod, CHANGELOG.md and the Dockerfile")
+	fmt.Println("Manifest check: SBOM.md, server.json, glama.json and the prose docs agree with go.mod, CHANGELOG.md and the Dockerfile")
 }
 
 // checkVersionedProse verifies that documents quoting a concrete version
@@ -449,6 +450,58 @@ func checkServerManifest() []string {
 				"server.json image tag is %s, its version field is %s", tag, manifest.Version))
 		}
 	}
+	return problems
+}
+
+// checkGlamaManifest holds glama.json, the Glama directory's listing, to the
+// same rule as server.json: its version is the newest release, and every
+// install command it quotes names the image for that release. Glama reads
+// the file from the default branch, so a stale one is what its users see.
+func checkGlamaManifest() []string {
+	raw, err := os.ReadFile("glama.json")
+	if err != nil {
+		return []string{fmt.Sprintf("reading glama.json: %v", err)}
+	}
+	var manifest struct {
+		Version      string            `json:"version"`
+		Installation map[string]string `json:"installation"`
+		MCPServers   map[string]struct {
+			Command string   `json:"command"`
+			Args    []string `json:"args"`
+		} `json:"mcpServers"`
+	}
+	if err := json.Unmarshal(raw, &manifest); err != nil {
+		return []string{fmt.Sprintf("parsing glama.json: %v", err)}
+	}
+	released, err := latestChangelogVersion("CHANGELOG.md")
+	if err != nil {
+		return []string{err.Error()}
+	}
+	var problems []string
+	if manifest.Version != released {
+		problems = append(problems, fmt.Sprintf(
+			"glama.json version is %s, newest CHANGELOG.md release is %s", manifest.Version, released))
+	}
+	imageTag := regexp.MustCompile(`ghcr\.io/sebastienrousseau/corralctl:([^\s"]+)`)
+	for name, cmd := range manifest.Installation {
+		for _, m := range imageTag.FindAllStringSubmatch(cmd, -1) {
+			if m[1] != manifest.Version {
+				problems = append(problems, fmt.Sprintf(
+					"glama.json installation.%s names image tag %s, its version field is %s", name, m[1], manifest.Version))
+			}
+		}
+	}
+	for name, srv := range manifest.MCPServers {
+		for _, arg := range srv.Args {
+			for _, m := range imageTag.FindAllStringSubmatch(arg, -1) {
+				if m[1] != manifest.Version {
+					problems = append(problems, fmt.Sprintf(
+						"glama.json mcpServers.%s names image tag %s, its version field is %s", name, m[1], manifest.Version))
+				}
+			}
+		}
+	}
+	sort.Strings(problems)
 	return problems
 }
 
