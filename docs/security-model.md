@@ -49,7 +49,8 @@ corralctl operates across four trust boundaries:
 Boundary 2 also includes `git clone` traffic to `github.com` over HTTPS.
 
 Boundary 4 is a pipe by default: the client launches the server as a
-subprocess and nothing else can reach it. `--http` turns it into a socket.
+subprocess and nothing else can reach it. `--transport streamable-http` or
+`--transport sse` (and the older `--http`) turns it into a socket.
 The server carries no authentication of its own, so the address is required
 to be on loopback — a routable bind is refused unless the operator also
 passes `--allow-remote`, which asserts that they have put authentication in

@@ -29,3 +29,4 @@ the decision was made on a weaker basis than it appeared.
 | [0004](0004-file-resource-allowlist.md) | The MCP file resource serves by allowlist | Accepted |
 | [0005](0005-generated-manpages-and-completions.md) | Manpages and completions are generated, never committed | Accepted |
 | [0006](0006-symbol-extraction-without-cgo.md) | Symbol extraction uses `go/ast`, not tree-sitter | Accepted, corrected |
+| [0007](0007-three-transports-one-command-line.md) | stdio, Streamable HTTP and SSE from one command line | Accepted |

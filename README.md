@@ -511,16 +511,26 @@ Notes on the args:
 corralctl mcp --root /custom/workspace
 ```
 
-**Serve over HTTP** instead of stdio, for a client that connects to a running
-server rather than launching one:
+### Transports
 
-```bash
-corralctl mcp --http 127.0.0.1:7777
-```
+stdio is the default: the client launches `corralctl mcp` and owns the pipe.
+The other two listen on `--host` and `--port`, for a client that connects to
+a server somebody else started.
 
-The address must be on loopback. `--http :7777` binds every interface and is
-refused, because this server has no authentication; pass `--allow-remote` if
-you have put your own in front of it.
+| Command | Transport | Endpoint | Protocol revisions |
+|---|---|---|---|
+| `corralctl mcp` | stdio | — | negotiated on `initialize` |
+| `corralctl mcp --transport streamable-http --host 127.0.0.1 --port 8000` | Streamable HTTP | `http://127.0.0.1:8000/mcp` | `2026-07-28` (stateless, `server/discover`) and `2025-11-25` (`initialize`, `Mcp-Session-Id`), on the one endpoint |
+| `corralctl mcp --transport sse --port 8001` | HTTP+SSE (legacy) | `http://127.0.0.1:8001/sse` | `2024-11-05` |
+
+`--http 127.0.0.1:7777` is the older spelling of `--transport
+streamable-http` and still works.
+
+None of them carries authentication, so a listening transport binds
+loopback: `--host 0.0.0.0`, or `--http :7777`, which binds every interface,
+is refused because this server exposes every repository under its root.
+Pass `--allow-remote` if you have put your own authentication in front of
+it.
 
 ### Safety
 
@@ -540,13 +550,14 @@ you have put your own in front of it.
   persuaded agent choosing the one clone that passes every check, which no
   amount of prompt text can. Pass `--no-confirm-deletes` only for an
   unattended workspace you are willing to lose.
-- **stdio by default; loopback when not.** Without `--http` the server has no
-  endpoint and no listening port, and only ever speaks to the parent process
-  that launched it. `--http` serves the Streamable HTTP transport, and
-  because the server has no authentication and exposes every repository under
-  its root, a non-loopback address is refused unless you also pass
-  `--allow-remote` — the accidental `--http :7777`, which binds every
-  interface, does not start.
+- **stdio by default; loopback when not.** Without `--transport` the server
+  has no endpoint and no listening port, and only ever speaks to the parent
+  process that launched it. `--transport streamable-http` and `--transport
+  sse` listen on `--host`/`--port`, and because the server has no
+  authentication and exposes every repository under its root, a non-loopback
+  address is refused unless you also pass `--allow-remote` — the accidental
+  `--host 0.0.0.0`, or `--http :7777`, which binds every interface, does not
+  start.
 
 ---
 

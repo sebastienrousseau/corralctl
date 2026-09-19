@@ -28,6 +28,10 @@ type stubMCPServer struct {
 	httpErr       error
 	httpCallCount int
 	httpAddr      string
+
+	sseErr       error
+	sseCallCount int
+	sseAddr      string
 }
 
 func (s *stubMCPServer) Root() string           { return s.root }
@@ -42,6 +46,12 @@ func (s *stubMCPServer) ServeHTTP(_ context.Context, addr string) error {
 	s.httpCallCount++
 	s.httpAddr = addr
 	return s.httpErr
+}
+
+func (s *stubMCPServer) ServeSSE(_ context.Context, addr string) error {
+	s.sseCallCount++
+	s.sseAddr = addr
+	return s.sseErr
 }
 
 func TestRunMCPAdditionalPathBranches(t *testing.T) {
@@ -107,14 +117,17 @@ func resetMCPFlags(t *testing.T) {
 	t.Helper()
 	oldRoot, oldMut := mcpRoot, mcpEnableMutations
 	oldHTTP, oldRemote, oldNoConfirm := mcpHTTP, mcpAllowRemote, mcpNoConfirmDeletes
+	oldTransport, oldHost, oldPort := mcpTransport, mcpHost, mcpPort
 	mcpRoot = ""
 	mcpEnableMutations = false
 	mcpHTTP = ""
 	mcpAllowRemote = false
 	mcpNoConfirmDeletes = false
+	mcpTransport, mcpHost, mcpPort = string(transportStdio), "127.0.0.1", 8000
 	t.Cleanup(func() {
 		mcpRoot, mcpEnableMutations = oldRoot, oldMut
 		mcpHTTP, mcpAllowRemote, mcpNoConfirmDeletes = oldHTTP, oldRemote, oldNoConfirm
+		mcpTransport, mcpHost, mcpPort = oldTransport, oldHost, oldPort
 	})
 }
 
@@ -389,5 +402,151 @@ func TestConfirmDeletesDefaultsOn(t *testing.T) {
 	}
 	if captured.ConfirmDeletes {
 		t.Error("--no-confirm-deletes should switch the confirmation off")
+	}
+}
+
+// TestResolveTransport is the flag arithmetic: three flags and a deprecated
+// fourth folded into one decision. The --http cases are the ones a
+// configured client depends on — its address must win, whole, over the
+// defaults of --host and --port.
+func TestResolveTransport(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		transport string
+		http      string
+		host      string
+		port      int
+		wantKind  transportKind
+		wantAddr  string
+		wantErr   string
+	}{
+		{"default is stdio", "stdio", "", "127.0.0.1", 8000, transportStdio, "", ""},
+		{"streamable-http on host and port", "streamable-http", "", "127.0.0.1", 8000, transportStreamableHTTP, "127.0.0.1:8000", ""},
+		{"sse on host and port", "sse", "", "127.0.0.1", 8001, transportSSE, "127.0.0.1:8001", ""},
+		{"an IPv6 host is bracketed", "sse", "", "::1", 8001, transportSSE, "[::1]:8001", ""},
+		{"--http alone selects streamable-http", "stdio", "127.0.0.1:7777", "127.0.0.1", 8000, transportStreamableHTTP, "127.0.0.1:7777", ""},
+		{"--http takes its own address over --host and --port", "streamable-http", "localhost:7777", "10.0.0.1", 9, transportStreamableHTTP, "localhost:7777", ""},
+		{"--http keeps an every-interface bind for the guard to refuse", "stdio", ":7777", "127.0.0.1", 8000, transportStreamableHTTP, ":7777", ""},
+		{"--http with sse is a contradiction", "sse", "127.0.0.1:7777", "127.0.0.1", 8000, "", "", "cannot be combined"},
+		{"an unknown transport", "grpc", "", "127.0.0.1", 8000, "", "", "not one of"},
+		{"port zero", "streamable-http", "", "127.0.0.1", 0, "", "", "not a TCP port"},
+		{"port too large", "sse", "", "127.0.0.1", 65536, "", "", "not a TCP port"},
+		{"an empty host", "streamable-http", "", "", 8000, "", "", "empty host"},
+		{"port is not checked for stdio", "stdio", "", "", 0, transportStdio, "", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			kind, addr, err := resolveTransport(tc.transport, tc.http, tc.host, tc.port)
+			if tc.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+					t.Fatalf("err = %v, want one mentioning %q", err, tc.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if kind != tc.wantKind || addr != tc.wantAddr {
+				t.Errorf("resolved (%q, %q), want (%q, %q)", kind, addr, tc.wantKind, tc.wantAddr)
+			}
+		})
+	}
+}
+
+// TestRunMCPTransportFlags drives runMCP through each transport and checks
+// exactly one listener was started, on the address the flags describe.
+func TestRunMCPTransportFlags(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		transport string
+		host      string
+		port      int
+		wantHTTP  string
+		wantSSE   string
+	}{
+		{"streamable-http", "streamable-http", "127.0.0.1", 8000, "127.0.0.1:8000", ""},
+		{"sse", "sse", "localhost", 8001, "", "localhost:8001"},
+		{"stdio", "stdio", "127.0.0.1", 8000, "", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			resetMCPFlags(t)
+			dir := t.TempDir()
+			mcpRoot = dir
+			mcpTransport, mcpHost, mcpPort = tc.transport, tc.host, tc.port
+
+			stub := &stubMCPServer{root: dir}
+			withStubServer(t, stub, nil)
+			if err := runMCP(nil, nil); err != nil {
+				t.Fatalf("expected success, got %v", err)
+			}
+			if stub.httpAddr != tc.wantHTTP || stub.sseAddr != tc.wantSSE {
+				t.Errorf("served http=%q sse=%q, want http=%q sse=%q", stub.httpAddr, stub.sseAddr, tc.wantHTTP, tc.wantSSE)
+			}
+			started := stub.httpCallCount + stub.sseCallCount + stub.serveCallCount
+			if started != 1 {
+				t.Errorf("%d transports started, want exactly one", started)
+			}
+			if tc.transport == "stdio" && stub.serveCallCount != 1 {
+				t.Error("stdio should have been served")
+			}
+		})
+	}
+}
+
+// TestRunMCPRefusesARoutableHost: the loopback guard covers --host as it
+// covers --http, for both listening transports.
+func TestRunMCPRefusesARoutableHost(t *testing.T) {
+	for _, transport := range []string{"streamable-http", "sse"} {
+		t.Run(transport, func(t *testing.T) {
+			resetMCPFlags(t)
+			dir := t.TempDir()
+			mcpRoot = dir
+			mcpTransport, mcpHost = transport, "0.0.0.0"
+
+			stub := &stubMCPServer{root: dir}
+			withStubServer(t, stub, nil)
+			err := runMCP(nil, nil)
+			if err == nil || !strings.Contains(err.Error(), "--allow-remote") {
+				t.Fatalf("a bind on every interface should be refused and name the override: %v", err)
+			}
+			if stub.httpCallCount+stub.sseCallCount+stub.serveCallCount != 0 {
+				t.Error("the server was started despite the refusal")
+			}
+
+			mcpAllowRemote = true
+			if err := runMCP(nil, nil); err != nil {
+				t.Fatalf("--allow-remote should lift the refusal: %v", err)
+			}
+		})
+	}
+}
+
+func TestRunMCPRejectsAnUnknownTransport(t *testing.T) {
+	resetMCPFlags(t)
+	dir := t.TempDir()
+	mcpRoot = dir
+	mcpTransport = "carrier-pigeon"
+
+	stub := &stubMCPServer{root: dir}
+	withStubServer(t, stub, nil)
+	err := runMCP(nil, nil)
+	if err == nil || !strings.Contains(err.Error(), "carrier-pigeon") {
+		t.Fatalf("an unknown transport should be refused by name: %v", err)
+	}
+	if stub.httpCallCount+stub.sseCallCount+stub.serveCallCount != 0 {
+		t.Error("the server was started despite the refusal")
+	}
+}
+
+func TestRunMCPReportsAnSSEFailure(t *testing.T) {
+	resetMCPFlags(t)
+	dir := t.TempDir()
+	mcpRoot = dir
+	mcpTransport, mcpPort = "sse", 8001
+
+	stub := &stubMCPServer{root: dir, sseErr: errors.New("address already in use")}
+	withStubServer(t, stub, nil)
+	err := runMCP(nil, nil)
+	if err == nil || !strings.Contains(err.Error(), "address already in use") {
+		t.Fatalf("the cause should survive: %v", err)
 	}
 }

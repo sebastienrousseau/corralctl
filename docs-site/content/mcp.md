@@ -125,14 +125,33 @@ By default the server speaks stdio: the client launches `corralctl mcp` as a
 subprocess and talks to it over the pipe. There is no endpoint and no
 listening port.
 
-`--http 127.0.0.1:7777` serves the Streamable HTTP transport instead, for a
-client that connects to a server somebody else started. The transport is
-stateless, so any instance can serve any request.
+The other two transports listen on `--host` and `--port`, for a client that
+connects to a server somebody else started:
+
+| Command | Transport | Endpoint | Protocol revisions |
+|---|---|---|---|
+| `corralctl mcp` | stdio | — | negotiated on `initialize` |
+| `corralctl mcp --transport streamable-http --host 127.0.0.1 --port 8000` | Streamable HTTP | `http://127.0.0.1:8000/mcp` | `2026-07-28` and `2025-11-25`, on the one endpoint |
+| `corralctl mcp --transport sse --port 8001` | HTTP+SSE (legacy) | `http://127.0.0.1:8001/sse` | `2024-11-05` |
+
+The Streamable HTTP endpoint serves both current revisions of the
+specification. A `2026-07-28` client sends no `initialize` and holds no
+session: each request carries its own identity in `_meta`, mirrored in the
+`Mcp-Protocol-Version` header, and `server/discover` asks who the server is.
+A `2025-11-25` client initialises, is issued `Mcp-Session-Id`, and may open a
+standalone stream with `GET`. The server tells them apart by the header and,
+without one, by whether the request opens or names a session; an idle session
+is closed after an hour. `--transport sse` is the older HTTP+SSE transport:
+`GET /sse` opens the event stream, and the `endpoint` event it sends names
+where the client posts its messages.
+
+`--http 127.0.0.1:7777` is the older spelling of `--transport streamable-http`
+and still works, with a notice on stderr.
 
 The address has to be on loopback. This server has no authentication and
 exposes every repository under its root — with mutations enabled, it can
 change them — so binding it to a routable interface publishes all of that.
-`--http :7777`, which is the form typed by somebody thinking about the port
-and not the host, binds every interface and is refused with an explanation.
-`--allow-remote` overrides the refusal, and is for the case where you have
-put your own authentication in front of it.
+`--host 0.0.0.0`, or `--http :7777`, which is the form typed by somebody
+thinking about the port and not the host, binds every interface and is
+refused with an explanation. `--allow-remote` overrides the refusal, and is
+for the case where you have put your own authentication in front of it.

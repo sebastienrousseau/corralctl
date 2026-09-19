@@ -149,9 +149,10 @@ func TestJSONRPCHTTPCorrectsAJSONErrorStatus(t *testing.T) {
 func TestJSONRPCHTTPKeepsAKnownMethodsInvalidRequest(t *testing.T) {
 	// A known method that the transport still refuses — a missing id, say —
 	// is an invalid request, not a missing method, and must not be reported
-	// as -32601.
+	// as -32601. The wording is the SDK's own (jsonrpc2.ErrInvalidRequest,
+	// as checkRequest wraps it), since that is what the wrapper keys on.
 	inner := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		http.Error(w, "missing id", http.StatusBadRequest)
+		http.Error(w, `invalid request: missing id for "tools/list"`, http.StatusBadRequest)
 	})
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/mcp",
@@ -163,6 +164,28 @@ func TestJSONRPCHTTPKeepsAKnownMethodsInvalidRequest(t *testing.T) {
 	}
 	if got.Error == nil || got.Error.Code != codeInvalidRequest {
 		t.Errorf("code = %+v, want %d for a known method", got.Error, codeInvalidRequest)
+	}
+}
+
+// TestJSONRPCHTTPLeavesATransportRefusalAlone: a text 400 about the HTTP
+// request rather than the envelope — an unsupported protocol header, a bad
+// Accept — is not the wrapper's to reshape. A client is meant to read that
+// status, and handed 200 with a JSON-RPC error it would carry on with a
+// version or a content type the server does not speak.
+func TestJSONRPCHTTPLeavesATransportRefusalAlone(t *testing.T) {
+	const refusal = "Bad Request: Unsupported protocol version (supported versions: 2026-07-28)"
+	inner := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, refusal, http.StatusBadRequest)
+	})
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/mcp",
+		strings.NewReader(`{"jsonrpc":"2.0","id":7,"method":"tools/list"}`))
+	jsonrpcHTTP(inner).ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("status %d, want the transport's own 400", rec.Code)
+	}
+	if strings.TrimSpace(rec.Body.String()) != refusal {
+		t.Errorf("body was rewritten: %s", rec.Body.String())
 	}
 }
 

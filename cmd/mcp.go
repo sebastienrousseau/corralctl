@@ -9,6 +9,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strconv"
 
 	"github.com/sebastienrousseau/corralctl/internal/mcp"
 	"github.com/sebastienrousseau/corralctl/internal/version"
@@ -23,6 +24,9 @@ var (
 	mcpAuditLog                   string
 	mcpAllowFileExts              string
 	mcpHTTP                       string
+	mcpTransport                  string
+	mcpHost                       string
+	mcpPort                       int
 	mcpAllowRemote                bool
 	mcpNoConfirmDeletes           bool
 )
@@ -36,8 +40,8 @@ var (
 // every diagnostic this command emits goes to stderr.
 var mcpCmd = &cobra.Command{
 	Use:   "mcp",
-	Short: "Run the corral-mcp server (Model Context Protocol over stdio).",
-	Long: `Start the Corral MCP server on stdio, or over HTTP with --http.
+	Short: "Run the corral-mcp server (Model Context Protocol over stdio, HTTP or SSE).",
+	Long: `Start the Corral MCP server on stdio, or over HTTP with --transport.
 
 The server exposes the local Corral-organised workspace (cloned
 repositories under the configured base directory) to AI coding agents
@@ -82,14 +86,27 @@ workspace you are willing to lose.
 
 Transport:
   Default is stdio - the client launches this process and talks to it
-  over the pipe; there is no listening port. --http 127.0.0.1:7777
-  serves the Streamable HTTP transport instead, for a client that
-  connects to a server somebody else started.
+  over the pipe; there is no listening port. The other two listen on
+  --host and --port, for a client that connects to a server somebody
+  else started:
+
+    --transport streamable-http   Streamable HTTP at /mcp. One endpoint
+                                  speaks both current protocol revisions:
+                                  2026-07-28 (stateless, server/discover)
+                                  and 2025-11-25 (initialize and
+                                  Mcp-Session-Id).
+    --transport sse               The legacy HTTP+SSE transport
+                                  (protocol 2024-11-05) at /sse, for a
+                                  host that still expects it.
+
+  --http HOST:PORT is the older spelling of --transport streamable-http
+  and still works; --host and --port are the way to say it now.
 
   The address must be on loopback. This server has no authentication
-  and exposes every repository under its root, so --http :7777 - which
-  binds every interface - is refused. --allow-remote overrides that,
-  for an operator who has put their own authentication in front.
+  and exposes every repository under its root, so --host 0.0.0.0 - or
+  --http :7777, which binds every interface - is refused.
+  --allow-remote overrides that, for an operator who has put their own
+  authentication in front.
 
 Resources:
   corral://workspace/index
@@ -122,6 +139,7 @@ type mcpServer interface {
 	AuditLogPath() string
 	ServeStdio() error
 	ServeHTTP(ctx context.Context, addr string) error
+	ServeSSE(ctx context.Context, addr string) error
 }
 
 // mcpNewServer is indirected through a package var so unit tests can
@@ -157,14 +175,18 @@ func runMCP(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("root %q is not a directory", abs)
 	}
 
-	if mcpHTTP != "" && !mcpAllowRemote && !loopbackOnly(mcpHTTP) {
+	kind, addr, err := resolveTransport(mcpTransport, mcpHTTP, mcpHost, mcpPort)
+	if err != nil {
+		return err
+	}
+	if kind != transportStdio && !mcpAllowRemote && !loopbackOnly(addr) {
 		return fmt.Errorf(
-			"--http %s would accept connections from other machines, and this server "+
+			"listening on %s would accept connections from other machines, and this server "+
 				"has no authentication: it exposes every repository under %s, and with "+
 				"mutations enabled it can change them.\n\n"+
-				"Use a loopback address (127.0.0.1:PORT or localhost:PORT), or pass "+
+				"Use a loopback address (--host 127.0.0.1 or --host localhost), or pass "+
 				"--allow-remote if you have put your own authentication in front of it",
-			mcpHTTP, abs)
+			addr, abs)
 	}
 
 	srv, err := mcpNewServer(mcp.ServerOptions{
@@ -192,17 +214,68 @@ func runMCP(cmd *cobra.Command, args []string) error {
 		version.Display(Version), srv.Root(), srv.MutationsEnabled(), mcpEnableDestructiveMutations, auditNote)
 
 	if mcpHTTP != "" {
-		fmt.Fprintf(os.Stderr, "corral-mcp listening on http://%s\n", mcpHTTP)
-		if err := srv.ServeHTTP(cmdContext(cmd), mcpHTTP); err != nil {
-			return fmt.Errorf("mcp server: %w", err)
-		}
-		return nil
+		fmt.Fprintf(os.Stderr, "corral-mcp: --http is deprecated; use --transport streamable-http --host HOST --port PORT\n")
 	}
 
-	if err := srv.ServeStdio(); err != nil {
-		return fmt.Errorf("mcp server: %w", err)
+	var serveErr error
+	switch kind {
+	case transportStreamableHTTP:
+		fmt.Fprintf(os.Stderr, "corral-mcp listening on http://%s%s (streamable HTTP; protocol 2026-07-28 and 2025-11-25)\n",
+			addr, mcp.StreamableEndpoint)
+		serveErr = srv.ServeHTTP(cmdContext(cmd), addr)
+	case transportSSE:
+		fmt.Fprintf(os.Stderr, "corral-mcp listening on http://%s%s (legacy HTTP+SSE; protocol 2024-11-05)\n",
+			addr, mcp.SSEEndpoint)
+		serveErr = srv.ServeSSE(cmdContext(cmd), addr)
+	default:
+		serveErr = srv.ServeStdio()
+	}
+	if serveErr != nil {
+		return fmt.Errorf("mcp server: %w", serveErr)
 	}
 	return nil
+}
+
+// transportKind is which of the three ways in the server was asked for.
+type transportKind string
+
+const (
+	transportStdio          transportKind = "stdio"
+	transportStreamableHTTP transportKind = "streamable-http"
+	transportSSE            transportKind = "sse"
+)
+
+// resolveTransport folds --transport, --host, --port and the older --http
+// into one decision: which transport, and for a listening one, the address.
+//
+// --http predates the other three and is kept so a configured client keeps
+// working. It names the streamable transport and its address in one flag,
+// so it cannot be combined with --transport sse, and it takes the address
+// over --host/--port rather than merging with them: a user who typed
+// 127.0.0.1:7777 meant that, not port 7777 on whatever --host defaults to.
+func resolveTransport(transport, httpAddr, host string, port int) (transportKind, string, error) {
+	kind := transportKind(transport)
+	switch kind {
+	case transportStdio, transportStreamableHTTP, transportSSE:
+	default:
+		return "", "", fmt.Errorf("--transport %q is not one of stdio, streamable-http, sse", transport)
+	}
+	if httpAddr != "" {
+		if kind == transportSSE {
+			return "", "", fmt.Errorf("--http names the streamable-http transport and cannot be combined with --transport sse")
+		}
+		return transportStreamableHTTP, httpAddr, nil
+	}
+	if kind == transportStdio {
+		return transportStdio, "", nil
+	}
+	if port < 1 || port > 65535 {
+		return "", "", fmt.Errorf("--port %d is not a TCP port (1-65535)", port)
+	}
+	if host == "" {
+		return "", "", fmt.Errorf("--host must name an interface; an empty host binds every one")
+	}
+	return kind, net.JoinHostPort(host, strconv.Itoa(port)), nil
 }
 
 // loopbackOnly reports whether addr binds only to the local machine.
@@ -233,10 +306,16 @@ func init() {
 	mcpCmd.Flags().StringVar(&mcpRoot, "root", "", "absolute path the server sandboxes itself to (defaults to --base-dir, then $HOME/Code)")
 	mcpCmd.Flags().BoolVar(&mcpEnableMutations, "enable-mutations", false, "unlock write tools (corral_sync_repo, corral_clone_repo). Every mutation is logged to the audit trail")
 	mcpCmd.Flags().BoolVar(&mcpEnableDestructiveMutations, "enable-destructive-mutations", false, "additionally unlock corral_delete_repo. Refuses when uncommitted or unpushed changes exist. Requires --enable-mutations")
+	mcpCmd.Flags().StringVar(&mcpTransport, "transport", string(transportStdio),
+		"how clients reach the server: stdio, streamable-http (/mcp) or sse (/sse, the legacy HTTP+SSE transport)")
+	mcpCmd.Flags().StringVar(&mcpHost, "host", "127.0.0.1",
+		"interface to listen on for an HTTP transport")
+	mcpCmd.Flags().IntVar(&mcpPort, "port", 8000,
+		"TCP port to listen on for an HTTP transport")
 	mcpCmd.Flags().StringVar(&mcpHTTP, "http", "",
-		"serve over Streamable HTTP on this address (e.g. 127.0.0.1:7777) instead of stdio")
+		"deprecated: serve Streamable HTTP on this HOST:PORT; the same as --transport streamable-http with --host and --port")
 	mcpCmd.Flags().BoolVar(&mcpAllowRemote, "allow-remote", false,
-		"permit a non-loopback --http address. The server has no authentication; only use this behind your own")
+		"permit a non-loopback --host or --http address. The server has no authentication; only use this behind your own")
 	mcpCmd.Flags().BoolVar(&mcpNoConfirmDeletes, "no-confirm-deletes", false,
 		"delete without asking a person to confirm. Only for an unattended workspace you are willing to lose")
 	mcpCmd.Flags().StringVar(&mcpAllowFileExts, "allow-file-ext", "",
