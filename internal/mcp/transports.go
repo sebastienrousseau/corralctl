@@ -201,6 +201,15 @@ func (rec *statusRecorder) Flush() {
 // transport handler.
 func (s *Server) wrapAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Propagate or generate W3C traceparent distributed tracing context.
+		rawTP := r.Header.Get("traceparent")
+		tc, ok := ParseTraceParent(rawTP)
+		if !ok {
+			tc = NewTraceContext()
+		}
+		w.Header().Set("traceparent", tc.String())
+		r = r.WithContext(ContextWithTrace(r.Context(), tc))
+
 		if origin := r.Header.Get("Origin"); origin != "" {
 			if !s.isAllowedOrigin(origin) {
 				http.Error(w, "Forbidden: cross-origin request rejected", http.StatusForbidden)
@@ -211,8 +220,8 @@ func (s *Server) wrapAuth(next http.Handler) http.Handler {
 			}
 			w.Header().Set("Access-Control-Allow-Origin", origin)
 			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
-			w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type, Mcp-Session-Id, Mcp-Method, Mcp-Name, io.modelcontextprotocol.protocol-version")
-			w.Header().Set("Access-Control-Expose-Headers", "Mcp-Session-Id, WWW-Authenticate")
+			w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type, Mcp-Session-Id, Mcp-Method, Mcp-Name, io.modelcontextprotocol.protocol-version, traceparent")
+			w.Header().Set("Access-Control-Expose-Headers", "Mcp-Session-Id, WWW-Authenticate, traceparent")
 			if r.Method == http.MethodOptions {
 				w.WriteHeader(http.StatusNoContent)
 				if s.metrics != nil {
