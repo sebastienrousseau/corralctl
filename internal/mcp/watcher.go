@@ -53,6 +53,12 @@ var newFSWatcher = func() (fsWatcher, error) {
 	return &realWatcher{w: w}, nil
 }
 
+// warmSymbolsAsync is a package seam for triggering background symbol warming
+// upon file change events, allowing tests to verify or synchronize warm passes.
+var warmSymbolsAsync = func(s *Server, ctx context.Context) {
+	go s.warmSymbols(ctx)
+}
+
 // startWorkspaceWatcher begins watching the workspace root and its structural
 // directories in the background. When filesystem changes occur, it debounces
 // the events and calls s.invalidateScanCache() so subsequent queries inspect
@@ -113,6 +119,9 @@ func (s *Server) startWorkspaceWatcher(ctx context.Context) <-chan struct{} {
 				debounceTimer = time.AfterFunc(watcherDebounceDelay, func() {
 					s.invalidateScanCache()
 					diag.Debugf("corral-mcp: workspace cache invalidated by filesystem watcher")
+					if !s.symbolQueryIdle() {
+						warmSymbolsAsync(s, ctx)
+					}
 				})
 				mu.Unlock()
 
