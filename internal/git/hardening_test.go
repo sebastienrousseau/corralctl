@@ -5,6 +5,8 @@ package git
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 )
@@ -67,5 +69,47 @@ func TestMetadataCallsRespectCancellation(t *testing.T) {
 	}
 	if !IsEmpty(ctx, dir) {
 		t.Error("IsEmpty should report true when the command cannot run")
+	}
+}
+
+// TestGitHooksAreDisarmedDuringOperations proves that repository hooks
+// are disarmed and cannot execute during Clone or Pull.
+func TestGitHooksAreDisarmedDuringOperations(t *testing.T) {
+	bareDir, workDir := setupTestRepo(t)
+	defer cleanup(t, bareDir)
+	defer cleanup(t, workDir)
+
+	targetDir := t.TempDir()
+	if err := Clone(context.Background(), bareDir, targetDir, CloneOptions{}); err != nil {
+		t.Fatalf("Clone failed: %v", err)
+	}
+
+	marker := filepath.Join(targetDir, "hook_ran.marker")
+	hookScript := "#!/bin/sh\ntouch \"" + marker + "\"\n"
+	hooksDir := filepath.Join(targetDir, ".git", "hooks")
+	if err := os.MkdirAll(hooksDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, hook := range []string{"post-merge", "post-checkout", "pre-rebase"} {
+		path := filepath.Join(hooksDir, hook)
+		if err := os.WriteFile(path, []byte(hookScript), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	newFile := filepath.Join(workDir, "new.txt")
+	if err := os.WriteFile(newFile, []byte("data"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	run(t, "git", "-C", workDir, "add", "new.txt")
+	run(t, "git", "-C", workDir, "commit", "-m", "update")
+	run(t, "git", "-C", workDir, "push", "origin", "main")
+
+	if err := Pull(context.Background(), targetDir, PullOptions{}); err != nil {
+		t.Fatalf("Pull failed: %v", err)
+	}
+
+	if _, err := os.Stat(marker); err == nil {
+		t.Errorf("hook executed during Pull despite core.hooksPath=/dev/null hardening")
 	}
 }

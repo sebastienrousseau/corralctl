@@ -97,7 +97,11 @@ type CloneOptions struct {
 
 // Clone executes a git clone command for the given URL into the target directory.
 func Clone(ctx context.Context, url, targetDir string, opts CloneOptions) error {
-	args := []string{"clone"}
+	args := []string{
+		"-c", "core.hooksPath=/dev/null",
+		"-c", "protocol.ext.allow=never",
+		"clone",
+	}
 	if opts.RecurseSubmodules {
 		args = append(args, "--recurse-submodules")
 	}
@@ -155,6 +159,8 @@ type PullOptions struct {
 //     error is logged but not returned.
 func Pull(ctx context.Context, targetDir string, opts PullOptions) error {
 	args := []string{
+		"-c", "core.hooksPath=/dev/null",
+		"-c", "protocol.ext.allow=never",
 		"-c", "merge.verifySignatures=false",
 		"-c", "rebase.verifySignatures=false",
 		// Rebase replays commits, which respects the global commit.gpgsign
@@ -195,7 +201,11 @@ func Pull(ctx context.Context, targetDir string, opts PullOptions) error {
 // targetDir as a separate subprocess. Exposed indirectly via Pull's
 // IgnoreSubmoduleFailures branch.
 func updateSubmodules(ctx context.Context, targetDir string) error {
-	args := []string{"-C", targetDir, "submodule", "update", "--init", "--recursive"}
+	args := []string{
+		"-c", "core.hooksPath=/dev/null",
+		"-c", "protocol.ext.allow=never",
+		"-C", targetDir, "submodule", "update", "--init", "--recursive",
+	}
 	// #nosec G204 -- fixed binary; controlled args.
 	cmd := exec.CommandContext(ctx, gitBinary, args...)
 	withGitEnv(cmd)
@@ -425,7 +435,11 @@ func submodulesHaveUnpublishedWork(ctx context.Context, targetDir string) (bool,
 }
 
 func gitOutput(ctx context.Context, targetDir string, args ...string) (string, error) {
-	fullArgs := append([]string{"-C", targetDir}, args...)
+	fullArgs := append([]string{
+		"-c", "core.hooksPath=/dev/null",
+		"-c", "protocol.ext.allow=never",
+		"-C", targetDir,
+	}, args...)
 	cmd := exec.CommandContext(ctx, gitBinary, fullArgs...) // #nosec G204 -- fixed git binary and structured arguments
 	withGitEnv(cmd)
 	out, err := cmd.Output()
