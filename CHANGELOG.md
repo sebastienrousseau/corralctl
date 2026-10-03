@@ -57,6 +57,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   serves standard Prometheus metrics (v0.0.4) at `/metrics` tracking request rates,
   tool execution outcomes, active MCP sessions, workspace repository totals, and cache
   invalidations.
+- **CLI dependency graph inspection (`corralctl graph`).** Added top-level
+  `corralctl graph [--repo <name>] [--json]` command to inspect inter-repository
+  package dependencies directly from the terminal with ASCII topological ordering,
+  circular dependency detection, and JSON output formatting.
+- **W3C distributed trace context propagation.** Added W3C `traceparent` context
+  parsing, generation, and propagation across Streamable HTTP and SSE MCP requests
+  with CORS header support, enabling distributed agent-to-server request tracing.
 
 ### Performance
 
