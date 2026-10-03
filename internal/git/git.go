@@ -654,3 +654,57 @@ func PruneWorktrees(ctx context.Context, targetDir string) error {
 	_, err := runGitOutput(ctx, targetDir, "worktree", "prune")
 	return err
 }
+
+// WorktreeInfo describes one linked or main Git worktree.
+type WorktreeInfo struct {
+	Path   string `json:"path"`
+	Commit string `json:"commit,omitempty"`
+	Branch string `json:"branch,omitempty"`
+	Bare   bool   `json:"bare,omitempty"`
+}
+
+// ListWorktrees lists all active linked and main Git worktrees for targetDir.
+func ListWorktrees(ctx context.Context, targetDir string) ([]WorktreeInfo, error) {
+	out, err := runGitOutput(ctx, targetDir, "worktree", "list", "--porcelain")
+	if err != nil {
+		return nil, err
+	}
+	return parseWorktreeListPorcelain(out), nil
+}
+
+func parseWorktreeListPorcelain(out string) []WorktreeInfo {
+	var list []WorktreeInfo
+	var current *WorktreeInfo
+
+	lines := strings.Split(out, "\n")
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			if current != nil {
+				list = append(list, *current)
+				current = nil
+			}
+			continue
+		}
+		if strings.HasPrefix(line, "worktree ") {
+			current = &WorktreeInfo{Path: strings.TrimPrefix(line, "worktree ")}
+			continue
+		}
+		switch {
+		case strings.HasPrefix(line, "HEAD "):
+			current.Commit = strings.TrimPrefix(line, "HEAD ")
+		case strings.HasPrefix(line, "branch "):
+			ref := strings.TrimPrefix(line, "branch ")
+			current.Branch = strings.TrimPrefix(ref, "refs/heads/")
+		case line == "bare":
+			current.Bare = true
+		case line == "detached":
+			current.Branch = "detached"
+		}
+	}
+	if current != nil {
+		list = append(list, *current)
+	}
+	return list
+}
+
