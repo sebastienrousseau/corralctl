@@ -47,8 +47,9 @@ func (p pythonExtractor) Extract(path string, src []byte) ([]Symbol, error) {
 	isTest := pythonIsTest(path)
 
 	var (
-		out    []Symbol
-		scopes []pyScope
+		out                 []Symbol
+		scopes              []pyScope
+		decoratorParenDepth int
 	)
 
 	add := func(name string, kind Kind, receiver string, line int) {
@@ -76,6 +77,11 @@ func (p pythonExtractor) Extract(path string, src []byte) ([]Symbol, error) {
 			continue // blank, or blanked-out comment
 		}
 
+		if decoratorParenDepth > 0 {
+			decoratorParenDepth = updateDepth(decoratorParenDepth, parenDelta(raw))
+			continue
+		}
+
 		// Close every scope this line has dedented out of.
 		for len(scopes) > 0 && indent <= scopes[len(scopes)-1].indent {
 			scopes = scopes[:len(scopes)-1]
@@ -87,6 +93,9 @@ func (p pythonExtractor) Extract(path string, src []byte) ([]Symbol, error) {
 		// A decorator line declares nothing itself; the declaration is
 		// below it, and will be seen on its own line.
 		if raw[i] == '@' {
+			if pd := parenDelta(raw[i:]); pd > 0 {
+				decoratorParenDepth = pd
+			}
 			continue
 		}
 
