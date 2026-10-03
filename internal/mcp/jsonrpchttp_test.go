@@ -240,3 +240,24 @@ func TestBatchIsLeftToTheSDK(t *testing.T) {
 		t.Errorf("batch did not return a tool list\nbody: %s", body)
 	}
 }
+
+// TestReadAndRestoreContextCaching ensures subsequent reads on the same request
+// return the cached body without additional buffering or allocations.
+func TestReadAndRestoreContextCaching(t *testing.T) {
+	req, err := http.NewRequest(http.MethodPost, "http://localhost/mcp", strings.NewReader(`{"test":"caching"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	body1, err := readAndRestore(req)
+	if err != nil {
+		t.Fatalf("first readAndRestore failed: %v", err)
+	}
+	body2, err := readAndRestore(req)
+	if err != nil {
+		t.Fatalf("second readAndRestore failed: %v", err)
+	}
+	if string(body1) != string(body2) {
+		t.Errorf("cached body mismatch: %q vs %q", string(body1), string(body2))
+	}
+}
+

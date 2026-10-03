@@ -145,6 +145,8 @@ type Server struct {
 	scanMu      sync.Mutex
 	scanIndex   *Index
 	scanExpires time.Time
+
+	metrics *Metrics
 }
 
 // scanTTL is how long a workspace scan is considered fresh. 5s is short
@@ -188,6 +190,9 @@ func (s *Server) invalidateScanCache() {
 	defer s.scanMu.Unlock()
 	s.scanIndex = nil
 	s.scanExpires = time.Time{}
+	if s.metrics != nil {
+		s.metrics.incCacheInvalidation()
+	}
 }
 
 // NewServer constructs and configures a Corral MCP server. It registers
@@ -237,6 +242,7 @@ func NewServer(opts ServerOptions) (*Server, error) {
 		confirmDeletes: opts.ConfirmDeletes,
 		confirmer:      elicitConfirmer{},
 		repoLocks:      newRepoLocks(),
+		metrics:        newMetrics(),
 	}
 	if opts.EnableMutations || opts.EnableDestructiveMutations {
 		s.auditor = NewAuditor(opts.AuditLogPath)
@@ -248,6 +254,7 @@ func NewServer(opts ServerOptions) (*Server, error) {
 	// Freshness hints on the results that carry them, so a client stops
 	// re-fetching a tool listing that cannot have changed.
 	s.mcp.AddReceivingMiddleware(cacheHintMiddleware())
+	s.mcp.AddReceivingMiddleware(s.toolInstrumentationMiddleware())
 	s.registerResources()
 	s.registerPrompts()
 	if s.opts.EnableMutations {

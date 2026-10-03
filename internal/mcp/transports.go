@@ -180,6 +180,22 @@ func (s *Server) isAllowedOrigin(origin string) bool {
 	return ip != nil && ip.IsLoopback()
 }
 
+type statusRecorder struct {
+	http.ResponseWriter
+	status int
+}
+
+func (rec *statusRecorder) WriteHeader(code int) {
+	rec.status = code
+	rec.ResponseWriter.WriteHeader(code)
+}
+
+func (rec *statusRecorder) Flush() {
+	if f, ok := rec.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+
 // wrapAuth attaches Bearer token authentication, CORS headers, and Origin
 // header validation (anti-DNS rebinding and CSRF protection) to an HTTP
 // transport handler.
@@ -188,6 +204,9 @@ func (s *Server) wrapAuth(next http.Handler) http.Handler {
 		if origin := r.Header.Get("Origin"); origin != "" {
 			if !s.isAllowedOrigin(origin) {
 				http.Error(w, "Forbidden: cross-origin request rejected", http.StatusForbidden)
+				if s.metrics != nil {
+					s.metrics.incRequest(r.Method, r.URL.Path, http.StatusForbidden)
+				}
 				return
 			}
 			w.Header().Set("Access-Control-Allow-Origin", origin)
@@ -196,6 +215,9 @@ func (s *Server) wrapAuth(next http.Handler) http.Handler {
 			w.Header().Set("Access-Control-Expose-Headers", "Mcp-Session-Id, WWW-Authenticate")
 			if r.Method == http.MethodOptions {
 				w.WriteHeader(http.StatusNoContent)
+				if s.metrics != nil {
+					s.metrics.incRequest(r.Method, r.URL.Path, http.StatusNoContent)
+				}
 				return
 			}
 		}
@@ -206,16 +228,26 @@ func (s *Server) wrapAuth(next http.Handler) http.Handler {
 			if !strings.HasPrefix(authHeader, prefix) {
 				w.Header().Set("WWW-Authenticate", `Bearer realm="corral-mcp"`)
 				http.Error(w, "Unauthorized: missing Bearer token", http.StatusUnauthorized)
+				if s.metrics != nil {
+					s.metrics.incRequest(r.Method, r.URL.Path, http.StatusUnauthorized)
+				}
 				return
 			}
 			token := strings.TrimPrefix(authHeader, prefix)
 			if subtle.ConstantTimeCompare([]byte(token), []byte(s.opts.AuthToken)) != 1 {
 				http.Error(w, "Forbidden: invalid token", http.StatusForbidden)
+				if s.metrics != nil {
+					s.metrics.incRequest(r.Method, r.URL.Path, http.StatusForbidden)
+				}
 				return
 			}
 		}
 
-		next.ServeHTTP(w, r)
+		rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
+		next.ServeHTTP(rec, r)
+		if s.metrics != nil {
+			s.metrics.incRequest(r.Method, r.URL.Path, rec.status)
+		}
 	})
 }
 
@@ -232,6 +264,7 @@ func (s *Server) httpHandler() http.Handler {
 	h := s.streamableHandler()
 	mux := http.NewServeMux()
 	mux.Handle(StreamableEndpoint, h)
+	mux.Handle(MetricsEndpoint, s.metricsHandler())
 	mux.Handle("/", h)
 	return s.wrapAuth(mux)
 }
@@ -243,6 +276,7 @@ func (s *Server) sseHandler() http.Handler {
 	h := mcp.NewSSEHandler(func(*http.Request) *mcp.Server { return s.mcp }, nil)
 	mux := http.NewServeMux()
 	mux.Handle(SSEEndpoint, h)
+	mux.Handle(MetricsEndpoint, s.metricsHandler())
 	return s.wrapAuth(mux)
 }
 
