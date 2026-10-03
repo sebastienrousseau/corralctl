@@ -95,6 +95,13 @@ var deniedAllowedExtNames = map[string]string{
 	".yarnrc.yml":        "yarnrc may hold registry tokens (npmAuthToken)",
 }
 
+// FileAllowed reports whether a repository-relative path is permitted by the
+// default workspace content policy.
+func FileAllowed(rel string) bool {
+	_, ok := fileAllowed(rel, nil)
+	return ok
+}
+
 // fileAllowed reports whether rel's shape is servable, and when it is not,
 // an error naming the flag that would permit it. rel is repository-relative
 // and already lexically cleaned by the caller.
