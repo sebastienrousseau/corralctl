@@ -88,12 +88,13 @@ func TestGitHooksAreDisarmedDuringOperations(t *testing.T) {
 	marker := filepath.Join(targetDir, "hook_ran.marker")
 	hookScript := "#!/bin/sh\ntouch \"" + marker + "\"\n"
 	hooksDir := filepath.Join(targetDir, ".git", "hooks")
-	if err := os.MkdirAll(hooksDir, 0o755); err != nil {
+	if err := os.MkdirAll(hooksDir, 0o750); err != nil {
 		t.Fatal(err)
 	}
 	for _, hook := range []string{"post-merge", "post-checkout", "pre-rebase"} {
 		path := filepath.Join(hooksDir, hook)
-		if err := os.WriteFile(path, []byte(hookScript), 0o755); err != nil {
+		//nolint:gosec // G306: test hook script must be executable
+		if err := os.WriteFile(path, []byte(hookScript), 0o700); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -118,14 +119,14 @@ func TestGitHooksAreDisarmedDuringOperations(t *testing.T) {
 func TestDirectBranchReading(t *testing.T) {
 	dir := t.TempDir()
 	dotGit := filepath.Join(dir, ".git")
-	if err := os.MkdirAll(dotGit, 0o755); err != nil {
+	if err := os.MkdirAll(dotGit, 0o750); err != nil {
 		t.Fatal(err)
 	}
 
 	headPath := filepath.Join(dotGit, "HEAD")
 
 	// 1. Normal branch
-	if err := os.WriteFile(headPath, []byte("ref: refs/heads/feat/fast-refs\n"), 0o644); err != nil {
+	if err := os.WriteFile(headPath, []byte("ref: refs/heads/feat/fast-refs\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	branch, err := CurrentBranch(context.Background(), dir)
@@ -135,7 +136,7 @@ func TestDirectBranchReading(t *testing.T) {
 
 	// 2. Detached HEAD (SHA-1)
 	sha1 := "e508898123456789abcdef0123456789abcdef01"
-	if err := os.WriteFile(headPath, []byte(sha1+"\n"), 0o644); err != nil {
+	if err := os.WriteFile(headPath, []byte(sha1+"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	branch, err = CurrentBranch(context.Background(), dir)
@@ -145,16 +146,16 @@ func TestDirectBranchReading(t *testing.T) {
 
 	// 3. Detached HEAD (SHA-256)
 	sha256 := strings.Repeat("a", 64)
-	if err := os.WriteFile(headPath, []byte(sha256+"\n"), 0o644); err != nil {
+	if err := os.WriteFile(headPath, []byte(sha256+"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	branch, err = CurrentBranch(nil, dir)
+	branch, err = CurrentBranch(context.Background(), dir)
 	if err != nil || branch != "HEAD" {
 		t.Errorf("CurrentBranch(sha256) = %q, %v; want 'HEAD', nil", branch, err)
 	}
 
 	// 4. Literal HEAD
-	if err := os.WriteFile(headPath, []byte("HEAD\n"), 0o644); err != nil {
+	if err := os.WriteFile(headPath, []byte("HEAD\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	branch, err = CurrentBranch(context.Background(), dir)
@@ -163,7 +164,7 @@ func TestDirectBranchReading(t *testing.T) {
 	}
 
 	// 5. Corrupt / empty ref
-	if err := os.WriteFile(headPath, []byte("ref: refs/heads/\n"), 0o644); err != nil {
+	if err := os.WriteFile(headPath, []byte("ref: refs/heads/\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if b, ok := readDirectBranch(dir); ok || b != "" {
@@ -172,7 +173,7 @@ func TestDirectBranchReading(t *testing.T) {
 
 	// 6. Non-hex 40-char string
 	nonHex40 := "z" + strings.Repeat("0", 39)
-	if err := os.WriteFile(headPath, []byte(nonHex40+"\n"), 0o644); err != nil {
+	if err := os.WriteFile(headPath, []byte(nonHex40+"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if b, ok := readDirectBranch(dir); ok || b != "" {
@@ -186,7 +187,7 @@ func TestDirectBranchReading(t *testing.T) {
 
 	// 8. Missing HEAD inside .git dir
 	missingHeadDir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(missingHeadDir, ".git"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(missingHeadDir, ".git"), 0o750); err != nil {
 		t.Fatal(err)
 	}
 	if b, ok := readDirectBranch(missingHeadDir); ok || b != "" {
@@ -225,7 +226,7 @@ func TestWorktreeLifecycle(t *testing.T) {
 
 	// 2. Add uncommitted change and assert non-forced removal is refused
 	dirtyFile := filepath.Join(wtPath, "dirty.txt")
-	if err := os.WriteFile(dirtyFile, []byte("uncommitted"), 0o644); err != nil {
+	if err := os.WriteFile(dirtyFile, []byte("uncommitted"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if err := RemoveWorktree(context.Background(), workDir, wtPath, false); err == nil {
