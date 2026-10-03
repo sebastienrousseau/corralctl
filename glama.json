@@ -6,7 +6,7 @@
   "title": "corralctl",
   "display_name": "corralctl MCP",
   "description": "Model Context Protocol server over a corralctl-organised workspace of git clones. Lets AI coding agents search code and symbols across every clone on disk, list repositories by forge, visibility and language, and read files, with zero network calls in the default read-only mode; an opt-in mode adds clone and sync tools that shell out to git.",
-  "version": "0.0.39",
+  "version": "0.0.40",
   "repository": "https://github.com/sebastienrousseau/corralctl",
   "homepage": "https://doc.corrallib.com",
   "license": "GPL-3.0-only",
@@ -39,6 +39,6 @@
   },
   "installation": {
     "go": "go install github.com/sebastienrousseau/corralctl/cmd/corralctl@latest",
-    "docker": "docker run --rm -i ghcr.io/sebastienrousseau/corralctl:0.0.39"
+    "docker": "docker run --rm -i ghcr.io/sebastienrousseau/corralctl:0.0.40"
   }
 }
