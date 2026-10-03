@@ -235,7 +235,18 @@ func withMetadataTimeout(ctx context.Context) (context.Context, context.CancelFu
 }
 
 // CurrentBranch retrieves the name of the currently checked-out branch.
+// It first attempts a fast direct read of .git/HEAD to avoid subprocess
+// execution overhead. If direct reading is not available, it falls back
+// to git rev-parse --abbrev-ref HEAD.
 func CurrentBranch(ctx context.Context, targetDir string) (string, error) {
+	if ctx != nil {
+		if err := ctx.Err(); err != nil {
+			return "", err
+		}
+	}
+	if branch, ok := readDirectBranch(targetDir); ok {
+		return branch, nil
+	}
 	ctx, cancel := withMetadataTimeout(ctx)
 	defer cancel()
 	// #nosec G204 -- fixed "git" binary; targetDir is a local path, not shell input.
@@ -245,6 +256,40 @@ func CurrentBranch(ctx context.Context, targetDir string) (string, error) {
 		return "", err
 	}
 	return strings.TrimSpace(string(out)), nil
+}
+
+// readDirectBranch attempts to read the current branch directly from .git/HEAD.
+func readDirectBranch(targetDir string) (string, bool) {
+	gitDir, err := resolveGitDir(targetDir)
+	if err != nil {
+		return "", false
+	}
+	data, err := readFile(filepath.Join(gitDir, "HEAD"))
+	if err != nil {
+		return "", false
+	}
+	s := strings.TrimSpace(string(data))
+	const refPrefix = "ref: refs/heads/"
+	if strings.HasPrefix(s, refPrefix) {
+		branch := strings.TrimSpace(strings.TrimPrefix(s, refPrefix))
+		if branch != "" {
+			return branch, true
+		}
+	}
+	if s == "HEAD" || (len(s) == 40 && isHex(s)) || (len(s) == 64 && isHex(s)) {
+		return "HEAD", true
+	}
+	return "", false
+}
+
+func isHex(s string) bool {
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')) {
+			return false
+		}
+	}
+	return true
 }
 
 // IsEmpty reports whether the repo at targetDir has no commits.

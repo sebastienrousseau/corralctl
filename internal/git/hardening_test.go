@@ -7,6 +7,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -113,3 +114,96 @@ func TestGitHooksAreDisarmedDuringOperations(t *testing.T) {
 		t.Errorf("hook executed during Pull despite core.hooksPath=/dev/null hardening")
 	}
 }
+
+func TestDirectBranchReading(t *testing.T) {
+	dir := t.TempDir()
+	dotGit := filepath.Join(dir, ".git")
+	if err := os.MkdirAll(dotGit, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	headPath := filepath.Join(dotGit, "HEAD")
+
+	// 1. Normal branch
+	if err := os.WriteFile(headPath, []byte("ref: refs/heads/feat/fast-refs\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	branch, err := CurrentBranch(context.Background(), dir)
+	if err != nil || branch != "feat/fast-refs" {
+		t.Errorf("CurrentBranch() = %q, %v; want 'feat/fast-refs', nil", branch, err)
+	}
+
+	// 2. Detached HEAD (SHA-1)
+	sha1 := "e508898123456789abcdef0123456789abcdef01"
+	if err := os.WriteFile(headPath, []byte(sha1+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	branch, err = CurrentBranch(context.Background(), dir)
+	if err != nil || branch != "HEAD" {
+		t.Errorf("CurrentBranch(sha1) = %q, %v; want 'HEAD', nil", branch, err)
+	}
+
+	// 3. Detached HEAD (SHA-256)
+	sha256 := strings.Repeat("a", 64)
+	if err := os.WriteFile(headPath, []byte(sha256+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	branch, err = CurrentBranch(nil, dir)
+	if err != nil || branch != "HEAD" {
+		t.Errorf("CurrentBranch(sha256) = %q, %v; want 'HEAD', nil", branch, err)
+	}
+
+	// 4. Literal HEAD
+	if err := os.WriteFile(headPath, []byte("HEAD\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	branch, err = CurrentBranch(context.Background(), dir)
+	if err != nil || branch != "HEAD" {
+		t.Errorf("CurrentBranch('HEAD') = %q, %v; want 'HEAD', nil", branch, err)
+	}
+
+	// 5. Corrupt / empty ref
+	if err := os.WriteFile(headPath, []byte("ref: refs/heads/\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if b, ok := readDirectBranch(dir); ok || b != "" {
+		t.Errorf("expected readDirectBranch to fail on empty ref, got %q, %v", b, ok)
+	}
+
+	// 6. Non-hex 40-char string
+	nonHex40 := "z" + strings.Repeat("0", 39)
+	if err := os.WriteFile(headPath, []byte(nonHex40+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if b, ok := readDirectBranch(dir); ok || b != "" {
+		t.Errorf("expected readDirectBranch to fail on non-hex string, got %q, %v", b, ok)
+	}
+
+	// 7. Non-existent gitdir
+	if b, ok := readDirectBranch("/definitely/not/a/git/dir"); ok || b != "" {
+		t.Errorf("expected readDirectBranch to fail on missing dir, got %q, %v", b, ok)
+	}
+
+	// 8. Missing HEAD inside .git dir
+	missingHeadDir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(missingHeadDir, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if b, ok := readDirectBranch(missingHeadDir); ok || b != "" {
+		t.Errorf("expected readDirectBranch to fail on missing HEAD, got %q, %v", b, ok)
+	}
+
+	// 9. Fallback to rev-parse when direct read fails on real repo
+	bareDir, workDir := setupTestRepo(t)
+	defer cleanup(t, bareDir)
+	defer cleanup(t, workDir)
+
+	oldReadFile := readFile
+	readFile = func(string) ([]byte, error) { return nil, os.ErrNotExist }
+	branch, err = CurrentBranch(context.Background(), workDir)
+	readFile = oldReadFile
+	if err != nil || branch != "main" {
+		t.Errorf("CurrentBranch fallback = %q, %v; want 'main', nil", branch, err)
+	}
+}
+

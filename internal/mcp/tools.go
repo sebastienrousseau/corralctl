@@ -13,6 +13,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/sebastienrousseau/corralctl/internal/diag"
+	"github.com/sebastienrousseau/corralctl/internal/git"
 	"github.com/sebastienrousseau/corralctl/internal/sanitize"
 )
 
@@ -277,8 +278,7 @@ func sortedLangCounts(m map[string]int) []LanguageCount {
 // stderr is the only safe channel — stdout carries the JSON-RPC
 // protocol stream and must not be polluted.
 var currentBranch = func(ctx context.Context, repoPath string) string {
-	cmd := exec.CommandContext(ctx, "git", "-C", repoPath, "rev-parse", "--abbrev-ref", "HEAD") // #nosec G204 -- fixed executable and root-confined path
-	out, err := cmd.Output()
+	branch, err := git.CurrentBranch(ctx, repoPath)
 	if err != nil {
 		// Include stderr from the failed process so operators can tell
 		// "not a git repo" apart from "detached HEAD" apart from
@@ -294,7 +294,7 @@ var currentBranch = func(ctx context.Context, repoPath string) string {
 		}
 		return ""
 	}
-	return strings.TrimSpace(string(out))
+	return branch
 }
 
 // addTool registers a tool and records its name.
