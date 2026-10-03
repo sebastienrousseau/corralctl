@@ -6,6 +6,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.39] — 2026-10-03
+
+### Added
+
+- **CLI Git Worktree Management (`corralctl worktree`).** Added `list`, `create`,
+  and `remove` subcommands for managing git worktrees directly from the command
+  line. Worktree deletion enforces workspace safety rules, refusing to remove
+  worktrees with uncommitted, unstaged, or untracked changes unless `--force` is
+  explicitly specified, and automatically prunes stale administrative metadata.
+- **Interactive Terminal Dependency Graph Browser (`corralctl graph --interactive` / `-i`).**
+  Integrated Bubble Tea and Lipgloss into `corralctl graph` for exploring
+  workspace repository dependency topologies interactively. Features dual-pane
+  navigation with keyboard shortcuts (`↑`/`↓`/`j`/`k`/`q`), displaying package
+  names, languages, direct dependencies, dependents, topological build order,
+  and cycles.
+- **Structured JSON Logging for Daemon Mode (`--log-format text|json`).** Added
+  `--log-format` persistent flag (and `CORRAL_LOG_FORMAT` environment variable)
+  powering structured JSON diagnostic emission via `log/slog` on `corralctl mcp`
+  and all CLI commands. Diagnostics remain strictly partitioned on stderr to
+  preserve JSON-RPC stream integrity over stdio and prevent transport corruption.
+- **Background Trigram Auto-Warming on File Change.** Connected the filesystem
+  `fsnotify` watcher to trigger background trigram index warming upon file change
+  events when queries are active, eliminating cold-start indexing latency for
+  active MCP client sessions.
+
 ## [0.0.38] — 2026-10-03
 
 ### Added
@@ -2492,7 +2517,8 @@ cron-safety overhaul.
   100 % doc coverage.
 - All tests green under `-race -count=1`.
 
-[Unreleased]: https://github.com/sebastienrousseau/corralctl/compare/v0.0.38...HEAD
+[Unreleased]: https://github.com/sebastienrousseau/corralctl/compare/v0.0.39...HEAD
+[0.0.39]: https://github.com/sebastienrousseau/corralctl/compare/v0.0.38...v0.0.39
 [0.0.38]: https://github.com/sebastienrousseau/corralctl/compare/v0.0.37...v0.0.38
 [0.0.37]: https://github.com/sebastienrousseau/corralctl/compare/v0.0.36...v0.0.37
 [0.0.36]: https://github.com/sebastienrousseau/corral/compare/v0.0.35...v0.0.36
