@@ -471,3 +471,46 @@ func TestGraphCommandCycleAndMissingNode(t *testing.T) {
 		t.Fatalf("unexpected error with nil dependencies: %v", err)
 	}
 }
+
+func TestGraphCommandInteractive(t *testing.T) {
+	root := t.TempDir()
+	origScan, origInteractive, origRunBrowser := graphScan, graphInteractive, graphRunBrowser
+	t.Cleanup(func() {
+		graphScan, graphInteractive, graphRunBrowser = origScan, origInteractive, origRunBrowser
+	})
+
+	graphScan = func(string) (*corralmcp.Index, error) {
+		return &corralmcp.Index{
+			Root: root,
+			Repos: []corralmcp.RepoEntry{
+				{Name: "app", Path: filepath.Join(root, "app"), Language: "go"},
+			},
+		}, nil
+	}
+	graphInteractive = true
+
+	var browserCalled bool
+	graphRunBrowser = func(g *graph.Graph) error {
+		browserCalled = true
+		if len(g.Nodes) != 1 || g.Nodes[0].Name != "app" {
+			t.Errorf("unexpected graph passed to browser: %+v", g)
+		}
+		return nil
+	}
+
+	if err := graphCmd.RunE(graphCmd, []string{root}); err != nil {
+		t.Fatalf("unexpected error in interactive mode: %v", err)
+	}
+	if !browserCalled {
+		t.Fatal("expected graphRunBrowser to be called")
+	}
+
+	// Browser failure
+	graphRunBrowser = func(g *graph.Graph) error {
+		return errors.New("simulated tui failure")
+	}
+	err := graphCmd.RunE(graphCmd, []string{root})
+	if err == nil || !strings.Contains(err.Error(), "simulated tui failure") {
+		t.Fatalf("expected simulated tui failure, got: %v", err)
+	}
+}
