@@ -34,6 +34,16 @@ func TestGraphCommandPreRunE(t *testing.T) {
 		t.Fatalf("unexpected error for empty: %v", err)
 	}
 
+	graphOutput = "mermaid"
+	if err := graphCmd.PreRunE(graphCmd, nil); err != nil {
+		t.Fatalf("unexpected error for mermaid: %v", err)
+	}
+
+	graphOutput = "dot"
+	if err := graphCmd.PreRunE(graphCmd, nil); err != nil {
+		t.Fatalf("unexpected error for dot: %v", err)
+	}
+
 	graphOutput = "yaml"
 	if err := graphCmd.PreRunE(graphCmd, nil); err == nil {
 		t.Fatal("expected error for yaml, got nil")
@@ -56,9 +66,9 @@ func TestGraphCommandScanFailure(t *testing.T) {
 
 func TestGraphCommandEmptyWorkspace(t *testing.T) {
 	root := t.TempDir()
-	origScan, origRepo, origJSON, origOutput := graphScan, graphRepo, graphJSON, graphOutput
+	origScan, origRepo, origJSON, origOutput, origMermaid, origDOT := graphScan, graphRepo, graphJSON, graphOutput, graphMermaid, graphDOT
 	t.Cleanup(func() {
-		graphScan, graphRepo, graphJSON, graphOutput = origScan, origRepo, origJSON, origOutput
+		graphScan, graphRepo, graphJSON, graphOutput, graphMermaid, graphDOT = origScan, origRepo, origJSON, origOutput, origMermaid, origDOT
 	})
 
 	graphScan = func(string) (*corralmcp.Index, error) {
@@ -66,6 +76,8 @@ func TestGraphCommandEmptyWorkspace(t *testing.T) {
 	}
 	graphRepo = ""
 	graphJSON = false
+	graphMermaid = false
+	graphDOT = false
 	graphOutput = "text"
 
 	// Text mode
@@ -91,6 +103,30 @@ func TestGraphCommandEmptyWorkspace(t *testing.T) {
 	}
 	if len(report.Nodes) != 0 {
 		t.Fatalf("expected 0 nodes, got %d", len(report.Nodes))
+	}
+
+	// Mermaid mode
+	graphJSON = false
+	graphMermaid = true
+	out = captureStdout(t, func() {
+		if err := graphCmd.RunE(graphCmd, []string{root}); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if !strings.Contains(out, "flowchart TD") {
+		t.Fatalf("expected flowchart TD, got %q", out)
+	}
+
+	// DOT mode
+	graphMermaid = false
+	graphDOT = true
+	out = captureStdout(t, func() {
+		if err := graphCmd.RunE(graphCmd, []string{root}); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if !strings.Contains(out, "digraph G") {
+		t.Fatalf("expected digraph G, got %q", out)
 	}
 }
 
@@ -155,14 +191,16 @@ func setupGraphWorkspace(t *testing.T) (string, *corralmcp.Index) {
 
 func TestGraphCommandWorkspaceView(t *testing.T) {
 	root, idx := setupGraphWorkspace(t)
-	origScan, origRepo, origJSON, origOutput := graphScan, graphRepo, graphJSON, graphOutput
+	origScan, origRepo, origJSON, origOutput, origMermaid, origDOT := graphScan, graphRepo, graphJSON, graphOutput, graphMermaid, graphDOT
 	t.Cleanup(func() {
-		graphScan, graphRepo, graphJSON, graphOutput = origScan, origRepo, origJSON, origOutput
+		graphScan, graphRepo, graphJSON, graphOutput, graphMermaid, graphDOT = origScan, origRepo, origJSON, origOutput, origMermaid, origDOT
 	})
 
 	graphScan = func(string) (*corralmcp.Index, error) { return idx, nil }
 	graphRepo = ""
 	graphJSON = false
+	graphMermaid = false
+	graphDOT = false
 	graphOutput = "text"
 
 	// 1. Text mode
@@ -198,16 +236,66 @@ func TestGraphCommandWorkspaceView(t *testing.T) {
 	if len(report.Edges) != 1 {
 		t.Fatalf("expected 1 edge, got %d", len(report.Edges))
 	}
+
+	// 3. Mermaid mode via --output mermaid
+	graphOutput = "mermaid"
+	out = captureStdout(t, func() {
+		if err := graphCmd.RunE(graphCmd, nil); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if !strings.Contains(out, "flowchart TD") || !strings.Contains(out, "repo_a") {
+		t.Fatalf("expected mermaid flowchart, got: %s", out)
+	}
+
+	// 4. Mermaid mode via --mermaid flag
+	graphOutput = ""
+	graphMermaid = true
+	out = captureStdout(t, func() {
+		if err := graphCmd.RunE(graphCmd, nil); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if !strings.Contains(out, "flowchart TD") || !strings.Contains(out, "repo_a") {
+		t.Fatalf("expected mermaid flowchart via flag, got: %s", out)
+	}
+	graphMermaid = false
+
+	// 5. DOT mode via --output dot
+	graphOutput = "dot"
+	out = captureStdout(t, func() {
+		if err := graphCmd.RunE(graphCmd, nil); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if !strings.Contains(out, "digraph G") || !strings.Contains(out, `"repo-a" -> "repo-b"`) {
+		t.Fatalf("expected dot graph, got: %s", out)
+	}
+
+	// 6. DOT mode via --dot flag
+	graphOutput = ""
+	graphDOT = true
+	out = captureStdout(t, func() {
+		if err := graphCmd.RunE(graphCmd, nil); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if !strings.Contains(out, "digraph G") || !strings.Contains(out, `"repo-a" -> "repo-b"`) {
+		t.Fatalf("expected dot graph via flag, got: %s", out)
+	}
+	graphDOT = false
 }
 
 func TestGraphCommandRepoFilter(t *testing.T) {
 	root, idx := setupGraphWorkspace(t)
-	origScan, origRepo, origJSON, origOutput := graphScan, graphRepo, graphJSON, graphOutput
+	origScan, origRepo, origJSON, origOutput, origMermaid, origDOT := graphScan, graphRepo, graphJSON, graphOutput, graphMermaid, graphDOT
 	t.Cleanup(func() {
-		graphScan, graphRepo, graphJSON, graphOutput = origScan, origRepo, origJSON, origOutput
+		graphScan, graphRepo, graphJSON, graphOutput, graphMermaid, graphDOT = origScan, origRepo, origJSON, origOutput, origMermaid, origDOT
 	})
 
 	graphScan = func(string) (*corralmcp.Index, error) { return idx, nil }
+	graphMermaid = false
+	graphDOT = false
 
 	// 1. Filter to repo-a (has dependency on repo-b, no dependents)
 	graphRepo = "repo-a"
@@ -239,9 +327,10 @@ func TestGraphCommandRepoFilter(t *testing.T) {
 		t.Fatalf("expected Dependents (1): for repo-b, got: %s", out)
 	}
 
-	// 3. Filter to repo-a in JSON mode
+	// 3. Filter to repo-a in JSON mode via --output json
 	graphRepo = "repo-a"
-	graphJSON = true
+	graphJSON = false
+	graphOutput = "json"
 	out = captureStdout(t, func() {
 		if err := graphCmd.RunE(graphCmd, []string{root}); err != nil {
 			t.Fatal(err)
@@ -255,7 +344,58 @@ func TestGraphCommandRepoFilter(t *testing.T) {
 		t.Fatalf("unexpected detail: %+v", detail)
 	}
 
-	// 4. Non-existent repo returns error
+	// 4. Filter to repo-a in Mermaid mode via --mermaid flag
+	graphRepo = "repo-a"
+	graphJSON = false
+	graphMermaid = true
+	graphOutput = ""
+	out = captureStdout(t, func() {
+		if err := graphCmd.RunE(graphCmd, []string{root}); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if !strings.Contains(out, "flowchart TD") || !strings.Contains(out, "repo_a") {
+		t.Fatalf("expected targeted mermaid, got: %s", out)
+	}
+	graphMermaid = false
+
+	// 5. Filter to repo-a in Mermaid mode via --output mermaid
+	graphOutput = "mermaid"
+	out = captureStdout(t, func() {
+		if err := graphCmd.RunE(graphCmd, []string{root}); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if !strings.Contains(out, "flowchart TD") || !strings.Contains(out, "repo_a") {
+		t.Fatalf("expected targeted mermaid via --output, got: %s", out)
+	}
+
+	// 6. Filter to repo-a in DOT mode via --dot flag
+	graphOutput = ""
+	graphDOT = true
+	out = captureStdout(t, func() {
+		if err := graphCmd.RunE(graphCmd, []string{root}); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if !strings.Contains(out, "digraph G") || !strings.Contains(out, `"repo-a" [style=filled`) {
+		t.Fatalf("expected targeted dot, got: %s", out)
+	}
+	graphDOT = false
+
+	// 7. Filter to repo-a in DOT mode via --output dot
+	graphOutput = "dot"
+	out = captureStdout(t, func() {
+		if err := graphCmd.RunE(graphCmd, []string{root}); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if !strings.Contains(out, "digraph G") || !strings.Contains(out, `"repo-a" [style=filled`) {
+		t.Fatalf("expected targeted dot via --output, got: %s", out)
+	}
+	graphOutput = ""
+
+	// 8. Non-existent repo returns error
 	graphRepo = "non-existent"
 	if err := graphCmd.RunE(graphCmd, []string{root}); err == nil {
 		t.Fatal("expected error for non-existent repo, got nil")
@@ -264,10 +404,16 @@ func TestGraphCommandRepoFilter(t *testing.T) {
 
 func TestGraphCommandCycleAndMissingNode(t *testing.T) {
 	root := t.TempDir()
-	origScan, origRepo, origJSON, origOutput := graphScan, graphRepo, graphJSON, graphOutput
+	origScan, origRepo, origJSON, origOutput, origMermaid, origDOT := graphScan, graphRepo, graphJSON, graphOutput, graphMermaid, graphDOT
 	t.Cleanup(func() {
-		graphScan, graphRepo, graphJSON, graphOutput = origScan, origRepo, origJSON, origOutput
+		graphScan, graphRepo, graphJSON, graphOutput, graphMermaid, graphDOT = origScan, origRepo, origJSON, origOutput, origMermaid, origDOT
 	})
+
+	graphRepo = ""
+	graphJSON = false
+	graphMermaid = false
+	graphDOT = false
+	graphOutput = "text"
 
 	// Workspace with circular dependency
 	repoXDir := filepath.Join(root, "repo-x")
@@ -307,7 +453,7 @@ func TestGraphCommandCycleAndMissingNode(t *testing.T) {
 		},
 	}
 	g := &graph.Graph{Nodes: []graph.Node{}}
-	if err := runGraphWith(weirdIdx, "ghost", false, g); err == nil {
+	if err := runGraphWith(weirdIdx, "ghost", "text", g); err == nil {
 		t.Fatal("expected error when node is missing from graph")
 	}
 
@@ -321,7 +467,7 @@ func TestGraphCommandCycleAndMissingNode(t *testing.T) {
 	gNil := &graph.Graph{
 		Nodes: []graph.Node{{Name: "nildeps", Path: "/nildeps", Dependencies: nil}},
 	}
-	if err := runGraphWith(nilDepsIdx, "nildeps", true, gNil); err != nil {
+	if err := runGraphWith(nilDepsIdx, "nildeps", "json", gNil); err != nil {
 		t.Fatalf("unexpected error with nil dependencies: %v", err)
 	}
 }

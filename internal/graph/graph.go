@@ -6,6 +6,7 @@ package graph
 import (
 	"bufio"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
@@ -378,4 +379,118 @@ func parsePyprojectTOML(path string) (string, []string) {
 		}
 	}
 	return name, deps
+}
+
+// ToMermaid exports the complete workspace dependency graph in Mermaid flowchart syntax.
+func (g *Graph) ToMermaid() string {
+	var b strings.Builder
+	b.WriteString("flowchart TD\n")
+	if len(g.Nodes) == 0 {
+		return b.String()
+	}
+
+	edges := make([]Edge, len(g.Edges))
+	copy(edges, g.Edges)
+	sort.Slice(edges, func(i, j int) bool {
+		if edges[i].From == edges[j].From {
+			return edges[i].To < edges[j].To
+		}
+		return edges[i].From < edges[j].From
+	})
+
+	edgeNodes := make(map[string]bool)
+	for _, e := range edges {
+		fmt.Fprintf(&b, "    %s[\"%s\"] --> %s[\"%s\"]\n", sanitizeID(e.From), e.From, sanitizeID(e.To), e.To)
+		edgeNodes[e.From] = true
+		edgeNodes[e.To] = true
+	}
+
+	for _, n := range g.Nodes {
+		if !edgeNodes[n.Name] {
+			fmt.Fprintf(&b, "    %s[\"%s\"]\n", sanitizeID(n.Name), n.Name)
+		}
+	}
+	return b.String()
+}
+
+// ToDOT exports the complete workspace dependency graph in Graphviz DOT format.
+func (g *Graph) ToDOT() string {
+	var b strings.Builder
+	b.WriteString("digraph G {\n")
+	b.WriteString("    rankdir=LR;\n")
+	b.WriteString("    node [shape=box];\n")
+	if len(g.Nodes) == 0 {
+		b.WriteString("}\n")
+		return b.String()
+	}
+
+	edges := make([]Edge, len(g.Edges))
+	copy(edges, g.Edges)
+	sort.Slice(edges, func(i, j int) bool {
+		if edges[i].From == edges[j].From {
+			return edges[i].To < edges[j].To
+		}
+		return edges[i].From < edges[j].From
+	})
+
+	edgeNodes := make(map[string]bool)
+	for _, e := range edges {
+		fmt.Fprintf(&b, "    \"%s\" -> \"%s\";\n", e.From, e.To)
+		edgeNodes[e.From] = true
+		edgeNodes[e.To] = true
+	}
+
+	for _, n := range g.Nodes {
+		if !edgeNodes[n.Name] {
+			fmt.Fprintf(&b, "    \"%s\";\n", n.Name)
+		}
+	}
+	b.WriteString("}\n")
+	return b.String()
+}
+
+// TargetToMermaid exports a focused repository and its direct dependencies and dependents in Mermaid flowchart syntax.
+func (g *Graph) TargetToMermaid(target string, deps, dependents []string) string {
+	var b strings.Builder
+	b.WriteString("flowchart TD\n")
+	tid := sanitizeID(target)
+	fmt.Fprintf(&b, "    %s[\"%s\"]\n", tid, target)
+	for _, dep := range deps {
+		fmt.Fprintf(&b, "    %s --> %s[\"%s\"]\n", tid, sanitizeID(dep), dep)
+	}
+	for _, dep := range dependents {
+		fmt.Fprintf(&b, "    %s[\"%s\"] --> %s\n", sanitizeID(dep), dep, tid)
+	}
+	fmt.Fprintf(&b, "    style %s fill:#e1f5fe,stroke:#0288d1,stroke-width:2px;\n", tid)
+	return b.String()
+}
+
+// TargetToDOT exports a focused repository and its direct dependencies and dependents in Graphviz DOT format.
+func (g *Graph) TargetToDOT(target string, deps, dependents []string) string {
+	var b strings.Builder
+	b.WriteString("digraph G {\n")
+	b.WriteString("    rankdir=LR;\n")
+	b.WriteString("    node [shape=box];\n")
+	fmt.Fprintf(&b, "    \"%s\" [style=filled, fillcolor=\"#e1f5fe\"];\n", target)
+	for _, dep := range deps {
+		fmt.Fprintf(&b, "    \"%s\" -> \"%s\";\n", target, dep)
+	}
+	for _, dep := range dependents {
+		fmt.Fprintf(&b, "    \"%s\" -> \"%s\";\n", dep, target)
+	}
+	b.WriteString("}\n")
+	return b.String()
+}
+
+func sanitizeID(name string) string {
+	var b strings.Builder
+	for i := 0; i < len(name); i++ {
+		c := name[i]
+		if (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') {
+			b.WriteByte(c)
+		} else {
+			b.WriteByte('_')
+		}
+	}
+	return b.String()
 }

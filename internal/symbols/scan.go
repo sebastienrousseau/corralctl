@@ -253,3 +253,40 @@ func keywordAt(s string, i int, kw string) (int, bool) {
 	}
 	return end, true
 }
+
+// parenDelta is the net change in parenthesis depth '(' minus ')' across a line.
+func parenDelta(line string) int {
+	d := 0
+	for i := 0; i < len(line); i++ {
+		switch line[i] {
+		case '(':
+			d++
+		case ')':
+			d--
+		}
+	}
+	return d
+}
+
+// bracketDelta is the net change in square bracket depth '[' minus ']' across a line.
+func bracketDelta(line string) int {
+	d := 0
+	for i := 0; i < len(line); i++ {
+		switch line[i] {
+		case '[':
+			d++
+		case ']':
+			d--
+		}
+	}
+	return d
+}
+
+// updateDepth adjusts a delimiter depth by delta, clamping at 0.
+func updateDepth(current, delta int) int {
+	next := current + delta
+	if next < 0 {
+		return 0
+	}
+	return next
+}

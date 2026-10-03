@@ -221,3 +221,13 @@ func TestValidateCloneURL(t *testing.T) {
 		}
 	}
 }
+
+func TestExportedFileAllowed(t *testing.T) {
+	if !FileAllowed("main.go") {
+		t.Error("expected main.go to be allowed")
+	}
+	if FileAllowed(".env") {
+		t.Error("expected .env to be refused")
+	}
+}
+

@@ -866,3 +866,78 @@ func TestRustAssociatedTypesBelongToTheirImpl(t *testing.T) {
 	found(t, syms, "DateTime.add", KindMethod, 4)
 	found(t, syms, "Parse.Err", KindType, 7)
 }
+
+func TestMultilineDecoratorsAndAttributes(t *testing.T) {
+	// 1. Python multiline decorator
+	pySrc := strings.Join([]string{
+		`@route(`,
+		`    "/api/users",`,
+		``,
+		`    methods=["GET", "POST"],`,
+		`)`,
+		`def list_users():`,
+		`    pass`,
+	}, "\n") + "\n"
+	pySyms := extract(t, "api.py", pySrc)
+	found(t, pySyms, "list_users", KindFunc, 6)
+	absent(t, pySyms, "methods")
+	absent(t, pySyms, "route")
+
+	// 2. TypeScript multiline decorator
+	tsSrc := strings.Join([]string{
+		`@Component({`,
+		`  selector: "app",`,
+		``,
+		`  template: "<div></div>",`,
+		`})`,
+		`export class AppComponent {`,
+		`  title = "app";`,
+		`}`,
+	}, "\n") + "\n"
+	tsSyms := extract(t, "app.component.ts", tsSrc)
+	found(t, tsSyms, "AppComponent", KindType, 6)
+	absent(t, tsSyms, "Component")
+	absent(t, tsSyms, "selector")
+	absent(t, tsSyms, "template")
+
+	// 3. Rust multiline attribute
+	rsSrc := strings.Join([]string{
+		`#[derive(`,
+		`    Debug,`,
+		``,
+		`    Clone,`,
+		`)]`,
+		`pub struct ServerConfig {`,
+		`    pub port: u16,`,
+		`}`,
+		`#[cfg(`,
+		`    test`,
+		`)]`,
+		`mod tests {`,
+		`    fn helper() {}`,
+		`}`,
+	}, "\n") + "\n"
+	rsSyms := extract(t, "config.rs", rsSrc)
+	found(t, rsSyms, "ServerConfig", KindType, 6)
+	h := found(t, rsSyms, "helper", KindFunc, 13)
+	if !h.Test {
+		t.Errorf("expected helper to be marked as test")
+	}
+	absent(t, rsSyms, "derive")
+	absent(t, rsSyms, "Debug")
+}
+
+func TestDeltaAndDepthHelpers(t *testing.T) {
+	if got := parenDelta("((a) + b)"); got != 0 {
+		t.Fatalf("parenDelta = %d, want 0", got)
+	}
+	if got := bracketDelta("[[a], b]"); got != 0 {
+		t.Fatalf("bracketDelta = %d, want 0", got)
+	}
+	if got := updateDepth(2, -5); got != 0 {
+		t.Fatalf("updateDepth(2, -5) = %d, want 0", got)
+	}
+	if got := updateDepth(2, 3); got != 5 {
+		t.Fatalf("updateDepth(2, 3) = %d, want 5", got)
+	}
+}

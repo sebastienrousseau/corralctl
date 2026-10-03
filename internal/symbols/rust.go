@@ -70,10 +70,23 @@ func (r rustExtractor) Extract(path string, src []byte) ([]Symbol, error) {
 	// `mod` it applies to, since `#[cfg(test)]` sits on its own line.
 	testModuleDepth := -1
 	pendingTest := false
+	attributeBracketDepth := 0
+	inCfg := false
 
 	for n, raw := range lines {
 		indent := indentOf(raw)
 		if indent < 0 {
+			depth += braceDelta(raw)
+			continue
+		}
+		if attributeBracketDepth > 0 {
+			if strings.Contains(raw, "cfg(test)") || (inCfg && strings.Contains(raw, "test")) {
+				pendingTest = true
+			}
+			attributeBracketDepth = updateDepth(attributeBracketDepth, bracketDelta(raw))
+			if attributeBracketDepth == 0 {
+				inCfg = false
+			}
 			depth += braceDelta(raw)
 			continue
 		}
@@ -88,6 +101,10 @@ func (r rustExtractor) Extract(path string, src []byte) ([]Symbol, error) {
 		if raw[i] == '#' {
 			if strings.Contains(raw, "cfg(test)") {
 				pendingTest = true
+			}
+			if bd := bracketDelta(raw[i:]); bd > 0 {
+				attributeBracketDepth = bd
+				inCfg = strings.Contains(raw, "cfg(")
 			}
 			depth += braceDelta(raw)
 			continue

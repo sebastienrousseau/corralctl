@@ -88,6 +88,7 @@ func (e tsExtractor) Extract(path string, src []byte) ([]Symbol, error) {
 	// explicitly; a depth that is left behind is simply never consulted.
 	classes := map[int]string{}
 	depth := 0
+	decoratorParenDepth := 0
 
 	for n, raw := range lines {
 		indent := indentOf(raw)
@@ -95,8 +96,22 @@ func (e tsExtractor) Extract(path string, src []byte) ([]Symbol, error) {
 			depth += braceDelta(raw)
 			continue
 		}
+		if decoratorParenDepth > 0 {
+			decoratorParenDepth = updateDepth(decoratorParenDepth, parenDelta(raw))
+			depth += braceDelta(raw)
+			continue
+		}
 		lineNo := n + 1
 		i := indent
+
+		// A decorator line declares nothing itself; the declaration is below it.
+		if raw[i] == '@' {
+			if pd := parenDelta(raw[i:]); pd > 0 {
+				decoratorParenDepth = pd
+			}
+			depth += braceDelta(raw)
+			continue
+		}
 
 		// `export` and `export default` mark a module's visible surface.
 		// A class member has no export keyword: it is public unless it
