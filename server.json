@@ -3,7 +3,7 @@
   "name": "io.github.sebastienrousseau/corralctl",
   "title": "corralctl",
   "description": "Search code and symbols across every clone in your corralctl workspace. Zero network calls.",
-  "version": "0.0.37",
+  "version": "0.0.38",
   "repository": {
     "url": "https://github.com/sebastienrousseau/corralctl",
     "source": "github"
@@ -12,7 +12,7 @@
   "packages": [
     {
       "registryType": "oci",
-      "identifier": "ghcr.io/sebastienrousseau/corralctl:0.0.37",
+      "identifier": "ghcr.io/sebastienrousseau/corralctl:0.0.38",
       "transport": {
         "type": "stdio"
       }

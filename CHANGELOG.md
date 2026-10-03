@@ -6,8 +6,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.38] — 2026-10-03
+
 ### Added
 
+- **Multi-line decorator and attribute symbol parsing.** Enhanced `internal/symbols`
+  with delimiter depth tracking for Python decorators (`@decorator(...)`),
+  TypeScript class/method decorators (`@Component({...})`), and Rust outer
+  attributes (`#[derive(...)]`, `#[cfg(...)]`), preventing false-positive variable
+  assignments within multiline argument blocks while maintaining zero AST overhead.
+- **Mermaid and Graphviz dependency graph exports.** Added `--mermaid` and `--dot`
+  export flags to `corralctl graph` (and `--output mermaid|dot`) for rendering
+  workspace dependency graphs and single-repository dependency/dependent trees in
+  standard visualization formats.
+- **Fast CLI code search (`corralctl search`).** Added top-level `corralctl search`
+  command for rapid cross-repository content searching across workspace clones,
+  supporting regex patterns, case sensitivity, test file filters, path globs,
+  language filters, repository targeting, hit bounds, and structured JSON output.
 - **Three transports from one command line.** `corralctl mcp` still speaks
   stdio by default; `--transport streamable-http --host 127.0.0.1 --port 8000`
   serves Streamable HTTP at `/mcp`, and `--transport sse --port 8001` serves
@@ -2477,7 +2492,8 @@ cron-safety overhaul.
   100 % doc coverage.
 - All tests green under `-race -count=1`.
 
-[Unreleased]: https://github.com/sebastienrousseau/corralctl/compare/v0.0.37...HEAD
+[Unreleased]: https://github.com/sebastienrousseau/corralctl/compare/v0.0.38...HEAD
+[0.0.38]: https://github.com/sebastienrousseau/corralctl/compare/v0.0.37...v0.0.38
 [0.0.37]: https://github.com/sebastienrousseau/corralctl/compare/v0.0.36...v0.0.37
 [0.0.36]: https://github.com/sebastienrousseau/corral/compare/v0.0.35...v0.0.36
 [0.0.35]: https://github.com/sebastienrousseau/corral/compare/v0.0.34...v0.0.35
