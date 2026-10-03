@@ -39,3 +39,14 @@ func assertCancelledRunnerErrors(t *testing.T) {
 		t.Fatal("cancelled default selector runner must return an error")
 	}
 }
+
+// assertDefaultGraphRunner exercises the default runGraphProgram implementation.
+// Like assertCancelledRunnerErrors, it is excluded under -race because starting a
+// real Bubble Tea program trips a data race inside cancelreader.
+func assertDefaultGraphRunner(t *testing.T) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		return
+	}
+	_ = runGraphProgram(immediateQuitModel{})
+}

@@ -18,3 +18,8 @@ func assertCancelledRunnerErrors(t *testing.T) {
 	t.Helper()
 	t.Log("skipping the real Bubble Tea runner under -race: bubbletea/cancelreader race their own shutdown")
 }
+
+func assertDefaultGraphRunner(t *testing.T) {
+	t.Helper()
+	t.Log("skipping the real Bubble Tea graph runner under -race: bubbletea/cancelreader race their own shutdown")
+}

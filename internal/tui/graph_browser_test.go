@@ -158,9 +158,7 @@ func TestRunGraphBrowser(t *testing.T) {
 
 	// Exercise default runGraphProgram implementation with an immediate quit model
 	runGraphProgram = origRunner
-	if err := runGraphProgram(immediateQuitModel{}); err != nil {
-		t.Fatalf("default runGraphProgram failed: %v", err)
-	}
+	assertDefaultGraphRunner(t)
 }
 
 type immediateQuitModel struct{}
