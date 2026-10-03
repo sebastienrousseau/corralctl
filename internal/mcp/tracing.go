@@ -8,6 +8,8 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"strings"
+
+	"github.com/sebastienrousseau/corralctl/internal/diag"
 )
 
 // TraceContext holds the parsed components of a W3C traceparent header
@@ -128,8 +130,13 @@ func NewTraceContext() TraceContext {
 
 type traceContextKey struct{}
 
-// ContextWithTrace attaches a TraceContext to the given context.
+// ContextWithTrace attaches a TraceContext to the given context and propagates
+// it to diag.WithTrace for structured logging.
 func ContextWithTrace(ctx context.Context, tc TraceContext) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	ctx = diag.WithTrace(ctx, tc.TraceID, tc.ParentID)
 	return context.WithValue(ctx, traceContextKey{}, tc)
 }
 

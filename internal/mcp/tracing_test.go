@@ -9,6 +9,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/sebastienrousseau/corralctl/internal/diag"
 )
 
 func TestParseTraceParent(t *testing.T) {
@@ -191,6 +193,17 @@ func TestTraceContextStorageAndRetrieval(t *testing.T) {
 	}
 	if retrieved != tc {
 		t.Fatalf("retrieved %+v, want %+v", retrieved, tc)
+	}
+
+	ti, ok := diag.FromContext(ctxWithTrace)
+	if !ok || ti.TraceID != tc.TraceID || ti.SpanID != tc.ParentID {
+		t.Fatalf("diag.FromContext = %+v, %v; want traceID=%s, spanID=%s", ti, ok, tc.TraceID, tc.ParentID)
+	}
+
+	// ContextWithTrace with nil ctx
+	nilWithTrace := ContextWithTrace(nilCtx, tc)
+	if r, ok := TraceFromContext(nilWithTrace); !ok || r != tc {
+		t.Errorf("ContextWithTrace(nil, tc) = %+v, %v; want %+v, true", r, ok, tc)
 	}
 }
 
