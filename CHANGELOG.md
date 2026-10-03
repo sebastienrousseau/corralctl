@@ -43,6 +43,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   risking path traversal. `corral_release_worktree` strictly refuses when uncommitted
   or untracked changes exist unless `force: true` is passed, and automatically
   prunes stale administrative worktree metadata.
+- **Real-time workspace watcher via fsnotify.** The MCP server monitors
+  workspace structural directories and repository roots in the background
+  (enabled by default via `--watch=true`), debouncing filesystem events by
+  50ms to automatically invalidate the cached repository index when branches,
+  remotes, or worktrees change on disk without descending into loose git objects.
 
 ### Performance
 

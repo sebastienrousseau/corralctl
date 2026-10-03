@@ -31,6 +31,7 @@ var (
 	mcpNoConfirmDeletes           bool
 	mcpToken                      string
 	mcpAllowedOrigins             string
+	mcpWatch                      bool
 )
 
 // mcpCmd registers the `corralctl mcp` subcommand. It runs a Model
@@ -209,6 +210,7 @@ func runMCP(cmd *cobra.Command, args []string) error {
 		SymbolCacheDir:             mcpSymbolCache,
 		AuthToken:                  token,
 		AllowedOrigins:             parseCSV(mcpAllowedOrigins),
+		WatchWorkspace:             mcpWatch,
 	})
 	if err != nil {
 		return fmt.Errorf("constructing mcp server: %w", err)
@@ -338,5 +340,7 @@ func init() {
 		"bearer token required for HTTP and SSE requests (or CORRAL_MCP_TOKEN env var)")
 	mcpCmd.Flags().StringVar(&mcpAllowedOrigins, "allowed-origins", "",
 		"comma-separated list of origins allowed for HTTP and SSE requests")
+	mcpCmd.Flags().BoolVar(&mcpWatch, "watch", true,
+		"watch the workspace for filesystem changes and invalidate the cache in real time")
 	rootCmd.AddCommand(mcpCmd)
 }

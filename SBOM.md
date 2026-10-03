@@ -15,6 +15,7 @@ Versions pinned in `go.mod`. Refresh this table whenever a direct dependency is 
 | `github.com/charmbracelet/bubbles` | v1.0.0 | TUI Components | MIT |
 | `github.com/charmbracelet/bubbletea` | v1.3.10 | TUI Architecture | MIT |
 | `github.com/charmbracelet/lipgloss` | v1.1.0 | TUI Styling | MIT |
+| `github.com/fsnotify/fsnotify` | v1.10.1 | Filesystem notification events | BSD-3-Clause |
 | `github.com/google/go-github/v90` | v90.0.0 | GitHub API Client | BSD-3-Clause |
 | `github.com/mattn/go-isatty` | v0.0.24 | Terminal Detection | MIT |
 | `github.com/modelcontextprotocol/go-sdk` | v1.8.0 | MCP Server Protocol | Apache-2.0 |

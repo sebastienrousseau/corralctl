@@ -81,6 +81,10 @@ type ServerOptions struct {
 	// When empty, cross-origin browser requests are rejected to protect against
 	// DNS rebinding and cross-site request forgery.
 	AllowedOrigins []string
+	// WatchWorkspace, when true, starts a background filesystem watcher across
+	// the workspace root and structural directories to invalidate the workspace
+	// scan cache dynamically in real time upon filesystem changes.
+	WatchWorkspace bool
 }
 
 // Server wraps an mcp-go MCPServer with the corral-specific configuration.
@@ -310,6 +314,14 @@ func (s *Server) AuditLogPath() string {
 // Stdout is reserved for the JSON-RPC protocol stream — any debug logging
 // the cmd layer wants to emit must go to stderr.
 func (s *Server) ServeStdio() error {
+	if s.opts.WatchWorkspace {
+		ctx, cancel := context.WithCancel(context.Background())
+		watchDone := s.startWorkspaceWatcher(ctx)
+		defer func() {
+			cancel()
+			<-watchDone
+		}()
+	}
 	return serveStdio(s.mcp)
 }
 
@@ -504,7 +516,18 @@ func (s *Server) serve(ctx context.Context, addr string, handler http.Handler) e
 	// from still reading the user's disk.
 	warmCtx, stopWarm := context.WithCancel(ctx)
 	warmDone := s.startSymbolWarmer(warmCtx)
+	var watchDone <-chan struct{}
+	var stopWatch context.CancelFunc
+	if s.opts.WatchWorkspace {
+		var watchCtx context.Context
+		watchCtx, stopWatch = context.WithCancel(ctx)
+		watchDone = s.startWorkspaceWatcher(watchCtx)
+	}
 	defer func() {
+		if stopWatch != nil {
+			stopWatch()
+			<-watchDone
+		}
 		stopWarm()
 		<-warmDone
 		// After the warmer has stopped and every request has finished, no
