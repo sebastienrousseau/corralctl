@@ -73,6 +73,18 @@ type ServerOptions struct {
 	// ($XDG_STATE_HOME/corral/mutations.log). Only consulted when at
 	// least one mutation gate is enabled.
 	AuditLogPath string
+	// AuthToken, when non-empty, requires requests against the HTTP and SSE
+	// transports to present a matching Bearer token in the Authorization
+	// header. When empty, no bearer authentication is enforced.
+	AuthToken string
+	// AllowedOrigins lists origins permitted to connect to HTTP and SSE endpoints.
+	// When empty, cross-origin browser requests are rejected to protect against
+	// DNS rebinding and cross-site request forgery.
+	AllowedOrigins []string
+	// WatchWorkspace, when true, starts a background filesystem watcher across
+	// the workspace root and structural directories to invalidate the workspace
+	// scan cache dynamically in real time upon filesystem changes.
+	WatchWorkspace bool
 }
 
 // Server wraps an mcp-go MCPServer with the corral-specific configuration.
@@ -133,6 +145,8 @@ type Server struct {
 	scanMu      sync.Mutex
 	scanIndex   *Index
 	scanExpires time.Time
+
+	metrics *Metrics
 }
 
 // scanTTL is how long a workspace scan is considered fresh. 5s is short
@@ -176,6 +190,9 @@ func (s *Server) invalidateScanCache() {
 	defer s.scanMu.Unlock()
 	s.scanIndex = nil
 	s.scanExpires = time.Time{}
+	if s.metrics != nil {
+		s.metrics.incCacheInvalidation()
+	}
 }
 
 // NewServer constructs and configures a Corral MCP server. It registers
@@ -225,6 +242,7 @@ func NewServer(opts ServerOptions) (*Server, error) {
 		confirmDeletes: opts.ConfirmDeletes,
 		confirmer:      elicitConfirmer{},
 		repoLocks:      newRepoLocks(),
+		metrics:        newMetrics(),
 	}
 	if opts.EnableMutations || opts.EnableDestructiveMutations {
 		s.auditor = NewAuditor(opts.AuditLogPath)
@@ -236,6 +254,7 @@ func NewServer(opts ServerOptions) (*Server, error) {
 	// Freshness hints on the results that carry them, so a client stops
 	// re-fetching a tool listing that cannot have changed.
 	s.mcp.AddReceivingMiddleware(cacheHintMiddleware())
+	s.mcp.AddReceivingMiddleware(s.toolInstrumentationMiddleware())
 	s.registerResources()
 	s.registerPrompts()
 	if s.opts.EnableMutations {
@@ -302,6 +321,14 @@ func (s *Server) AuditLogPath() string {
 // Stdout is reserved for the JSON-RPC protocol stream — any debug logging
 // the cmd layer wants to emit must go to stderr.
 func (s *Server) ServeStdio() error {
+	if s.opts.WatchWorkspace {
+		ctx, cancel := context.WithCancel(context.Background())
+		watchDone := s.startWorkspaceWatcher(ctx)
+		defer func() {
+			cancel()
+			<-watchDone
+		}()
+	}
 	return serveStdio(s.mcp)
 }
 
@@ -496,7 +523,18 @@ func (s *Server) serve(ctx context.Context, addr string, handler http.Handler) e
 	// from still reading the user's disk.
 	warmCtx, stopWarm := context.WithCancel(ctx)
 	warmDone := s.startSymbolWarmer(warmCtx)
+	var watchDone <-chan struct{}
+	var stopWatch context.CancelFunc
+	if s.opts.WatchWorkspace {
+		var watchCtx context.Context
+		watchCtx, stopWatch = context.WithCancel(ctx)
+		watchDone = s.startWorkspaceWatcher(watchCtx)
+	}
 	defer func() {
+		if stopWatch != nil {
+			stopWatch()
+			<-watchDone
+		}
 		stopWarm()
 		<-warmDone
 		// After the warmer has stopped and every request has finished, no

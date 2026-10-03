@@ -25,7 +25,7 @@ func TestRootCommandExposesTheRealTree(t *testing.T) {
 	// Every subcommand a manpage is generated for must be reachable.
 	want := map[string]bool{
 		"clone": false, "sync": false, "mcp": false, "exec": false, "status": false,
-		"plan": false, "prune": false, "profile": false, "config": false,
+		"plan": false, "prune": false, "profile": false, "config": false, "graph": false,
 	}
 	for _, sub := range root.Commands() {
 		if _, ok := want[sub.Name()]; ok {

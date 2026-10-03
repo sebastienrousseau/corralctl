@@ -51,11 +51,13 @@ Boundary 2 also includes `git clone` traffic to `github.com` over HTTPS.
 Boundary 4 is a pipe by default: the client launches the server as a
 subprocess and nothing else can reach it. `--transport streamable-http` or
 `--transport sse` (and the older `--http`) turns it into a socket.
-The server carries no authentication of its own, so the address is required
-to be on loopback — a routable bind is refused unless the operator also
-passes `--allow-remote`, which asserts that they have put authentication in
-front of it. Anyone who can reach the socket has the server's full
-capability, including whatever mutations were enabled at startup.
+The server supports `--token` (or `CORRAL_MCP_TOKEN`) to enforce Bearer
+token authentication, and validates `Origin` headers (restricting requests
+to loopback origins by default, with `--allowed-origins` for external/web
+origins) to protect against CSRF and DNS rebinding attacks. A routable bind
+is refused unless the operator also passes `--allow-remote`, which asserts
+that they have configured authentication. Anyone who can reach the socket
+has the server's capability according to configured flags.
 
 ## 3. Security properties (claims)
 
@@ -218,6 +220,17 @@ to GitLab carries the GitLab credential and nothing else.
 **Evidence.** `pushAuthEnv` in `internal/git/mirror.go`, and
 `TestPushMirrorScopesTheCredential`.
 
+### C8. corralctl disarms git hooks and dangerous external protocols during execution
+
+**Argument.** Automated operations (clone, pull, mirror, submodule updates) run
+with explicit configuration disarming git hooks (`-c core.hooksPath=/dev/null`)
+and disallowing external protocol helper execution (`-c protocol.ext.allow=never`).
+Cloning or updating an untrusted repository cannot trigger local code execution
+via embedded hooks.
+
+**Evidence.** `internal/git/git.go`, `internal/git/mirror.go`, and
+`TestGitHooksAreDisarmedDuringOperations` in `internal/git/hardening_test.go`.
+
 ## 4. Threats considered and out of scope
 
 ### In scope
@@ -228,6 +241,12 @@ to GitLab carries the GitLab credential and nothing else.
   cosign + SLSA (C3).
 - **Dependency compromise**: mitigated by Dependabot on `go.mod` and by
   `govulncheck` in CI; `go.sum` locks transitive hashes.
+- **Execution of untrusted git hooks or external helpers**: mitigated by
+  enforcing `-c core.hooksPath=/dev/null` and `-c protocol.ext.allow=never`
+  on all automated git subprocess invocations (C8).
+- **Cross-origin attacks and unauthorized MCP access**: mitigated by
+  `--token` bearer authentication, strict `Origin` header validation, and
+  loopback binding enforcement (Boundary 4).
 
 ### Out of scope
 
@@ -239,10 +258,6 @@ to GitLab carries the GitLab credential and nothing else.
   should pin to a specific release tag+digest.
 - **Attacks against GitHub itself.** corralctl trusts `api.github.com` and
   `github.com` as authoritative for repository state.
-- **Local privilege escalation via git hooks.** `corralctl` runs `git
-  clone`, and `git` executes hooks from the cloned repository during
-  some operations. Users cloning arbitrary attacker-controlled repos
-  should be aware of `core.hooksPath` behaviour.
 - **Denial of service via GitHub rate limits.** corralctl respects
   `X-RateLimit-*` headers and backs off, but cannot prevent a mistuned
   cron job from exhausting the user's own rate budget.

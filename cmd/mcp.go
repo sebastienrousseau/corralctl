@@ -29,6 +29,9 @@ var (
 	mcpPort                       int
 	mcpAllowRemote                bool
 	mcpNoConfirmDeletes           bool
+	mcpToken                      string
+	mcpAllowedOrigins             string
+	mcpWatch                      bool
 )
 
 // mcpCmd registers the `corralctl mcp` subcommand. It runs a Model
@@ -45,18 +48,19 @@ var mcpCmd = &cobra.Command{
 
 The server exposes the local Corral-organised workspace (cloned
 repositories under the configured base directory) to AI coding agents
-through eight read-only tools and four resources. No network calls are
+through nine read-only tools and four resources. No network calls are
 made and no forge API is contacted.
 
 Tools:
-  corral_find_symbol       - where a symbol is defined, across EVERY clone
-  corral_search_code       - where text appears, across EVERY clone
-  corral_repo_overview     - one repository's shape in a single call
-  corral_list_repos        - filter clones by visibility/language/name
-  corral_find_repo         - resolve a fuzzy name to one clone
-  corral_get_repo_metadata - detailed info incl. current branch
-  corral_status_summary    - aggregate counts by visibility + language
-  corral_workspace_index   - full workspace index as JSON
+  corral_find_symbol        - where a symbol is defined, across EVERY clone
+  corral_search_code        - where text appears, across EVERY clone
+  corral_repo_overview      - one repository's shape in a single call
+  corral_list_repos         - filter clones by visibility/language/name
+  corral_find_repo          - resolve a fuzzy name to one clone
+  corral_get_repo_metadata  - detailed info incl. current branch
+  corral_status_summary     - aggregate counts by visibility + language
+  corral_workspace_index    - full workspace index as JSON
+  corral_graph_dependencies - analyze cross-repo package dependencies
 
 corral_find_symbol is the one a single-repository code index cannot
 offer: it resolves a function, method, type, interface, constant or
@@ -72,6 +76,8 @@ never match.
 Write tools, registered only with --enable-mutations, and audited:
   corral_sync_repo         - git pull one clone
   corral_clone_repo        - clone into the workspace
+  corral_create_worktree   - create isolated worktree in .git/corral-worktrees
+  corral_release_worktree  - remove isolated worktree after branch work
   corral_delete_repo       - remove one clone; additionally requires
                              --enable-destructive-mutations, and refuses
                              when the clone holds uncommitted, unpushed,
@@ -189,6 +195,11 @@ func runMCP(cmd *cobra.Command, args []string) error {
 			addr, abs)
 	}
 
+	token := mcpToken
+	if token == "" {
+		token = os.Getenv("CORRAL_MCP_TOKEN")
+	}
+
 	srv, err := mcpNewServer(mcp.ServerOptions{
 		Root:                       abs,
 		Version:                    Version,
@@ -198,6 +209,9 @@ func runMCP(cmd *cobra.Command, args []string) error {
 		AuditLogPath:               mcpAuditLog,
 		AllowFileExts:              parseCSV(mcpAllowFileExts),
 		SymbolCacheDir:             mcpSymbolCache,
+		AuthToken:                  token,
+		AllowedOrigins:             parseCSV(mcpAllowedOrigins),
+		WatchWorkspace:             mcpWatch,
 	})
 	if err != nil {
 		return fmt.Errorf("constructing mcp server: %w", err)
@@ -323,5 +337,11 @@ func init() {
 	mcpCmd.Flags().StringVar(&mcpSymbolCache, "symbol-cache", "",
 		"where to persist the symbol index between runs (defaults to $XDG_CACHE_HOME/corral/symbols; \"off\" disables it)")
 	mcpCmd.Flags().StringVar(&mcpAuditLog, "audit-log", "", "path to the mutation audit log (defaults to $XDG_STATE_HOME/corral/mutations.log or ~/.local/state/corral/mutations.log)")
+	mcpCmd.Flags().StringVar(&mcpToken, "token", "",
+		"bearer token required for HTTP and SSE requests (or CORRAL_MCP_TOKEN env var)")
+	mcpCmd.Flags().StringVar(&mcpAllowedOrigins, "allowed-origins", "",
+		"comma-separated list of origins allowed for HTTP and SSE requests")
+	mcpCmd.Flags().BoolVar(&mcpWatch, "watch", true,
+		"watch the workspace for filesystem changes and invalidate the cache in real time")
 	rootCmd.AddCommand(mcpCmd)
 }

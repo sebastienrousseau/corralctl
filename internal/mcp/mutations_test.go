@@ -642,3 +642,397 @@ func TestDeleteRefusalsWithLostAuditRecord(t *testing.T) {
 		})
 	}
 }
+
+func TestWorktreeCreateAndAudits(t *testing.T) {
+	base := t.TempDir()
+	repoPath := makeFakeRepo(t, base, "Public", "go", "alpha", "https://github.com/o/alpha.git", "")
+	realRepo, err := filepath.EvalSymlinks(repoPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	created := 0
+	var gotRepo, gotTarget, gotBranch string
+	stubSeam(t, &gitCreateWorktree, func(_ context.Context, repo, target, branch string) error {
+		created++
+		gotRepo = repo
+		gotTarget = target
+		gotBranch = branch
+		return nil
+	})
+	h, audit := mutationHarness(t, base, false)
+
+	var got map[string]any
+	h.callToolJSON("corral_create_worktree", map[string]any{
+		"repo":   "alpha",
+		"branch": "feat/isolated",
+	}, &got)
+
+	if got["result"] != "created" {
+		t.Errorf("result = %v, want created", got["result"])
+	}
+	wantTarget := filepath.Join(realRepo, ".git", "corral-worktrees", filepath.FromSlash("feat/isolated"))
+	if gotTarget != wantTarget {
+		t.Errorf("gitCreateWorktree target = %q, want %q", gotTarget, wantTarget)
+	}
+	if gotBranch != "feat/isolated" {
+		t.Errorf("gitCreateWorktree branch = %q, want feat/isolated", gotBranch)
+	}
+	if gotRepo != realRepo {
+		t.Errorf("gitCreateWorktree repo = %q, want %q", gotRepo, realRepo)
+	}
+	if created != 1 {
+		t.Errorf("gitCreateWorktree called %d times, want 1", created)
+	}
+
+	recs := auditRecords(t, audit)
+	if len(recs) != 2 {
+		t.Fatalf("expected intent + completion records, got %d: %+v", len(recs), recs)
+	}
+	if recs[0].Phase != "intent" || recs[1].Phase != "completion" {
+		t.Errorf("phases = %q,%q want intent,completion", recs[0].Phase, recs[1].Phase)
+	}
+	if recs[0].OperationID == "" || recs[0].OperationID != recs[1].OperationID {
+		t.Errorf("records are not correlated: %+v", recs)
+	}
+	if recs[0].Tool != "corral_create_worktree" || recs[1].Tool != "corral_create_worktree" {
+		t.Errorf("tool names incorrect in audit records: %+v", recs)
+	}
+}
+
+func TestWorktreeReleaseAndAudits(t *testing.T) {
+	base := t.TempDir()
+	repoPath := makeFakeRepo(t, base, "Public", "go", "alpha", "https://github.com/o/alpha.git", "")
+	realRepo, err := filepath.EvalSymlinks(repoPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stubSeam(t, &hasLocalChanges, func(context.Context, string) (bool, string) { return false, "" })
+	var removedTarget string
+	var removedForce bool
+	stubSeam(t, &gitRemoveWorktree, func(_ context.Context, repo, target string, force bool) error {
+		removedTarget = target
+		removedForce = force
+		return nil
+	})
+	pruned := 0
+	stubSeam(t, &gitPruneWorktrees, func(context.Context, string) error {
+		pruned++
+		return nil
+	})
+
+	h, audit := mutationHarness(t, base, false)
+
+	// Release by branch name
+	var got map[string]any
+	h.callToolJSON("corral_release_worktree", map[string]any{
+		"repo":   "alpha",
+		"branch": "feat/isolated",
+	}, &got)
+	if got["result"] != "released" {
+		t.Errorf("result = %v, want released", got["result"])
+	}
+	wantTarget := filepath.Join(realRepo, ".git", "corral-worktrees", filepath.FromSlash("feat/isolated"))
+	if removedTarget != wantTarget {
+		t.Errorf("removed target = %q, want %q", removedTarget, wantTarget)
+	}
+	if removedForce != false {
+		t.Errorf("removed force = %v, want false", removedForce)
+	}
+	if pruned != 1 {
+		t.Errorf("pruned called %d times, want 1", pruned)
+	}
+
+	recs := auditRecords(t, audit)
+	if len(recs) != 2 {
+		t.Fatalf("expected intent + completion records, got %d: %+v", len(recs), recs)
+	}
+
+	// Release by explicit path with force
+	h.callToolJSON("corral_release_worktree", map[string]any{
+		"repo":  "alpha",
+		"path":  wantTarget,
+		"force": true,
+	}, &got)
+	if got["result"] != "released" {
+		t.Errorf("result = %v, want released", got["result"])
+	}
+	if removedForce != true {
+		t.Errorf("removed force = %v, want true", removedForce)
+	}
+}
+
+func TestWorktreeInputValidationAndRefusals(t *testing.T) {
+	base := t.TempDir()
+	repoPath := makeFakeRepo(t, base, "Public", "go", "alpha", "", "")
+	realRepo, err := filepath.EvalSymlinks(repoPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h, _ := mutationHarness(t, base, false)
+
+	// Create input validation
+	createCases := []struct {
+		name string
+		args map[string]any
+		want string
+	}{
+		{"empty repo", map[string]any{"repo": "", "branch": "feat"}, "repo is required"},
+		{"empty branch", map[string]any{"repo": "alpha", "branch": ""}, "invalid branch name"},
+		{"branch with dash prefix", map[string]any{"repo": "alpha", "branch": "-bad"}, "invalid branch name"},
+		{"branch with dotdot", map[string]any{"repo": "alpha", "branch": "feat/../bad"}, "invalid branch name"},
+		{"repo not found", map[string]any{"repo": "missing", "branch": "feat"}, "no repository matches"},
+	}
+	for _, tc := range createCases {
+		t.Run("create_"+tc.name, func(t *testing.T) {
+			text, isErr := h.callTool("corral_create_worktree", tc.args)
+			if !isErr {
+				t.Fatalf("expected error, got: %s", text)
+			}
+			if !strings.Contains(text, tc.want) {
+				t.Errorf("error %q does not contain %q", text, tc.want)
+			}
+		})
+	}
+
+	// Worktree already exists
+	t.Run("create_already_exists", func(t *testing.T) {
+		existing := filepath.Join(realRepo, ".git", "corral-worktrees", "existing")
+		if err := os.MkdirAll(existing, 0o750); err != nil {
+			t.Fatal(err)
+		}
+		text, isErr := h.callTool("corral_create_worktree", map[string]any{
+			"repo": "alpha", "branch": "existing",
+		})
+		if !isErr {
+			t.Fatalf("expected error for existing worktree, got: %s", text)
+		}
+		if !strings.Contains(text, "worktree already exists") {
+			t.Errorf("error %q does not contain 'worktree already exists'", text)
+		}
+	})
+
+	// Release input validation
+	releaseCases := []struct {
+		name string
+		args map[string]any
+		want string
+	}{
+		{"empty repo", map[string]any{"repo": "", "branch": "feat"}, "repo is required"},
+		{"missing branch and path", map[string]any{"repo": "alpha"}, "either branch or path must be specified"},
+		{"invalid branch with prefix dash", map[string]any{"repo": "alpha", "branch": "-bad"}, "invalid branch name"},
+		{"invalid branch with dotdot", map[string]any{"repo": "alpha", "branch": "foo/../bar"}, "invalid branch name"},
+		{"invalid branch empty spaces", map[string]any{"repo": "alpha", "branch": "   "}, "invalid branch name"},
+		{"repo not found", map[string]any{"repo": "missing", "branch": "feat"}, "no repository matches"},
+		{"path outside worktrees dir", map[string]any{"repo": "alpha", "path": filepath.Join(base, "other")}, "is not inside"},
+		{"path traversal", map[string]any{"repo": "alpha", "path": filepath.Join(realRepo, ".git", "corral-worktrees", "..", "config")}, "is not inside"},
+		{"path is base itself", map[string]any{"repo": "alpha", "path": filepath.Join(realRepo, ".git", "corral-worktrees")}, "is not inside"},
+	}
+	for _, tc := range releaseCases {
+		t.Run("release_"+tc.name, func(t *testing.T) {
+			text, isErr := h.callTool("corral_release_worktree", tc.args)
+			if !isErr {
+				t.Fatalf("expected error, got: %s", text)
+			}
+			if !strings.Contains(text, tc.want) {
+				t.Errorf("error %q does not contain %q", text, tc.want)
+			}
+		})
+	}
+}
+
+func TestWorktreeDirtyRefusal(t *testing.T) {
+	base := t.TempDir()
+	makeFakeRepo(t, base, "Public", "go", "alpha", "", "")
+	stubSeam(t, &hasLocalChanges, func(context.Context, string) (bool, string) {
+		return true, "uncommitted changes in foo.go"
+	})
+	h, audit := mutationHarness(t, base, false)
+
+	// Refusal without force
+	text, isErr := h.callTool("corral_release_worktree", map[string]any{
+		"repo":   "alpha",
+		"branch": "feat",
+	})
+	if !isErr {
+		t.Fatalf("dirty worktree release should be refused, got: %s", text)
+	}
+	if !strings.Contains(text, "refusing to release dirty worktree: uncommitted changes in foo.go") {
+		t.Errorf("refusal %q does not state reason", text)
+	}
+	recs := auditRecords(t, audit)
+	if len(recs) != 2 || recs[1].Result != "refused" {
+		t.Fatalf("expected intent + refusal records, got %+v", recs)
+	}
+
+	// Refusal with broken audit
+	failAuditAfter(t, 2)
+	text, isErr = h.callTool("corral_release_worktree", map[string]any{
+		"repo":   "alpha",
+		"branch": "feat",
+	})
+	if !isErr {
+		t.Fatalf("dirty worktree release should be refused, got: %s", text)
+	}
+	if !strings.Contains(text, "audit refusal failed") {
+		t.Errorf("refusal %q does not report failed audit", text)
+	}
+}
+
+func TestWorktreeAuditAndFilesystemFailures(t *testing.T) {
+	boom := errors.New("disk boom")
+
+	// Unscannable root
+	t.Run("unscannable_root", func(t *testing.T) {
+		h, _ := mutationHarness(t, filepath.Join(t.TempDir(), "does-not-exist"), false)
+		for _, tool := range []string{"corral_create_worktree", "corral_release_worktree"} {
+			text, isErr := h.callTool(tool, map[string]any{"repo": "alpha", "branch": "feat"})
+			if !isErr {
+				t.Errorf("%s succeeded on unscannable root: %s", tool, text)
+			}
+			if !strings.Contains(text, "scan workspace") {
+				t.Errorf("%s error %q does not mention scan workspace", tool, text)
+			}
+		}
+	})
+
+	// SafeMutationPath failure
+	t.Run("safe_mutation_path_failure", func(t *testing.T) {
+		base := t.TempDir()
+		makeFakeRepo(t, base, "Public", "go", "alpha", "", "")
+		h, _ := mutationHarness(t, base, false)
+
+		real := relSafePath
+		calls := 0
+		stubSeam(t, &relSafePath, func(b, target string) (string, error) {
+			calls++
+			if calls > 1 {
+				return "", errors.New("rel failure")
+			}
+			return real(b, target)
+		})
+
+		text, isErr := h.callTool("corral_create_worktree", map[string]any{"repo": "alpha", "branch": "feat"})
+		if !isErr || !strings.Contains(text, "rel failure") {
+			t.Errorf("create SafeMutationPath failure: isErr=%v, text=%s", isErr, text)
+		}
+
+		calls = 0
+		text, isErr = h.callTool("corral_release_worktree", map[string]any{"repo": "alpha", "branch": "feat"})
+		if !isErr || !strings.Contains(text, "rel failure") {
+			t.Errorf("release SafeMutationPath failure: isErr=%v, text=%s", isErr, text)
+		}
+	})
+
+	// Audit intent failures
+	t.Run("audit_intent_failure", func(t *testing.T) {
+		base := t.TempDir()
+		makeFakeRepo(t, base, "Public", "go", "alpha", "", "")
+		h, _ := mutationHarness(t, base, false)
+
+		failAuditAfter(t, 1)
+		text, isErr := h.callTool("corral_create_worktree", map[string]any{"repo": "alpha", "branch": "feat"})
+		if !isErr || !strings.Contains(text, "audit intent failed") {
+			t.Errorf("create intent audit failure: isErr=%v, text=%s", isErr, text)
+		}
+
+		failAuditAfter(t, 1)
+		text, isErr = h.callTool("corral_release_worktree", map[string]any{"repo": "alpha", "branch": "feat"})
+		if !isErr || !strings.Contains(text, "audit intent failed") {
+			t.Errorf("release intent audit failure: isErr=%v, text=%s", isErr, text)
+		}
+	})
+
+	// Create: mkdir failure
+	t.Run("create_mkdir_failure", func(t *testing.T) {
+		base := t.TempDir()
+		makeFakeRepo(t, base, "Public", "go", "alpha", "", "")
+		h, _ := mutationHarness(t, base, false)
+		stubSeam(t, &mkdirMutation, func(string, os.FileMode) error { return boom })
+
+		text, isErr := h.callTool("corral_create_worktree", map[string]any{"repo": "alpha", "branch": "feat"})
+		if !isErr || !strings.Contains(text, "create worktree parent") {
+			t.Errorf("create mkdir failure: isErr=%v, text=%s", isErr, text)
+		}
+
+		// with lost audit record
+		failAuditAfter(t, 2)
+		text, isErr = h.callTool("corral_create_worktree", map[string]any{"repo": "alpha", "branch": "feat"})
+		if !isErr || !strings.Contains(text, "create worktree parent") || !strings.Contains(text, "audit completion failed") {
+			t.Errorf("create mkdir with lost audit: isErr=%v, text=%s", isErr, text)
+		}
+	})
+
+	// Create: gitCreateWorktree failure
+	t.Run("create_git_failure", func(t *testing.T) {
+		base := t.TempDir()
+		makeFakeRepo(t, base, "Public", "go", "alpha", "", "")
+		h, _ := mutationHarness(t, base, false)
+		stubSeam(t, &mkdirMutation, func(string, os.FileMode) error { return nil })
+		stubSeam(t, &gitCreateWorktree, func(context.Context, string, string, string) error { return boom })
+
+		text, isErr := h.callTool("corral_create_worktree", map[string]any{"repo": "alpha", "branch": "feat"})
+		if !isErr || !strings.Contains(text, "disk boom") {
+			t.Errorf("create git failure: isErr=%v, text=%s", isErr, text)
+		}
+
+		// with lost audit record
+		failAuditAfter(t, 2)
+		text, isErr = h.callTool("corral_create_worktree", map[string]any{"repo": "alpha", "branch": "feat"})
+		if !isErr || !strings.Contains(text, "disk boom") || !strings.Contains(text, "audit completion failed") {
+			t.Errorf("create git with lost audit: isErr=%v, text=%s", isErr, text)
+		}
+	})
+
+	// Create: audit completion failure on success
+	t.Run("create_audit_completion_failure", func(t *testing.T) {
+		base := t.TempDir()
+		makeFakeRepo(t, base, "Public", "go", "alpha", "", "")
+		h, _ := mutationHarness(t, base, false)
+		stubSeam(t, &mkdirMutation, func(string, os.FileMode) error { return nil })
+		stubSeam(t, &gitCreateWorktree, func(context.Context, string, string, string) error { return nil })
+
+		failAuditAfter(t, 2)
+		text, isErr := h.callTool("corral_create_worktree", map[string]any{"repo": "alpha", "branch": "feat"})
+		if !isErr || !strings.Contains(text, "audit completion failed") {
+			t.Errorf("create audit completion failure: isErr=%v, text=%s", isErr, text)
+		}
+	})
+
+	// Release: gitRemoveWorktree failure
+	t.Run("release_git_failure", func(t *testing.T) {
+		base := t.TempDir()
+		makeFakeRepo(t, base, "Public", "go", "alpha", "", "")
+		h, _ := mutationHarness(t, base, false)
+		stubSeam(t, &hasLocalChanges, func(context.Context, string) (bool, string) { return false, "" })
+		stubSeam(t, &gitRemoveWorktree, func(context.Context, string, string, bool) error { return boom })
+
+		text, isErr := h.callTool("corral_release_worktree", map[string]any{"repo": "alpha", "branch": "feat"})
+		if !isErr || !strings.Contains(text, "disk boom") {
+			t.Errorf("release git failure: isErr=%v, text=%s", isErr, text)
+		}
+
+		// with lost audit record
+		failAuditAfter(t, 2)
+		text, isErr = h.callTool("corral_release_worktree", map[string]any{"repo": "alpha", "branch": "feat"})
+		if !isErr || !strings.Contains(text, "disk boom") || !strings.Contains(text, "audit completion failed") {
+			t.Errorf("release git with lost audit: isErr=%v, text=%s", isErr, text)
+		}
+	})
+
+	// Release: audit completion failure on success
+	t.Run("release_audit_completion_failure", func(t *testing.T) {
+		base := t.TempDir()
+		makeFakeRepo(t, base, "Public", "go", "alpha", "", "")
+		h, _ := mutationHarness(t, base, false)
+		stubSeam(t, &hasLocalChanges, func(context.Context, string) (bool, string) { return false, "" })
+		stubSeam(t, &gitRemoveWorktree, func(context.Context, string, string, bool) error { return nil })
+		stubSeam(t, &gitPruneWorktrees, func(context.Context, string) error { return nil })
+
+		failAuditAfter(t, 2)
+		text, isErr := h.callTool("corral_release_worktree", map[string]any{"repo": "alpha", "branch": "feat"})
+		if !isErr || !strings.Contains(text, "audit completion failed") {
+			t.Errorf("release audit completion failure: isErr=%v, text=%s", isErr, text)
+		}
+	})
+}
+

@@ -5,11 +5,13 @@ package mcp
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
 	"strings"
+	"sync"
 )
 
 // maxInterceptBody bounds how much of a request body this layer will buffer
@@ -267,8 +269,17 @@ func refusedEnvelope(cw *captureWriter) bool {
 	return false
 }
 
+type interceptedBodyKey struct{}
+
+var bodyBufferPool = sync.Pool{
+	New: func() any {
+		return new(bytes.Buffer)
+	},
+}
+
 // readAndRestore reads the request body and puts it back, so the inner
-// handler still sees a complete body.
+// handler still sees a complete body. Subsequent calls within the same
+// request pipeline retrieve the cached body from context without re-reading.
 //
 // Bodies larger than maxInterceptBody are refused rather than buffered: this
 // layer only needs the id, and buffering an arbitrary upload to recover it
@@ -277,10 +288,16 @@ func readAndRestore(r *http.Request) ([]byte, error) {
 	if r.Body == nil {
 		return nil, errNoBody
 	}
+	if body, ok := r.Context().Value(interceptedBodyKey{}).([]byte); ok {
+		return body, nil
+	}
 	if r.ContentLength > maxInterceptBody {
 		return nil, errBodyTooLarge
 	}
-	var buf bytes.Buffer
+	buf := bodyBufferPool.Get().(*bytes.Buffer)
+	buf.Reset()
+	defer bodyBufferPool.Put(buf)
+
 	limited := io.LimitReader(r.Body, maxInterceptBody+1)
 	if _, err := buf.ReadFrom(limited); err != nil {
 		return nil, err
@@ -288,11 +305,15 @@ func readAndRestore(r *http.Request) ([]byte, error) {
 	if buf.Len() > maxInterceptBody {
 		// Put back what was read so the inner handler is not handed a
 		// truncated body, then decline to interpret it.
-		r.Body = io.NopCloser(io.MultiReader(bytes.NewReader(buf.Bytes()), r.Body))
+		b := make([]byte, buf.Len())
+		copy(b, buf.Bytes())
+		r.Body = io.NopCloser(io.MultiReader(bytes.NewReader(b), r.Body))
 		return nil, errBodyTooLarge
 	}
-	body := buf.Bytes()
+	body := make([]byte, buf.Len())
+	copy(body, buf.Bytes())
 	r.Body = io.NopCloser(bytes.NewReader(body))
+	*r = *r.WithContext(context.WithValue(r.Context(), interceptedBodyKey{}, body))
 	return body, nil
 }
 

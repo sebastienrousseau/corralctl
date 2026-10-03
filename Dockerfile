@@ -20,7 +20,7 @@
 # supply chain from a poisoned `alpine:3.20` tag rotation. Update the
 # digest when refreshing Alpine (e.g. moving to 3.21) or when the
 # upstream image publishes a security fix.
-FROM alpine:3.24@sha256:28bd5fe8b56d1bd048e5babf5b10710ebe0bae67db86916198a6eec434943f8b
+FROM alpine:3.24@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6
 
 # Runtime deps: git is required for clone/pull, ca-certificates for TLS.
 # Pin an explicit numeric uid/gid. hadolint DL3066 flags a non-numeric

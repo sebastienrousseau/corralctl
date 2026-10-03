@@ -97,7 +97,11 @@ type CloneOptions struct {
 
 // Clone executes a git clone command for the given URL into the target directory.
 func Clone(ctx context.Context, url, targetDir string, opts CloneOptions) error {
-	args := []string{"clone"}
+	args := []string{
+		"-c", "core.hooksPath=/dev/null",
+		"-c", "protocol.ext.allow=never",
+		"clone",
+	}
 	if opts.RecurseSubmodules {
 		args = append(args, "--recurse-submodules")
 	}
@@ -155,6 +159,8 @@ type PullOptions struct {
 //     error is logged but not returned.
 func Pull(ctx context.Context, targetDir string, opts PullOptions) error {
 	args := []string{
+		"-c", "core.hooksPath=/dev/null",
+		"-c", "protocol.ext.allow=never",
 		"-c", "merge.verifySignatures=false",
 		"-c", "rebase.verifySignatures=false",
 		// Rebase replays commits, which respects the global commit.gpgsign
@@ -195,7 +201,11 @@ func Pull(ctx context.Context, targetDir string, opts PullOptions) error {
 // targetDir as a separate subprocess. Exposed indirectly via Pull's
 // IgnoreSubmoduleFailures branch.
 func updateSubmodules(ctx context.Context, targetDir string) error {
-	args := []string{"-C", targetDir, "submodule", "update", "--init", "--recursive"}
+	args := []string{
+		"-c", "core.hooksPath=/dev/null",
+		"-c", "protocol.ext.allow=never",
+		"-C", targetDir, "submodule", "update", "--init", "--recursive",
+	}
 	// #nosec G204 -- fixed binary; controlled args.
 	cmd := exec.CommandContext(ctx, gitBinary, args...)
 	withGitEnv(cmd)
@@ -225,7 +235,18 @@ func withMetadataTimeout(ctx context.Context) (context.Context, context.CancelFu
 }
 
 // CurrentBranch retrieves the name of the currently checked-out branch.
+// It first attempts a fast direct read of .git/HEAD to avoid subprocess
+// execution overhead. If direct reading is not available, it falls back
+// to git rev-parse --abbrev-ref HEAD.
 func CurrentBranch(ctx context.Context, targetDir string) (string, error) {
+	if ctx != nil {
+		if err := ctx.Err(); err != nil {
+			return "", err
+		}
+	}
+	if branch, ok := readDirectBranch(targetDir); ok {
+		return branch, nil
+	}
 	ctx, cancel := withMetadataTimeout(ctx)
 	defer cancel()
 	// #nosec G204 -- fixed "git" binary; targetDir is a local path, not shell input.
@@ -235,6 +256,40 @@ func CurrentBranch(ctx context.Context, targetDir string) (string, error) {
 		return "", err
 	}
 	return strings.TrimSpace(string(out)), nil
+}
+
+// readDirectBranch attempts to read the current branch directly from .git/HEAD.
+func readDirectBranch(targetDir string) (string, bool) {
+	gitDir, err := resolveGitDir(targetDir)
+	if err != nil {
+		return "", false
+	}
+	data, err := readFile(filepath.Join(gitDir, "HEAD"))
+	if err != nil {
+		return "", false
+	}
+	s := strings.TrimSpace(string(data))
+	const refPrefix = "ref: refs/heads/"
+	if strings.HasPrefix(s, refPrefix) {
+		branch := strings.TrimSpace(strings.TrimPrefix(s, refPrefix))
+		if branch != "" {
+			return branch, true
+		}
+	}
+	if s == "HEAD" || (len(s) == 40 && isHex(s)) || (len(s) == 64 && isHex(s)) {
+		return "HEAD", true
+	}
+	return "", false
+}
+
+func isHex(s string) bool {
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if (c < '0' || c > '9') && (c < 'a' || c > 'f') && (c < 'A' || c > 'F') {
+			return false
+		}
+	}
+	return true
 }
 
 // IsEmpty reports whether the repo at targetDir has no commits.
@@ -425,7 +480,11 @@ func submodulesHaveUnpublishedWork(ctx context.Context, targetDir string) (bool,
 }
 
 func gitOutput(ctx context.Context, targetDir string, args ...string) (string, error) {
-	fullArgs := append([]string{"-C", targetDir}, args...)
+	fullArgs := append([]string{
+		"-c", "core.hooksPath=/dev/null",
+		"-c", "protocol.ext.allow=never",
+		"-C", targetDir,
+	}, args...)
 	cmd := exec.CommandContext(ctx, gitBinary, fullArgs...) // #nosec G204 -- fixed git binary and structured arguments
 	withGitEnv(cmd)
 	out, err := cmd.Output()
@@ -559,4 +618,39 @@ func resolveGitDir(targetDir string) (string, error) {
 		dir = filepath.Join(targetDir, dir)
 	}
 	return filepath.Clean(dir), nil
+}
+
+// CreateWorktree creates a new linked Git worktree for targetDir at worktreePath.
+// If branch is non-empty, a new branch with that name is created.
+func CreateWorktree(ctx context.Context, targetDir, worktreePath, branch string) error {
+	args := []string{"worktree", "add"}
+	if branch != "" {
+		args = append(args, "-b", branch)
+	}
+	args = append(args, worktreePath)
+	_, err := runGitOutput(ctx, targetDir, args...)
+	return err
+}
+
+// RemoveWorktree deletes a linked Git worktree. When force is false, it refuses
+// if the worktree contains uncommitted or untracked changes.
+func RemoveWorktree(ctx context.Context, targetDir, worktreePath string, force bool) error {
+	if !force {
+		if hasChanges, reason := HasLocalChanges(ctx, worktreePath); hasChanges {
+			return fmt.Errorf("refusing to remove worktree: %s", reason)
+		}
+	}
+	args := []string{"worktree", "remove"}
+	if force {
+		args = append(args, "--force")
+	}
+	args = append(args, worktreePath)
+	_, err := runGitOutput(ctx, targetDir, args...)
+	return err
+}
+
+// PruneWorktrees cleans up stale worktree administrative metadata in targetDir.
+func PruneWorktrees(ctx context.Context, targetDir string) error {
+	_, err := runGitOutput(ctx, targetDir, "worktree", "prune")
+	return err
 }

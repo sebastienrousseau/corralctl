@@ -28,6 +28,64 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   saying so, on every transport and revision. Under `2026-07-28` the SDK's
   protocol error would have carried HTTP 400, which a client's transport
   layer retries rather than reads.
+- **Bearer token authentication on HTTP and SSE transports.** The MCP server
+  supports `--token` (and `CORRAL_MCP_TOKEN`) to require a constant-time
+  validated Bearer token in the `Authorization` header for HTTP and SSE
+  connections.
+- **Origin header validation and CORS protection.** Cross-origin browser requests
+  are rejected by default unless the request originates from loopback
+  (`localhost`, `127.0.0.0/8`, `::1`) or matches an explicit `--allowed-origins`
+  whitelist, mitigating DNS rebinding and cross-site request forgery.
+- **Isolated agent worktree lifecycle tools.** Registered under `--enable-mutations`,
+  `corral_create_worktree` and `corral_release_worktree` allow coding agents to
+  create and cleanly remove isolated worktrees constrained to
+  `.git/corral-worktrees/<branch>` without mutating the primary working tree or
+  risking path traversal. `corral_release_worktree` strictly refuses when uncommitted
+  or untracked changes exist unless `force: true` is passed, and automatically
+  prunes stale administrative worktree metadata.
+- **Real-time workspace watcher via fsnotify.** The MCP server monitors
+  workspace structural directories and repository roots in the background
+  (enabled by default via `--watch=true`), debouncing filesystem events by
+  50ms to automatically invalidate the cached repository index when branches,
+  remotes, or worktrees change on disk without descending into loose git objects.
+- **Cross-repo workspace dependency graph analysis.** Added `corral_graph_dependencies`
+  tool to analyze inter-repository package dependencies across Go modules, Rust crates,
+  Node/TypeScript packages, and Python projects in the workspace corral, computing
+  directed dependency edges, topological build/test execution order, and circular
+  dependency cycles.
+- **Prometheus telemetry endpoint on HTTP and SSE transports.** The MCP server
+  serves standard Prometheus metrics (v0.0.4) at `/metrics` tracking request rates,
+  tool execution outcomes, active MCP sessions, workspace repository totals, and cache
+  invalidations.
+- **CLI dependency graph inspection (`corralctl graph`).** Added top-level
+  `corralctl graph [--repo <name>] [--json]` command to inspect inter-repository
+  package dependencies directly from the terminal with ASCII topological ordering,
+  circular dependency detection, and JSON output formatting.
+- **W3C distributed trace context propagation.** Added W3C `traceparent` context
+  parsing, generation, and propagation across Streamable HTTP and SSE MCP requests
+  with CORS header support, enabling distributed agent-to-server request tracing.
+
+### Performance
+
+- **Fast direct read of .git/HEAD for refs.** `internal/git` reads `.git/HEAD`
+  directly to resolve the current branch and commit SHA, bypassing `git rev-parse`
+  subprocess invocations in normal workflows with fallback for detached or packed
+  references.
+- **Pooled trigram candidate buffers.** `internal/search` pools trigram index
+  intersection candidate buffers via `sync.Pool`, eliminating per-query slice
+  allocations during multi-token code searches.
+- **Zero-allocation HTTP body peeking in eraRouter.** `internal/mcp` pools request
+  buffer readers via `sync.Pool` and caches the inspected JSON-RPC body within the
+  request context, eliminating duplicate body read and slice allocation cycles during
+  dual-revision Streamable HTTP routing.
+
+### Security
+
+- **Neutralize git hooks during automated operations.** Subprocess git invocations
+  (`clone`, `pull`, `submodule update`, `mirror`) now explicitly pass
+  `-c core.hooksPath=/dev/null` and `-c protocol.ext.allow=never` to disarm local
+  hooks and external transport helpers, closing local code execution vectors
+  when cloning untrusted repositories.
 
 ### Changed
 

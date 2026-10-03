@@ -6,8 +6,12 @@ package mcp
 import (
 	"bytes"
 	"context"
+	"crypto/subtle"
 	"encoding/json"
+	"net"
 	"net/http"
+	"net/url"
+	"strings"
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -155,6 +159,107 @@ func (s *Server) streamableHandler() http.Handler {
 	return jsonrpcHTTP(router)
 }
 
+// isAllowedOrigin reports whether an Origin header is permitted to access the
+// server. Origins from loopback are permitted by default; non-loopback origins
+// must match an entry in ServerOptions.AllowedOrigins.
+func (s *Server) isAllowedOrigin(origin string) bool {
+	for _, allowed := range s.opts.AllowedOrigins {
+		if strings.EqualFold(origin, allowed) {
+			return true
+		}
+	}
+	u, err := url.Parse(origin)
+	if err != nil {
+		return false
+	}
+	host := u.Hostname()
+	if host == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
+}
+
+type statusRecorder struct {
+	http.ResponseWriter
+	status int
+}
+
+func (rec *statusRecorder) WriteHeader(code int) {
+	rec.status = code
+	rec.ResponseWriter.WriteHeader(code)
+}
+
+func (rec *statusRecorder) Flush() {
+	if f, ok := rec.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+
+// wrapAuth attaches Bearer token authentication, CORS headers, and Origin
+// header validation (anti-DNS rebinding and CSRF protection) to an HTTP
+// transport handler.
+func (s *Server) wrapAuth(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Propagate or generate W3C traceparent distributed tracing context.
+		rawTP := r.Header.Get("traceparent")
+		tc, ok := ParseTraceParent(rawTP)
+		if !ok {
+			tc = NewTraceContext()
+		}
+		w.Header().Set("traceparent", tc.String())
+		r = r.WithContext(ContextWithTrace(r.Context(), tc))
+
+		if origin := r.Header.Get("Origin"); origin != "" {
+			if !s.isAllowedOrigin(origin) {
+				http.Error(w, "Forbidden: cross-origin request rejected", http.StatusForbidden)
+				if s.metrics != nil {
+					s.metrics.incRequest(r.Method, r.URL.Path, http.StatusForbidden)
+				}
+				return
+			}
+			w.Header().Set("Access-Control-Allow-Origin", origin)
+			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
+			w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type, Mcp-Session-Id, Mcp-Method, Mcp-Name, io.modelcontextprotocol.protocol-version, traceparent")
+			w.Header().Set("Access-Control-Expose-Headers", "Mcp-Session-Id, WWW-Authenticate, traceparent")
+			if r.Method == http.MethodOptions {
+				w.WriteHeader(http.StatusNoContent)
+				if s.metrics != nil {
+					s.metrics.incRequest(r.Method, r.URL.Path, http.StatusNoContent)
+				}
+				return
+			}
+		}
+
+		if s.opts.AuthToken != "" {
+			authHeader := r.Header.Get("Authorization")
+			const prefix = "Bearer "
+			if !strings.HasPrefix(authHeader, prefix) {
+				w.Header().Set("WWW-Authenticate", `Bearer realm="corral-mcp"`)
+				http.Error(w, "Unauthorized: missing Bearer token", http.StatusUnauthorized)
+				if s.metrics != nil {
+					s.metrics.incRequest(r.Method, r.URL.Path, http.StatusUnauthorized)
+				}
+				return
+			}
+			token := strings.TrimPrefix(authHeader, prefix)
+			if subtle.ConstantTimeCompare([]byte(token), []byte(s.opts.AuthToken)) != 1 {
+				http.Error(w, "Forbidden: invalid token", http.StatusForbidden)
+				if s.metrics != nil {
+					s.metrics.incRequest(r.Method, r.URL.Path, http.StatusForbidden)
+				}
+				return
+			}
+		}
+
+		rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
+		next.ServeHTTP(rec, r)
+		if s.metrics != nil {
+			s.metrics.incRequest(r.Method, r.URL.Path, rec.status)
+		}
+	})
+}
+
 // httpHandler is the mux ServeHTTP serves: the Streamable HTTP transport at
 // StreamableEndpoint, and at the root for a client configured against the
 // address alone, which is what `--http` documented before the endpoint had
@@ -168,8 +273,9 @@ func (s *Server) httpHandler() http.Handler {
 	h := s.streamableHandler()
 	mux := http.NewServeMux()
 	mux.Handle(StreamableEndpoint, h)
+	mux.Handle(MetricsEndpoint, s.metricsHandler())
 	mux.Handle("/", h)
-	return mux
+	return s.wrapAuth(mux)
 }
 
 // sseHandler is the mux ServeSSE serves: the SDK's legacy HTTP+SSE transport
@@ -179,7 +285,8 @@ func (s *Server) sseHandler() http.Handler {
 	h := mcp.NewSSEHandler(func(*http.Request) *mcp.Server { return s.mcp }, nil)
 	mux := http.NewServeMux()
 	mux.Handle(SSEEndpoint, h)
-	return mux
+	mux.Handle(MetricsEndpoint, s.metricsHandler())
+	return s.wrapAuth(mux)
 }
 
 // ServeSSE runs the server on the legacy HTTP+SSE transport (protocol

@@ -424,3 +424,235 @@ func TestServeHTTPEndsLeftoverSessions(t *testing.T) {
 		t.Error("a session survived the listener stopping")
 	}
 }
+
+func TestIsAllowedOrigin(t *testing.T) {
+	s := &Server{
+		opts: ServerOptions{
+			AllowedOrigins: []string{"https://app.example.com", "http://allowed.local:8080"},
+		},
+	}
+	tests := []struct {
+		origin string
+		want   bool
+	}{
+		{"https://app.example.com", true},
+		{"HTTPS://APP.EXAMPLE.COM", true},
+		{"http://allowed.local:8080", true},
+		{"http://localhost", true},
+		{"http://localhost:3000", true},
+		{"http://127.0.0.1:8080", true},
+		{"http://[::1]:8080", true},
+		{"http://127.0.0.2:9000", true},
+		{"http://192.168.1.100:8000", false},
+		{"https://malicious.attacker.com", false},
+		{"://invalid-url", false},
+	}
+	for _, tc := range tests {
+		if got := s.isAllowedOrigin(tc.origin); got != tc.want {
+			t.Errorf("isAllowedOrigin(%q) = %v, want %v", tc.origin, got, tc.want)
+		}
+	}
+}
+
+func TestHTTPTransportOriginProtection(t *testing.T) {
+	dir := t.TempDir()
+	srv, err := NewServer(ServerOptions{
+		Root:           dir,
+		Version:        "test",
+		AllowedOrigins: []string{"https://app.custom.io"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ts := httptest.NewServer(srv.httpHandler())
+	t.Cleanup(func() {
+		ts.Close()
+		for session := range srv.mcp.Sessions() {
+			_ = session.Close()
+		}
+	})
+
+	url := ts.URL + StreamableEndpoint
+	bodyDiscover := `{"jsonrpc":"2.0","id":1,"method":"server/discover","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}}}}`
+
+	// 1. Rejected origin
+	badOrigin := map[string]string{
+		protocolVersionHeader: statelessRevision,
+		"Origin":                "https://evil.com",
+	}
+	status, _, body := do(t, http.MethodPost, url, bodyDiscover, badOrigin)
+	if status != http.StatusForbidden || !strings.Contains(body, "cross-origin request rejected") {
+		t.Errorf("expected 403 Forbidden for bad origin, got %d: %s", status, body)
+	}
+
+	// 2. Allowed origin configured explicitly
+	allowedOrigin := map[string]string{
+		protocolVersionHeader: statelessRevision,
+		"Origin":                "https://app.custom.io",
+	}
+	status, hdr, body := do(t, http.MethodPost, url, bodyDiscover, allowedOrigin)
+	if status != http.StatusOK {
+		t.Errorf("expected 200 OK for allowed origin, got %d: %s", status, body)
+	}
+	if got := hdr.Get("Access-Control-Allow-Origin"); got != "https://app.custom.io" {
+		t.Errorf("expected Access-Control-Allow-Origin %q, got %q", "https://app.custom.io", got)
+	}
+
+	// 3. Preflight OPTIONS request for loopback origin
+	req, err := http.NewRequest(http.MethodOptions, url, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Origin", "http://localhost:3000")
+	req.Header.Set("Access-Control-Request-Method", "POST")
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = res.Body.Close()
+	if res.StatusCode != http.StatusNoContent {
+		t.Errorf("preflight status = %d, want 204 No Content", res.StatusCode)
+	}
+	if got := res.Header.Get("Access-Control-Allow-Origin"); got != "http://localhost:3000" {
+		t.Errorf("expected Access-Control-Allow-Origin for localhost, got %q", got)
+	}
+	if got := res.Header.Get("Access-Control-Allow-Methods"); !strings.Contains(got, "POST") {
+		t.Errorf("expected Access-Control-Allow-Methods with POST, got %q", got)
+	}
+}
+
+func TestHTTPTransportBearerAuth(t *testing.T) {
+	dir := t.TempDir()
+	const secretToken = "super-secret-mcp-token"
+	srv, err := NewServer(ServerOptions{
+		Root:      dir,
+		Version:   "test",
+		AuthToken: secretToken,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ts := httptest.NewServer(srv.httpHandler())
+	t.Cleanup(func() {
+		ts.Close()
+		for session := range srv.mcp.Sessions() {
+			_ = session.Close()
+		}
+	})
+
+	url := ts.URL + StreamableEndpoint
+	body := `{"jsonrpc":"2.0","id":1,"method":"server/discover","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}}}}`
+
+	// 1. Missing Authorization header
+	noAuth := map[string]string{protocolVersionHeader: statelessRevision}
+	status, hdr, b := do(t, http.MethodPost, url, body, noAuth)
+	if status != http.StatusUnauthorized {
+		t.Errorf("expected 401 Unauthorized for missing auth, got %d: %s", status, b)
+	}
+	if !strings.Contains(hdr.Get("WWW-Authenticate"), "Bearer") {
+		t.Errorf("expected WWW-Authenticate Bearer header, got %q", hdr.Get("WWW-Authenticate"))
+	}
+
+	// 2. Non-Bearer Authorization header
+	basicAuth := map[string]string{
+		protocolVersionHeader: statelessRevision,
+		"Authorization":         "Basic dXNlcjpwYXNz",
+	}
+	status, _, _ = do(t, http.MethodPost, url, body, basicAuth)
+	if status != http.StatusUnauthorized {
+		t.Errorf("expected 401 Unauthorized for Basic auth, got %d", status)
+	}
+
+	// 3. Invalid Bearer token
+	badToken := map[string]string{
+		protocolVersionHeader: statelessRevision,
+		"Authorization":         "Bearer wrong-token",
+	}
+	status, _, _ = do(t, http.MethodPost, url, body, badToken)
+	if status != http.StatusForbidden {
+		t.Errorf("expected 403 Forbidden for bad token, got %d", status)
+	}
+
+	// 4. Valid Bearer token
+	goodToken := map[string]string{
+		protocolVersionHeader: statelessRevision,
+		"Authorization":         "Bearer " + secretToken,
+	}
+	status, _, b = do(t, http.MethodPost, url, body, goodToken)
+	if status != http.StatusOK {
+		t.Errorf("expected 200 OK for valid token, got %d: %s", status, b)
+	}
+}
+
+func TestSSETransportAuthAndOrigin(t *testing.T) {
+	dir := t.TempDir()
+	const secretToken = "sse-secret-token"
+	srv, err := NewServer(ServerOptions{
+		Root:           dir,
+		Version:        "test",
+		AuthToken:      secretToken,
+		AllowedOrigins: []string{"https://allowed.sse.io"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ts := httptest.NewServer(srv.sseHandler())
+	t.Cleanup(func() {
+		ts.Close()
+	})
+
+	url := ts.URL + SSEEndpoint
+
+	// 1. Rejected origin on SSE
+	req, _ := http.NewRequest(http.MethodGet, url, nil)
+	req.Header.Set("Origin", "https://unauthorized.org")
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = res.Body.Close()
+	if res.StatusCode != http.StatusForbidden {
+		t.Errorf("expected 403 for bad origin on SSE, got %d", res.StatusCode)
+	}
+
+	// 2. Missing token on SSE
+	req, _ = http.NewRequest(http.MethodGet, url, nil)
+	res, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = res.Body.Close()
+	if res.StatusCode != http.StatusUnauthorized {
+		t.Errorf("expected 401 for missing token on SSE, got %d", res.StatusCode)
+	}
+
+	// 3. Invalid token on SSE
+	req, _ = http.NewRequest(http.MethodGet, url, nil)
+	req.Header.Set("Authorization", "Bearer invalid-secret")
+	res, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = res.Body.Close()
+	if res.StatusCode != http.StatusForbidden {
+		t.Errorf("expected 403 for invalid token on SSE, got %d", res.StatusCode)
+	}
+
+	// 4. Valid token and allowed origin on SSE
+	req, _ = http.NewRequest(http.MethodGet, url, nil)
+	req.Header.Set("Authorization", "Bearer "+secretToken)
+	req.Header.Set("Origin", "https://allowed.sse.io")
+	req.Header.Set("Accept", "text/event-stream")
+	res, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = res.Body.Close() }()
+	if res.StatusCode != http.StatusOK {
+		t.Errorf("expected 200 OK for valid SSE connection, got %d", res.StatusCode)
+	}
+	if !strings.HasPrefix(res.Header.Get("Content-Type"), "text/event-stream") {
+		t.Errorf("expected text/event-stream, got %q", res.Header.Get("Content-Type"))
+	}
+}
+
