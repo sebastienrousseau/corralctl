@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 )
 
 // A trigram index over one repository.
@@ -381,12 +382,33 @@ func (ix *Index) Candidates(m *Matcher) ([]string, bool) {
 		}
 	}
 
+// candidateScratch holds reusable buffers for posting list intersection and merging.
+type candidateScratch struct {
+	bufA []uint32
+	bufB []uint32
+}
+
+var candidateScratchPool = sync.Pool{
+	New: func() any {
+		return &candidateScratch{
+			bufA: make([]uint32, 0, 128),
+			bufB: make([]uint32, 0, 128),
+		}
+	},
+}
+
 	// Every trigram of the pattern must be present in a matching file, so
 	// the answer is the intersection of their posting lists. Folding both
 	// sides with lowerASCII makes this a superset for a case-sensitive
 	// query too — the exact matcher then discards what does not match.
+	scratch := candidateScratchPool.Get().(*candidateScratch)
+	scratch.bufA = scratch.bufA[:0]
+	scratch.bufB = scratch.bufB[:0]
+	defer candidateScratchPool.Put(scratch)
+
 	var acc []uint32
 	first := true
+	useBufA := true
 	for j := 0; j+2 < len(pattern); j++ {
 		k := key(lowerASCII(pattern[j]), lowerASCII(pattern[j+1]), lowerASCII(pattern[j+2]))
 		list, known := ix.lookupList(k)
@@ -406,7 +428,14 @@ func (ix *Index) Candidates(m *Matcher) ([]string, bool) {
 			acc, first = list, false
 			continue
 		}
-		acc = intersect(acc, list)
+		if useBufA {
+			scratch.bufA = intersect(scratch.bufA, acc, list)
+			acc = scratch.bufA
+		} else {
+			scratch.bufB = intersect(scratch.bufB, acc, list)
+			acc = scratch.bufB
+		}
+		useBufA = !useBufA
 		if len(acc) == 0 {
 			break
 		}
@@ -425,17 +454,28 @@ func (ix *Index) Candidates(m *Matcher) ([]string, bool) {
 	if !m.caseFolded {
 		extra = nil
 	}
-	out := make([]string, 0, len(acc)+len(extra))
-	merged := mergeSorted(acc, extra)
+
+	var merged []uint32
+	if len(extra) == 0 {
+		merged = acc
+	} else {
+		targetBuf := scratch.bufA
+		if !useBufA {
+			targetBuf = scratch.bufB
+		}
+		merged = mergeSorted(targetBuf, acc, extra)
+	}
+
+	out := make([]string, 0, len(merged))
 	for _, id := range merged {
 		out = append(out, ix.files[id])
 	}
 	return out, true
 }
 
-// intersect returns the ids present in both sorted lists.
-func intersect(a, b []uint32) []uint32 {
-	out := a[:0:0]
+// intersect appends ids present in both sorted lists into dst, resetting dst's length.
+func intersect(dst, a, b []uint32) []uint32 {
+	out := dst[:0]
 	i, j := 0, 0
 	for i < len(a) && j < len(b) {
 		switch {
@@ -452,10 +492,10 @@ func intersect(a, b []uint32) []uint32 {
 	return out
 }
 
-// mergeSorted unions two sorted id lists, keeping order and dropping
-// duplicates, so candidates stay in walk order and a file is read once.
-func mergeSorted(a, b []uint32) []uint32 {
-	out := make([]uint32, 0, len(a)+len(b))
+// mergeSorted unions two sorted id lists into dst, resetting dst's length,
+// keeping order and dropping duplicates so candidates stay in walk order.
+func mergeSorted(dst, a, b []uint32) []uint32 {
+	out := dst[:0]
 	i, j := 0, 0
 	for i < len(a) && j < len(b) {
 		switch {
