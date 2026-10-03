@@ -36,6 +36,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   are rejected by default unless the request originates from loopback
   (`localhost`, `127.0.0.0/8`, `::1`) or matches an explicit `--allowed-origins`
   whitelist, mitigating DNS rebinding and cross-site request forgery.
+- **Isolated agent worktree lifecycle tools.** Registered under `--enable-mutations`,
+  `corral_create_worktree` and `corral_release_worktree` allow coding agents to
+  create and cleanly remove isolated worktrees constrained to
+  `.git/corral-worktrees/<branch>` without mutating the primary working tree or
+  risking path traversal. `corral_release_worktree` strictly refuses when uncommitted
+  or untracked changes exist unless `force: true` is passed, and automatically
+  prunes stale administrative worktree metadata.
+
+### Performance
+
+- **Fast direct read of .git/HEAD for refs.** `internal/git` reads `.git/HEAD`
+  directly to resolve the current branch and commit SHA, bypassing `git rev-parse`
+  subprocess invocations in normal workflows with fallback for detached or packed
+  references.
+- **Pooled trigram candidate buffers.** `internal/search` pools trigram index
+  intersection candidate buffers via `sync.Pool`, eliminating per-query slice
+  allocations during multi-token code searches.
 
 ### Security
 

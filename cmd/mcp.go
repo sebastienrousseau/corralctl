@@ -74,6 +74,8 @@ never match.
 Write tools, registered only with --enable-mutations, and audited:
   corral_sync_repo         - git pull one clone
   corral_clone_repo        - clone into the workspace
+  corral_create_worktree   - create isolated worktree in .git/corral-worktrees
+  corral_release_worktree  - remove isolated worktree after branch work
   corral_delete_repo       - remove one clone; additionally requires
                              --enable-destructive-mutations, and refuses
                              when the clone holds uncommitted, unpushed,

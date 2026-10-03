@@ -619,3 +619,38 @@ func resolveGitDir(targetDir string) (string, error) {
 	}
 	return filepath.Clean(dir), nil
 }
+
+// CreateWorktree creates a new linked Git worktree for targetDir at worktreePath.
+// If branch is non-empty, a new branch with that name is created.
+func CreateWorktree(ctx context.Context, targetDir, worktreePath, branch string) error {
+	args := []string{"worktree", "add"}
+	if branch != "" {
+		args = append(args, "-b", branch)
+	}
+	args = append(args, worktreePath)
+	_, err := runGitOutput(ctx, targetDir, args...)
+	return err
+}
+
+// RemoveWorktree deletes a linked Git worktree. When force is false, it refuses
+// if the worktree contains uncommitted or untracked changes.
+func RemoveWorktree(ctx context.Context, targetDir, worktreePath string, force bool) error {
+	if !force {
+		if hasChanges, reason := HasLocalChanges(ctx, worktreePath); hasChanges {
+			return fmt.Errorf("refusing to remove worktree: %s", reason)
+		}
+	}
+	args := []string{"worktree", "remove"}
+	if force {
+		args = append(args, "--force")
+	}
+	args = append(args, worktreePath)
+	_, err := runGitOutput(ctx, targetDir, args...)
+	return err
+}
+
+// PruneWorktrees cleans up stale worktree administrative metadata in targetDir.
+func PruneWorktrees(ctx context.Context, targetDir string) error {
+	_, err := runGitOutput(ctx, targetDir, "worktree", "prune")
+	return err
+}

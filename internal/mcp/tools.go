@@ -255,6 +255,20 @@ type cloneInput struct {
 	Blobless bool   `json:"blobless,omitempty" jsonschema:"Use a partial clone with filter=blob:none."`
 }
 
+// createWorktreeInput is the argument set for corral_create_worktree.
+type createWorktreeInput struct {
+	Repo   string `json:"repo" jsonschema:"Repository name or relative path in workspace (required)."`
+	Branch string `json:"branch" jsonschema:"New branch name for the isolated agent worktree (required)."`
+}
+
+// releaseWorktreeInput is the argument set for corral_release_worktree.
+type releaseWorktreeInput struct {
+	Repo   string `json:"repo" jsonschema:"Repository name or relative path in workspace (required)."`
+	Branch string `json:"branch,omitempty" jsonschema:"Branch name of the worktree to remove."`
+	Path   string `json:"path,omitempty" jsonschema:"Worktree path to remove if branch is not specified."`
+	Force  bool   `json:"force,omitempty" jsonschema:"Force remove the worktree even if uncommitted changes exist."`
+}
+
 func sortedLangCounts(m map[string]int) []LanguageCount {
 	out := make([]LanguageCount, 0, len(m))
 	for k, v := range m {

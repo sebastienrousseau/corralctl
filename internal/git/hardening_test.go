@@ -207,3 +207,49 @@ func TestDirectBranchReading(t *testing.T) {
 	}
 }
 
+func TestWorktreeLifecycle(t *testing.T) {
+	bareDir, workDir := setupTestRepo(t)
+	defer cleanup(t, bareDir)
+	defer cleanup(t, workDir)
+
+	wtPath := filepath.Join(t.TempDir(), "wt-test")
+
+	// 1. Create worktree on a new branch
+	if err := CreateWorktree(context.Background(), workDir, wtPath, "agent-branch"); err != nil {
+		t.Fatalf("CreateWorktree failed: %v", err)
+	}
+	branch, err := CurrentBranch(context.Background(), wtPath)
+	if err != nil || branch != "agent-branch" {
+		t.Fatalf("worktree branch = %q, %v; want 'agent-branch', nil", branch, err)
+	}
+
+	// 2. Add uncommitted change and assert non-forced removal is refused
+	dirtyFile := filepath.Join(wtPath, "dirty.txt")
+	if err := os.WriteFile(dirtyFile, []byte("uncommitted"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := RemoveWorktree(context.Background(), workDir, wtPath, false); err == nil {
+		t.Fatal("expected RemoveWorktree without force to refuse dirty worktree")
+	}
+
+	// 3. Forced removal succeeds
+	if err := RemoveWorktree(context.Background(), workDir, wtPath, true); err != nil {
+		t.Fatalf("RemoveWorktree with force failed: %v", err)
+	}
+
+	// 4. Prune worktrees
+	if err := PruneWorktrees(context.Background(), workDir); err != nil {
+		t.Fatalf("PruneWorktrees failed: %v", err)
+	}
+
+	// 5. Create worktree without branch
+	wtPath2 := filepath.Join(t.TempDir(), "wt-detached")
+	if err := CreateWorktree(context.Background(), workDir, wtPath2, ""); err != nil {
+		t.Fatalf("CreateWorktree with empty branch failed: %v", err)
+	}
+	if err := RemoveWorktree(context.Background(), workDir, wtPath2, false); err != nil {
+		t.Fatalf("RemoveWorktree clean failed: %v", err)
+	}
+}
+
+

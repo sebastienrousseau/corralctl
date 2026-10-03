@@ -43,6 +43,10 @@ import (
 var (
 	gitPull            = git.Pull
 	gitClone           = git.Clone
+	gitCreateWorktree  = git.CreateWorktree
+	gitRemoveWorktree  = git.RemoveWorktree
+	gitPruneWorktrees  = git.PruneWorktrees
+	hasLocalChanges    = git.HasLocalChanges
 	hasUnpushedCommits = git.HasUnpublishedWork
 	gitIsRepository    = git.IsRepository
 	statMutation       = os.Stat
@@ -102,6 +106,30 @@ func (s *Server) registerMutationTools() {
 		},
 		Description: "Clone a repository into the Corral workspace. Requires --enable-mutations. Refuses when the target already exists (never overwrites) or would escape the sandbox root.",
 	}, s.handleCloneRepo)
+
+	addTool(s, &mcp.Tool{
+		Name:  "corral_create_worktree",
+		Title: "Create an isolated agent worktree",
+		Annotations: &mcp.ToolAnnotations{
+			ReadOnlyHint:    false,
+			DestructiveHint: &f,
+			IdempotentHint:  false,
+			OpenWorldHint:   &f,
+		},
+		Description: "Create an isolated Git worktree for an agent under .git/corral-worktrees/<branch> linked to a repository clone. Requires --enable-mutations. Protects the developer's working directory by keeping agent branching and edits isolated. Refuses when the target worktree already exists or would escape the repository.",
+	}, s.handleCreateWorktree)
+
+	addTool(s, &mcp.Tool{
+		Name:  "corral_release_worktree",
+		Title: "Release an agent worktree",
+		Annotations: &mcp.ToolAnnotations{
+			ReadOnlyHint:    false,
+			DestructiveHint: &f,
+			IdempotentHint:  false,
+			OpenWorldHint:   &f,
+		},
+		Description: "Remove a linked agent worktree created under .git/corral-worktrees. Requires --enable-mutations. Refuses when uncommitted or untracked changes exist in the worktree unless force=true is passed. Prunes stale worktree administrative metadata.",
+	}, s.handleReleaseWorktree)
 }
 
 // registerDestructiveTools attaches corral_delete_repo. Kept in its
@@ -265,6 +293,150 @@ func (s *Server) handleCloneRepo(ctx context.Context, _ *mcp.CallToolRequest, in
 	}
 	s.invalidateScanCache()
 	out := MutationOutput{Tool: "corral_clone_repo", Target: safeTarget, Result: "cloned"}
+	return jsonResult(out), out, nil
+}
+
+// handleCreateWorktree creates an isolated worktree under .git/corral-worktrees/<branch>.
+func (s *Server) handleCreateWorktree(ctx context.Context, _ *mcp.CallToolRequest, in createWorktreeInput) (*mcp.CallToolResult, MutationOutput, error) {
+	if in.Repo == "" {
+		return nil, MutationOutput{}, fmt.Errorf("repo is required")
+	}
+	branch := strings.TrimSpace(in.Branch)
+	if branch == "" || strings.HasPrefix(branch, "-") || strings.Contains(branch, "..") {
+		return nil, MutationOutput{}, fmt.Errorf("invalid branch name %q", in.Branch)
+	}
+
+	idx, err := s.scan()
+	if err != nil {
+		return nil, MutationOutput{}, fmt.Errorf("scan workspace: %v", err)
+	}
+	repo, err := idx.Find(in.Repo)
+	if err != nil {
+		return nil, MutationOutput{}, fmt.Errorf("%v", err)
+	}
+	safeRepo, err := idx.SafeMutationPath(repo.Path)
+	if err != nil {
+		return nil, MutationOutput{}, fmt.Errorf("%v", err)
+	}
+
+	worktreeDir := filepath.Join(safeRepo, ".git", "corral-worktrees", filepath.FromSlash(filepath.Clean(branch)))
+	if _, err := statMutation(worktreeDir); err == nil {
+		return nil, MutationOutput{}, fmt.Errorf("worktree already exists at %s", worktreeDir)
+	}
+
+	rec := AuditRecord{
+		Tool:   "corral_create_worktree",
+		Target: worktreeDir,
+		Args:   map[string]any{"repo": in.Repo, "branch": branch},
+	}
+	rec, err = s.beginMutation(rec)
+	if err != nil {
+		return nil, MutationOutput{}, fmt.Errorf("audit intent failed: %v", err)
+	}
+
+	if err := mkdirMutation(filepath.Dir(worktreeDir), 0o750); err != nil {
+		if auditErr := s.completeMutation(rec, "error", err.Error()); auditErr != nil {
+			return nil, MutationOutput{}, fmt.Errorf("create worktree parent: %v; audit completion failed: %v", err, auditErr)
+		}
+		return nil, MutationOutput{}, fmt.Errorf("create worktree parent: %v", err)
+	}
+
+	createErr := gitCreateWorktree(ctx, safeRepo, worktreeDir, branch)
+	if createErr != nil {
+		if auditErr := s.completeMutation(rec, "error", createErr.Error()); auditErr != nil {
+			return nil, MutationOutput{}, fmt.Errorf("%v; audit completion failed: %v", createErr, auditErr)
+		}
+		return nil, MutationOutput{}, fmt.Errorf("%v", createErr)
+	}
+
+	if err := s.completeMutation(rec, "ok", ""); err != nil {
+		return nil, MutationOutput{}, fmt.Errorf("audit completion failed: %v", err)
+	}
+	out := MutationOutput{
+		Tool:   "corral_create_worktree",
+		Repo:   repo.RelPath,
+		Target: worktreeDir,
+		Result: "created",
+	}
+	return jsonResult(out), out, nil
+}
+
+// handleReleaseWorktree removes an agent worktree and prunes worktree metadata.
+func (s *Server) handleReleaseWorktree(ctx context.Context, _ *mcp.CallToolRequest, in releaseWorktreeInput) (*mcp.CallToolResult, MutationOutput, error) {
+	if in.Repo == "" {
+		return nil, MutationOutput{}, fmt.Errorf("repo is required")
+	}
+
+	idx, err := s.scan()
+	if err != nil {
+		return nil, MutationOutput{}, fmt.Errorf("scan workspace: %v", err)
+	}
+	repo, err := idx.Find(in.Repo)
+	if err != nil {
+		return nil, MutationOutput{}, fmt.Errorf("%v", err)
+	}
+	safeRepo, err := idx.SafeMutationPath(repo.Path)
+	if err != nil {
+		return nil, MutationOutput{}, fmt.Errorf("%v", err)
+	}
+
+	allowedBase := filepath.Join(safeRepo, ".git", "corral-worktrees")
+	var targetWorktree string
+	if in.Branch != "" {
+		branch := strings.TrimSpace(in.Branch)
+		if branch == "" || strings.HasPrefix(branch, "-") || strings.Contains(branch, "..") {
+			return nil, MutationOutput{}, fmt.Errorf("invalid branch name %q", in.Branch)
+		}
+		targetWorktree = filepath.Join(allowedBase, filepath.FromSlash(filepath.Clean(branch)))
+	} else if in.Path != "" {
+		targetWorktree = filepath.Clean(in.Path)
+	} else {
+		return nil, MutationOutput{}, fmt.Errorf("either branch or path must be specified")
+	}
+
+	rel, err := filepath.Rel(allowedBase, targetWorktree)
+	if err != nil || strings.HasPrefix(rel, "..") || rel == "." {
+		return nil, MutationOutput{}, fmt.Errorf("worktree path %q is not inside %s", targetWorktree, allowedBase)
+	}
+
+	rec := AuditRecord{
+		Tool:   "corral_release_worktree",
+		Target: targetWorktree,
+		Args:   map[string]any{"repo": in.Repo, "branch": in.Branch, "force": in.Force},
+	}
+	rec, err = s.beginMutation(rec)
+	if err != nil {
+		return nil, MutationOutput{}, fmt.Errorf("audit intent failed: %v", err)
+	}
+
+	if !in.Force {
+		if hasChanges, reason := hasLocalChanges(ctx, targetWorktree); hasChanges {
+			msg := fmt.Sprintf("refusing to release dirty worktree: %s (pass force=true to override)", reason)
+			if auditErr := s.auditRefusal(rec, msg); auditErr != nil {
+				return nil, MutationOutput{}, fmt.Errorf("%s; audit refusal failed: %v", msg, auditErr)
+			}
+			return nil, MutationOutput{}, fmt.Errorf("%s", msg)
+		}
+	}
+
+	removeErr := gitRemoveWorktree(ctx, safeRepo, targetWorktree, in.Force)
+	if removeErr != nil {
+		if auditErr := s.completeMutation(rec, "error", removeErr.Error()); auditErr != nil {
+			return nil, MutationOutput{}, fmt.Errorf("%v; audit completion failed: %v", removeErr, auditErr)
+		}
+		return nil, MutationOutput{}, fmt.Errorf("%v", removeErr)
+	}
+	_ = gitPruneWorktrees(ctx, safeRepo)
+
+	if err := s.completeMutation(rec, "ok", ""); err != nil {
+		return nil, MutationOutput{}, fmt.Errorf("audit completion failed: %v", err)
+	}
+	out := MutationOutput{
+		Tool:   "corral_release_worktree",
+		Repo:   repo.RelPath,
+		Target: targetWorktree,
+		Result: "released",
+	}
 	return jsonResult(out), out, nil
 }
 
