@@ -6,6 +6,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.40] — 2026-10-03
+
+### Added
+
+- **Fast Pure-Go Direct Git Ref Reading (Subprocess Elimination).** Added pure-Go
+  resolution of HEAD commit SHA (`HeadCommit`) and emptiness checks (`directIsEmpty`)
+  reading directly from `.git/HEAD`, loose refs, and `packed-refs` across normal
+  repositories and linked worktrees, eliminating spawning `git` subprocesses on
+  hot scanning paths while maintaining robust fallback.
+- **W3C `traceparent` Context Propagation & Distributed Tracing.** Added support
+  for W3C Trace Context (`00-{trace_id}-{parent_id}-{trace_flags}`) in MCP HTTP
+  and SSE handlers. Request context is enriched via `diag.WithTrace` and
+  propagates trace and span identifiers into structured JSON diagnostic logs.
+- **Daemon Observability: Prometheus Metrics Endpoint (`/metrics`).** Added standard
+  Prometheus text exposition format (v0.0.4) on `/metrics` endpoint across Streamable
+  HTTP and SSE transports, exposing HTTP request counts, MCP tool invocations,
+  active sessions, and cache invalidation telemetry with zero external dependencies.
+- **Polyglot Symbol Extraction (C/C++ & Protobuf).** Added pure-Go tokenizers in
+  `internal/symbols` for C/C++ (`.c`, `.h`, `.cpp`, `.hpp`, `.cc`, `.cxx`, `.hh`)
+  and Protocol Buffers (`.proto`) without CGO, extracting functions, methods,
+  structs, classes, enums, unions, macros, services, and RPCs.
+
 ## [0.0.39] — 2026-10-03
 
 ### Added
@@ -2517,7 +2539,8 @@ cron-safety overhaul.
   100 % doc coverage.
 - All tests green under `-race -count=1`.
 
-[Unreleased]: https://github.com/sebastienrousseau/corralctl/compare/v0.0.39...HEAD
+[Unreleased]: https://github.com/sebastienrousseau/corralctl/compare/v0.0.40...HEAD
+[0.0.40]: https://github.com/sebastienrousseau/corralctl/compare/v0.0.39...v0.0.40
 [0.0.39]: https://github.com/sebastienrousseau/corralctl/compare/v0.0.38...v0.0.39
 [0.0.38]: https://github.com/sebastienrousseau/corralctl/compare/v0.0.37...v0.0.38
 [0.0.37]: https://github.com/sebastienrousseau/corralctl/compare/v0.0.36...v0.0.37

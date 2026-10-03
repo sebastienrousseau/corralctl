@@ -941,3 +941,362 @@ func TestDeltaAndDepthHelpers(t *testing.T) {
 		t.Fatalf("updateDepth(2, 3) = %d, want 5", got)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// C & C++
+// ---------------------------------------------------------------------------
+
+const cSource = `/* Comment with struct FakeStruct */
+// Another comment with class FakeClass
+#include <stdio.h>
+
+#define BUFFER_SIZE 1024
+#define _PRIVATE_MACRO 1
+#define CLAMP(x, low, high) (((x) > (high)) ? (high) : (((x) < (low)) ? (low) : (x)))
+
+struct ForwardDecl;
+union ForwardUnion;
+
+struct Point {
+    int x;
+    int y;
+};
+
+union DataValue {
+    int ival;
+    double dval;
+};
+
+enum Status {
+    STATUS_OK,
+    STATUS_ERR
+};
+
+static void private_helper(int a) {
+    if (a > 0) {
+        printf("positive\n");
+    }
+}
+
+int calculate_area(int w, int h) {
+    return w * h;
+}
+`
+
+const cppSource = `// C++ example
+#include <vector>
+#include <string>
+
+using StringList = std::vector<std::string>;
+
+namespace graphics {
+
+class BaseWidget; // Forward decl
+
+class Widget {
+public:
+    Widget();
+    virtual ~Widget();
+    void show();
+    bool operator==(const Widget &other);
+
+private:
+    void initInternal();
+};
+
+enum class Theme {
+    Light,
+    Dark
+};
+
+} // namespace graphics
+
+void Widget::render() {
+    // inside function call
+    show();
+}
+
+int main(int argc, char **argv) {
+    return 0;
+}
+`
+
+func TestCPPExtractor(t *testing.T) {
+	// 1. C source extraction
+	cSyms := extract(t, "math.c", cSource)
+
+	bs := found(t, cSyms, "BUFFER_SIZE", KindConst, 5)
+	if !bs.Exported || bs.Language != "c" {
+		t.Errorf("unexpected BUFFER_SIZE: %+v", bs)
+	}
+
+	priv := found(t, cSyms, "_PRIVATE_MACRO", KindConst, 6)
+	if priv.Exported {
+		t.Errorf("expected _PRIVATE_MACRO to not be exported: %+v", priv)
+	}
+
+	clamp := found(t, cSyms, "CLAMP", KindFunc, 7)
+	if !clamp.Exported {
+		t.Errorf("expected CLAMP to be exported: %+v", clamp)
+	}
+
+	pt := found(t, cSyms, "Point", KindType, 12)
+	if !pt.Exported {
+		t.Errorf("expected Point to be exported")
+	}
+
+	dv := found(t, cSyms, "DataValue", KindType, 17)
+	if !dv.Exported {
+		t.Errorf("expected DataValue to be exported")
+	}
+
+	st := found(t, cSyms, "Status", KindType, 22)
+	if !st.Exported {
+		t.Errorf("expected Status to be exported")
+	}
+
+	ph := found(t, cSyms, "private_helper", KindFunc, 27)
+	if ph.Exported {
+		t.Errorf("expected static function private_helper to not be exported")
+	}
+
+	ca := found(t, cSyms, "calculate_area", KindFunc, 33)
+	if !ca.Exported {
+		t.Errorf("expected calculate_area to be exported")
+	}
+
+	absent(t, cSyms, "FakeStruct")
+	absent(t, cSyms, "FakeClass")
+	absent(t, cSyms, "ForwardDecl")
+	absent(t, cSyms, "ForwardUnion")
+	absent(t, cSyms, "if")
+	absent(t, cSyms, "printf")
+
+	// 2. C++ source extraction
+	cppSyms := extract(t, "widget.cpp", cppSource)
+
+	sl := found(t, cppSyms, "StringList", KindType, 5)
+	if !sl.Exported || sl.Language != "cpp" {
+		t.Errorf("unexpected StringList: %+v", sl)
+	}
+
+	w := found(t, cppSyms, "Widget", KindType, 11)
+	if !w.Exported {
+		t.Errorf("expected Widget to be exported")
+	}
+
+	sh := found(t, cppSyms, "Widget.show", KindMethod, 15)
+	if !sh.Exported || sh.Receiver != "Widget" {
+		t.Errorf("unexpected Widget.show: %+v", sh)
+	}
+
+	eq := found(t, cppSyms, "Widget.operator==", KindMethod, 16)
+	if !eq.Exported || eq.Receiver != "Widget" {
+		t.Errorf("unexpected Widget.operator==: %+v", eq)
+	}
+
+	initInt := found(t, cppSyms, "Widget.initInternal", KindMethod, 19)
+	if initInt.Exported {
+		t.Errorf("expected private method initInternal to not be exported")
+	}
+
+	th := found(t, cppSyms, "Theme", KindType, 22)
+	if !th.Exported {
+		t.Errorf("expected Theme to be exported")
+	}
+
+	rnd := found(t, cppSyms, "Widget.render", KindMethod, 29)
+	if !rnd.Exported || rnd.Receiver != "Widget" {
+		t.Errorf("unexpected out-of-line method Widget.render: %+v", rnd)
+	}
+
+	mainFn := found(t, cppSyms, "main", KindFunc, 34)
+	if !mainFn.Exported {
+		t.Errorf("expected main to be exported")
+	}
+
+	absent(t, cppSyms, "BaseWidget")
+	absent(t, cppSyms, "graphics")
+
+	// 3. Extensions claiming
+	for _, ext := range []string{".c", ".h"} {
+		e, ok := ExtractorFor("file" + ext)
+		if !ok || e.Language() != "c" {
+			t.Errorf("expected c extractor for %s", ext)
+		}
+	}
+	for _, ext := range []string{".cpp", ".hpp", ".cc", ".cxx", ".hh"} {
+		e, ok := ExtractorFor("file" + ext)
+		if !ok || e.Language() != "cpp" {
+			t.Errorf("expected cpp extractor for %s", ext)
+		}
+	}
+
+	// 4. Test naming detection
+	testPaths := []string{
+		"test_calc.c", "calc_test.cpp", "tests/foo.cc", "test/bar.cxx", "pkg/testing/baz.hh", "foo_unittest.hpp",
+	}
+	for _, p := range testPaths {
+		if !cppIsTest(p) {
+			t.Errorf("expected %s to be recognised as test", p)
+		}
+	}
+	if cppIsTest("src/calc.cpp") {
+		t.Error("src/calc.cpp should not be recognised as test")
+	}
+
+	// 5. C++ struct pending brace on next line
+	pendingBraceSrc := `
+struct
+Config
+{
+    int port;
+};
+`
+	pbSyms := extract(t, "config.hpp", pendingBraceSrc)
+	found(t, pbSyms, "Config", KindType, 3)
+
+	// 6. Access specifiers (protected)
+	protSrc := `
+class Account {
+protected:
+    void protectMe();
+};
+`
+	protSyms := extract(t, "account.hpp", protSrc)
+	pme := found(t, protSyms, "Account.protectMe", KindMethod, 4)
+	if pme.Exported {
+		t.Errorf("expected protected method to not be exported")
+	}
+
+	// 7. Additional C++ patterns
+	extraCPPSrc := `
+class
+PendingClass
+{
+    void doWork() {
+        // empty line inside function
+
+        int temp = 1;
+    }
+};
+
+bool operator +(const Point &a, const Point &b);
+
+static_assert(sizeof(int) == 4, "int must be 4 bytes");
+
+int top_val = calculate_area(2, 3);
+(void)();
+ (void)();
+*();
+`
+	extraSyms := extract(t, "extra.cpp", extraCPPSrc)
+	found(t, extraSyms, "PendingClass", KindType, 3)
+	found(t, extraSyms, "PendingClass.doWork", KindMethod, 5)
+	found(t, extraSyms, "operator+", KindFunc, 12)
+	absent(t, extraSyms, "static_assert")
+	absent(t, extraSyms, "calculate_area")
+
+	if !cppReservedWord("for") || !cppReservedWord("while") || !cppReservedWord("case") {
+		t.Error("expected reserved words to return true")
+	}
+	if cppReservedWord("myFunc") {
+		t.Error("myFunc should not be reserved")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Protocol Buffers
+// ---------------------------------------------------------------------------
+
+const protoSource = `// Protocol Buffer example
+/* Multi-line comment
+   message FakeMessage {}
+*/
+syntax = "proto3";
+
+package example.v1;
+
+enum UserStatus {
+    STATUS_UNKNOWN = 0;
+    STATUS_ACTIVE = 1;
+}
+
+message User {
+    string id = 1;
+    string name = 2;
+    UserStatus status = 3;
+
+    message Profile {
+        string bio = 1;
+    }
+
+    enum Role {
+        ROLE_GUEST = 0;
+        ROLE_ADMIN = 1;
+    }
+}
+
+service UserService {
+    rpc GetUser (GetUserRequest) returns (User);
+    rpc UpdateUser (UpdateUserRequest) returns (User);
+}
+`
+
+func TestProtoExtractor(t *testing.T) {
+	syms := extract(t, "user.proto", protoSource)
+
+	us := found(t, syms, "UserStatus", KindType, 9)
+	if !us.Exported || us.Language != "protobuf" {
+		t.Errorf("unexpected UserStatus: %+v", us)
+	}
+
+	u := found(t, syms, "User", KindType, 14)
+	if !u.Exported {
+		t.Errorf("expected User to be exported")
+	}
+
+	prof := found(t, syms, "User.Profile", KindType, 19)
+	if !prof.Exported || prof.Receiver != "User" {
+		t.Errorf("unexpected nested Profile message: %+v", prof)
+	}
+
+	role := found(t, syms, "User.Role", KindType, 23)
+	if !role.Exported || role.Receiver != "User" {
+		t.Errorf("unexpected nested Role enum: %+v", role)
+	}
+
+	svc := found(t, syms, "UserService", KindInterface, 29)
+	if !svc.Exported {
+		t.Errorf("expected UserService to be exported")
+	}
+
+	gu := found(t, syms, "UserService.GetUser", KindMethod, 30)
+	if !gu.Exported || gu.Receiver != "UserService" {
+		t.Errorf("unexpected GetUser rpc: %+v", gu)
+	}
+
+	uu := found(t, syms, "UserService.UpdateUser", KindMethod, 31)
+	if !uu.Exported || uu.Receiver != "UserService" {
+		t.Errorf("unexpected UpdateUser rpc: %+v", uu)
+	}
+
+	absent(t, syms, "FakeMessage")
+	absent(t, syms, "proto3")
+	absent(t, syms, "example.v1")
+
+	// Extension
+	e, ok := ExtractorFor("schema.proto")
+	if !ok || e.Language() != "protobuf" {
+		t.Errorf("expected protobuf extractor for schema.proto")
+	}
+
+	// Test naming
+	if !protoIsTest("user_test.proto") || !protoIsTest("test_user.proto") || !protoIsTest("tests/user.proto") {
+		t.Error("expected test convention matching for proto")
+	}
+	if protoIsTest("schema/user.proto") {
+		t.Error("schema/user.proto should not be test")
+	}
+}
+

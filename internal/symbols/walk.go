@@ -101,6 +101,8 @@ var generatedSuffixes = []string{
 	".min.js", ".min.mjs", ".bundle.js", ".generated.ts", ".gen.ts",
 	// Rust
 	".pb.rs",
+	// C / C++
+	".pb.cc", ".pb.h",
 }
 
 // skipSourceFile reports whether a discovered file should be left out of

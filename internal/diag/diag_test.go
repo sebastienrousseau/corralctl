@@ -5,6 +5,7 @@ package diag
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -277,3 +278,85 @@ func TestEmitJSONFiltering(t *testing.T) {
 		t.Fatalf("unexpected info/debug in warn-level JSON output, got:\n%s", out)
 	}
 }
+
+func TestTraceContext(t *testing.T) {
+	var nilCtx context.Context //nolint:staticcheck // SA1012: defensive test for nil context
+
+	// 1. FromContext on nil and empty context
+	if _, ok := FromContext(nilCtx); ok {
+		t.Error("FromContext(nil) should return ok=false")
+	}
+	if _, ok := FromContext(context.Background()); ok {
+		t.Error("FromContext(bg) should return ok=false")
+	}
+
+	// 2. WithTrace on nil context
+	ctxNil := WithTrace(nilCtx, "tid1", "sid1")
+	ti, ok := FromContext(ctxNil)
+	if !ok || ti.TraceID != "tid1" || ti.SpanID != "sid1" {
+		t.Errorf("WithTrace(nil) = %+v, %v; want tid1, sid1, true", ti, ok)
+	}
+
+	// 3. Text output with trace
+	buf := capture(t, LevelDebug)
+	SetFormat(FormatText)
+	ctx := WithTrace(context.Background(), "4bf92f3577b34da6a3ce929d0e0e4736", "00f067aa0ba902b7")
+
+	ErrorContextf(ctx, "err msg")
+	WarnContextf(ctx, "warn msg")
+	InfoContextf(ctx, "info msg")
+	DebugContextf(ctx, "debug msg")
+
+	out := buf.String()
+	for _, expected := range []string{
+		"ERROR: [4bf92f3577b34da6a3ce929d0e0e4736] err msg",
+		"WARN: [4bf92f3577b34da6a3ce929d0e0e4736] warn msg",
+		"INFO: [4bf92f3577b34da6a3ce929d0e0e4736] info msg",
+		"DEBUG: [4bf92f3577b34da6a3ce929d0e0e4736] debug msg",
+	} {
+		if !strings.Contains(out, expected) {
+			t.Errorf("text output missing %q:\n%s", expected, out)
+		}
+	}
+
+	// 4. Text output with trace where TraceID is empty
+	buf.Reset()
+	ctxEmptyTID := WithTrace(context.Background(), "", "sid2")
+	InfoContextf(ctxEmptyTID, "no tid msg")
+	if !strings.Contains(buf.String(), "INFO: no tid msg") {
+		t.Errorf("expected no brackets when TraceID is empty, got %q", buf.String())
+	}
+
+	// 5. JSON output with trace
+	buf.Reset()
+	SetFormat(FormatJSON)
+	InfoContextf(ctx, "json trace msg")
+	var rec struct {
+		Msg     string `json:"msg"`
+		TraceID string `json:"trace_id"`
+		SpanID  string `json:"span_id"`
+	}
+	if err := json.Unmarshal(buf.Bytes(), &rec); err != nil {
+		t.Fatalf("failed unmarshaling json: %v", err)
+	}
+	if rec.TraceID != "4bf92f3577b34da6a3ce929d0e0e4736" || rec.SpanID != "00f067aa0ba902b7" || rec.Msg != "json trace msg" {
+		t.Errorf("unexpected json record: %+v", rec)
+	}
+
+	// 6. JSON output with nil context and level filtering
+	buf.Reset()
+	SetLevel(LevelWarn)
+	DebugContextf(nilCtx, "filtered out")
+	if buf.Len() != 0 {
+		t.Errorf("expected empty buffer for filtered level, got %q", buf.String())
+	}
+
+	// 7. JSON output with nil context when permitted
+	buf.Reset()
+	SetLevel(LevelInfo)
+	InfoContextf(nilCtx, "json nil ctx msg")
+	if !strings.Contains(buf.String(), "json nil ctx msg") {
+		t.Errorf("expected json message with nil ctx, got %q", buf.String())
+	}
+}
+

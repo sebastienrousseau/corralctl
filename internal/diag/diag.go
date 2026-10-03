@@ -172,8 +172,41 @@ func Enabled(l Level) bool {
 	return l <= CurrentLevel()
 }
 
+// TraceInfo holds distributed tracing metadata propagated via context.
+type TraceInfo struct {
+	TraceID string `json:"trace_id,omitempty"`
+	SpanID  string `json:"span_id,omitempty"`
+}
+
+type traceContextKey struct{}
+
+// WithTrace returns a new Context with the provided trace ID and span ID attached.
+func WithTrace(ctx context.Context, traceID, spanID string) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return context.WithValue(ctx, traceContextKey{}, TraceInfo{
+		TraceID: traceID,
+		SpanID:  spanID,
+	})
+}
+
+// FromContext extracts the TraceInfo from the context, if present.
+func FromContext(ctx context.Context) (TraceInfo, bool) {
+	if ctx == nil {
+		return TraceInfo{}, false
+	}
+	ti, ok := ctx.Value(traceContextKey{}).(TraceInfo)
+	return ti, ok
+}
+
 // emit writes one diagnostic line if the level permits it.
 func emit(l Level, formatStr string, args ...any) {
+	emitContext(context.Background(), l, formatStr, args...)
+}
+
+// emitContext writes one diagnostic line with context-derived tracing metadata if permitted.
+func emitContext(ctx context.Context, l Level, formatStr string, args ...any) {
 	mu.RLock()
 	threshold, fmtMode, w := level, format, output
 	mu.RUnlock()
@@ -182,6 +215,8 @@ func emit(l Level, formatStr string, args ...any) {
 	}
 	msg := fmt.Sprintf(formatStr, args...)
 	msg = strings.TrimRight(msg, "\n")
+
+	ti, hasTrace := FromContext(ctx)
 
 	if fmtMode == FormatJSON {
 		var slogLvl slog.Level
@@ -196,12 +231,28 @@ func emit(l Level, formatStr string, args ...any) {
 			slogLvl = slog.LevelDebug
 		}
 		h := slog.NewJSONHandler(w, &slog.HandlerOptions{Level: slogLvl})
-		_ = h.Handle(context.Background(), slog.NewRecord(timeNow(), slogLvl, msg, 0))
+		rec := slog.NewRecord(timeNow(), slogLvl, msg, 0)
+		if hasTrace {
+			if ti.TraceID != "" {
+				rec.AddAttrs(slog.String("trace_id", ti.TraceID))
+			}
+			if ti.SpanID != "" {
+				rec.AddAttrs(slog.String("span_id", ti.SpanID))
+			}
+		}
+		if ctx == nil {
+			ctx = context.Background()
+		}
+		_ = h.Handle(ctx, rec)
 		return
 	}
 
-	// One line per diagnostic, prefixed with its level, so stderr stays
-	// greppable when it is the only evidence available.
+	// One line per diagnostic, prefixed with its level and optional trace ID,
+	// so stderr stays greppable when it is the only evidence available.
+	if hasTrace && ti.TraceID != "" {
+		_, _ = fmt.Fprintf(w, "%s: [%s] %s\n", strings.ToUpper(l.String()), ti.TraceID, msg)
+		return
+	}
 	_, _ = fmt.Fprintf(w, "%s: %s\n", strings.ToUpper(l.String()), msg)
 }
 
@@ -216,3 +267,23 @@ func Infof(format string, args ...any) { emit(LevelInfo, format, args...) }
 
 // Debugf reports detail useful only when diagnosing corral itself.
 func Debugf(format string, args ...any) { emit(LevelDebug, format, args...) }
+
+// ErrorContextf reports a failure that stopped something from working, with trace metadata from ctx.
+func ErrorContextf(ctx context.Context, format string, args ...any) {
+	emitContext(ctx, LevelError, format, args...)
+}
+
+// WarnContextf reports a condition corral worked around, with trace metadata from ctx.
+func WarnContextf(ctx context.Context, format string, args ...any) {
+	emitContext(ctx, LevelWarn, format, args...)
+}
+
+// InfoContextf reports ordinary progress, with trace metadata from ctx.
+func InfoContextf(ctx context.Context, format string, args ...any) {
+	emitContext(ctx, LevelInfo, format, args...)
+}
+
+// DebugContextf reports detail useful when diagnosing corral itself, with trace metadata from ctx.
+func DebugContextf(ctx context.Context, format string, args ...any) {
+	emitContext(ctx, LevelDebug, format, args...)
+}
