@@ -15,10 +15,12 @@ import (
 )
 
 var (
-	graphRepo   string
-	graphJSON   bool
-	graphOutput string
-	graphScan   = corralmcp.Scan
+	graphRepo    string
+	graphJSON    bool
+	graphMermaid bool
+	graphDOT     bool
+	graphOutput  string
+	graphScan    = corralmcp.Scan
 )
 
 // RepoGraphDetail represents single-repository dependency inspection details.
@@ -46,8 +48,8 @@ var graphCmd = &cobra.Command{
 	Long:  "Analyze inter-repository package dependencies across Go modules, Rust crates, Node packages, and Python projects in the workspace corral.",
 	Args:  cobra.MaximumNArgs(1),
 	PreRunE: func(cmd *cobra.Command, args []string) error {
-		if graphOutput != "" && graphOutput != "text" && graphOutput != "json" {
-			return errors.New("--output must be text or json")
+		if graphOutput != "" && graphOutput != "text" && graphOutput != "json" && graphOutput != "mermaid" && graphOutput != "dot" {
+			return errors.New("--output must be text, json, mermaid, or dot")
 		}
 		return nil
 	},
@@ -69,12 +71,20 @@ var graphCmd = &cobra.Command{
 		}
 
 		g := graph.BuildGraph(repos)
-		isJSON := graphJSON || graphOutput == "json"
-		return runGraphWith(idx, graphRepo, isJSON, g)
+		format := "text"
+		switch {
+		case graphJSON || graphOutput == "json":
+			format = "json"
+		case graphMermaid || graphOutput == "mermaid":
+			format = "mermaid"
+		case graphDOT || graphOutput == "dot":
+			format = "dot"
+		}
+		return runGraphWith(idx, graphRepo, format, g)
 	},
 }
 
-func runGraphWith(idx *corralmcp.Index, repoFilter string, isJSON bool, g *graph.Graph) error {
+func runGraphWith(idx *corralmcp.Index, repoFilter string, format string, g *graph.Graph) error {
 	if repoFilter != "" {
 		match, err := idx.Find(repoFilter)
 		if err != nil {
@@ -101,7 +111,14 @@ func runGraphWith(idx *corralmcp.Index, repoFilter string, isJSON bool, g *graph
 			dependents = []string{}
 		}
 
-		if isJSON {
+		switch format {
+		case "mermaid":
+			fmt.Print(g.TargetToMermaid(repoName, deps, dependents))
+			return nil
+		case "dot":
+			fmt.Print(g.TargetToDOT(repoName, deps, dependents))
+			return nil
+		case "json":
 			res := RepoGraphDetail{
 				TargetRepo:   repoName,
 				Path:         node.Path,
@@ -140,7 +157,14 @@ func runGraphWith(idx *corralmcp.Index, repoFilter string, isJSON bool, g *graph
 		return nil
 	}
 
-	if isJSON {
+	switch format {
+	case "mermaid":
+		fmt.Print(g.ToMermaid())
+		return nil
+	case "dot":
+		fmt.Print(g.ToDOT())
+		return nil
+	case "json":
 		res := WorkspaceGraphReport{
 			Nodes:            g.Nodes,
 			Edges:            g.Edges,
@@ -185,6 +209,8 @@ func runGraphWith(idx *corralmcp.Index, repoFilter string, isJSON bool, g *graph
 func init() {
 	graphCmd.Flags().StringVar(&graphRepo, "repo", "", "filter graph to a specific repository and its direct dependencies")
 	graphCmd.Flags().BoolVar(&graphJSON, "json", false, "output graph as JSON")
-	graphCmd.Flags().StringVar(&graphOutput, "output", "", "output format: text or json")
+	graphCmd.Flags().BoolVar(&graphMermaid, "mermaid", false, "output graph as a Mermaid flowchart")
+	graphCmd.Flags().BoolVar(&graphDOT, "dot", false, "output graph as Graphviz DOT")
+	graphCmd.Flags().StringVar(&graphOutput, "output", "", "output format: text, json, mermaid, or dot")
 	rootCmd.AddCommand(graphCmd)
 }

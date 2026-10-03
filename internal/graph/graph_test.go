@@ -6,6 +6,7 @@ package graph
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -261,6 +262,67 @@ lib-b = "^2.0"
 	baseMatch := resolveDep("github.com/org/custom-lib", map[string]string{}, map[string]string{"custom-lib": "repo-custom"})
 	if baseMatch != "repo-custom" {
 		t.Errorf("expected base match 'repo-custom', got %q", baseMatch)
+	}
+}
+
+func TestGraphVisualization(t *testing.T) {
+	// 1. Empty graph
+	empty := &Graph{Nodes: []Node{}}
+	if m := empty.ToMermaid(); !strings.Contains(m, "flowchart TD") {
+		t.Fatalf("expected flowchart TD, got %q", m)
+	}
+	if d := empty.ToDOT(); !strings.Contains(d, "digraph G") {
+		t.Fatalf("expected digraph G, got %q", d)
+	}
+
+	// 2. Populated graph with edges and standalone node
+	// To test edges[i].From == edges[j].From sorting branch, have two edges from "a": "a->b" and "a->c"
+	g := &Graph{
+		Nodes: []Node{
+			{Name: "app-1"},
+			{Name: "app-2"},
+			{Name: "lib-a"},
+			{Name: "lib-b"},
+			{Name: "lib-c"},
+			{Name: "standalone"},
+		},
+		Edges: []Edge{
+			{From: "app-2", To: "lib-c"},
+			{From: "app-1", To: "lib-b"},
+			{From: "app-1", To: "lib-a"},
+		},
+	}
+
+	mermaid := g.ToMermaid()
+	if !strings.Contains(mermaid, `app_1["app-1"] --> lib_a["lib-a"]`) {
+		t.Fatalf("expected sorted edge app-1 -> lib-a in mermaid:\n%s", mermaid)
+	}
+	if !strings.Contains(mermaid, `standalone["standalone"]`) {
+		t.Fatalf("expected standalone node in mermaid:\n%s", mermaid)
+	}
+
+	dot := g.ToDOT()
+	if !strings.Contains(dot, `"app-1" -> "lib-a";`) {
+		t.Fatalf("expected sorted edge app-1 -> lib-a in dot:\n%s", dot)
+	}
+	if !strings.Contains(dot, `"standalone";`) {
+		t.Fatalf("expected standalone node in dot:\n%s", dot)
+	}
+
+	// 3. TargetToMermaid & TargetToDOT
+	tMermaid := g.TargetToMermaid("my-app", []string{"dep-1"}, []string{"dependent-1"})
+	if !strings.Contains(tMermaid, `my_app["my-app"]`) || !strings.Contains(tMermaid, "style my_app") {
+		t.Fatalf("unexpected targeted mermaid:\n%s", tMermaid)
+	}
+
+	tDOT := g.TargetToDOT("my-app", []string{"dep-1"}, []string{"dependent-1"})
+	if !strings.Contains(tDOT, `"my-app" [style=filled`) || !strings.Contains(tDOT, `"dependent-1" -> "my-app";`) {
+		t.Fatalf("unexpected targeted dot:\n%s", tDOT)
+	}
+
+	// 4. sanitizeID with special characters
+	if got := sanitizeID("my-repo.test/123"); got != "my_repo_test_123" {
+		t.Fatalf("sanitizeID = %q, want %q", got, "my_repo_test_123")
 	}
 }
 
