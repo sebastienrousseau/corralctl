@@ -292,6 +292,164 @@ func isHex(s string) bool {
 	return true
 }
 
+// HeadCommit retrieves the full commit hash of HEAD for the target repository.
+// It uses fast direct reading of .git/HEAD, loose ref files, and .git/packed-refs
+// to avoid subprocess invocation. If direct reading cannot resolve HEAD,
+// it falls back to git rev-parse --verify HEAD.
+func HeadCommit(ctx context.Context, targetDir string) (string, error) {
+	if ctx != nil {
+		if err := ctx.Err(); err != nil {
+			return "", err
+		}
+	}
+	if commit, ok := readDirectHeadCommit(targetDir); ok {
+		return commit, nil
+	}
+	ctx, cancel := withMetadataTimeout(ctx)
+	defer cancel()
+	// #nosec G204 -- fixed binary; targetDir is a local path.
+	cmd := exec.CommandContext(ctx, gitBinary, "-C", targetDir, "rev-parse", "--verify", "HEAD")
+	out, err := cmd.Output()
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
+// readDirectHeadCommit attempts to resolve the commit SHA of HEAD directly from
+// repository metadata without spawning a git subprocess.
+func readDirectHeadCommit(targetDir string) (string, bool) {
+	gitDir, err := resolveGitDir(targetDir)
+	if err != nil {
+		return "", false
+	}
+	headData, err := readFile(filepath.Join(gitDir, "HEAD"))
+	if err != nil {
+		return "", false
+	}
+	s := strings.TrimSpace(string(headData))
+	if (len(s) == 40 || len(s) == 64) && isHex(s) {
+		return s, true
+	}
+	const refPrefix = "ref:"
+	if !strings.HasPrefix(s, refPrefix) {
+		return "", false
+	}
+	refName := strings.TrimSpace(strings.TrimPrefix(s, refPrefix))
+	if refName == "" {
+		return "", false
+	}
+
+	cleanRef := filepath.Clean(filepath.FromSlash(refName))
+	if !strings.HasPrefix(cleanRef, "refs"+string(filepath.Separator)) {
+		return "", false
+	}
+
+	// 1. Try loose ref file in <gitDir>/<refName>
+	loosePath := filepath.Join(gitDir, cleanRef)
+	if data, err := readFile(loosePath); err == nil {
+		sha := strings.TrimSpace(string(data))
+		if (len(sha) == 40 || len(sha) == 64) && isHex(sha) {
+			return sha, true
+		}
+	}
+
+	// 2. Try packed-refs in gitDir
+	if sha, ok := readPackedRef(filepath.Join(gitDir, "packed-refs"), refName); ok {
+		return sha, true
+	}
+
+	// 3. For linked worktrees, check commondir for packed-refs
+	commondirPath := filepath.Join(gitDir, "commondir")
+	if b, err := readFile(commondirPath); err == nil {
+		common := strings.TrimSpace(string(b))
+		if !filepath.IsAbs(common) {
+			common = filepath.Join(gitDir, common)
+		}
+		if sha, ok := readPackedRef(filepath.Join(common, "packed-refs"), refName); ok {
+			return sha, true
+		}
+	}
+
+	return "", false
+}
+
+// readPackedRef scans a packed-refs file for the target reference name.
+func readPackedRef(packedPath, targetRef string) (string, bool) {
+	f, err := os.Open(packedPath) // #nosec G304 -- path resolved from repository gitDir
+	if err != nil {
+		return "", false
+	}
+	defer func() { _ = f.Close() }()
+
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || line[0] == '#' || line[0] == '^' {
+			continue
+		}
+		fields := strings.Fields(line)
+		if len(fields) >= 2 {
+			sha, ref := fields[0], fields[1]
+			if ref == targetRef && (len(sha) == 40 || len(sha) == 64) && isHex(sha) {
+				return sha, true
+			}
+		}
+	}
+	return "", false
+}
+
+// directIsEmpty reports whether a repository has no commits without spawning git.
+func directIsEmpty(targetDir string) (bool, bool) {
+	gitDir, err := resolveGitDir(targetDir)
+	if err != nil {
+		return false, false
+	}
+	headData, err := readFile(filepath.Join(gitDir, "HEAD"))
+	if err != nil {
+		return false, false
+	}
+	s := strings.TrimSpace(string(headData))
+	if (len(s) == 40 || len(s) == 64) && isHex(s) {
+		return false, true
+	}
+	const refPrefix = "ref:"
+	if !strings.HasPrefix(s, refPrefix) {
+		return false, false
+	}
+	refName := strings.TrimSpace(strings.TrimPrefix(s, refPrefix))
+	if refName == "" {
+		return false, false
+	}
+
+	if _, ok := readDirectHeadCommit(targetDir); ok {
+		return false, true
+	}
+
+	// If HEAD points to a ref, but no loose ref or packed-refs file exists:
+	loosePath := filepath.Join(gitDir, filepath.Clean(filepath.FromSlash(refName)))
+	_, looseErr := os.Stat(loosePath)
+	packedPath := filepath.Join(gitDir, "packed-refs")
+	_, packedErr := os.Stat(packedPath)
+
+	if errors.Is(looseErr, os.ErrNotExist) && errors.Is(packedErr, os.ErrNotExist) {
+		// Also check commondir for linked worktrees
+		commondirPath := filepath.Join(gitDir, "commondir")
+		if b, err := readFile(commondirPath); err == nil {
+			common := strings.TrimSpace(string(b))
+			if !filepath.IsAbs(common) {
+				common = filepath.Join(gitDir, common)
+			}
+			if _, commonPackedErr := os.Stat(filepath.Join(common, "packed-refs")); !errors.Is(commonPackedErr, os.ErrNotExist) {
+				return false, false
+			}
+		}
+		return true, true // Unborn HEAD with no packed refs -> empty repo
+	}
+
+	return false, false
+}
+
 // IsEmpty reports whether the repo at targetDir has no commits.
 //
 // This is the local mirror of "an empty GitHub repository" — one that
@@ -308,6 +466,9 @@ func isHex(s string) bool {
 // targetDir *is* a git repo (via a .git-directory check) before
 // calling; the "not a git repo" case is defence-in-depth.
 func IsEmpty(ctx context.Context, targetDir string) bool {
+	if empty, ok := directIsEmpty(targetDir); ok {
+		return empty
+	}
 	ctx, cancel := withMetadataTimeout(ctx)
 	defer cancel()
 	// #nosec G204 -- fixed binary; targetDir is a local path.
