@@ -6,8 +6,12 @@ package mcp
 import (
 	"bytes"
 	"context"
+	"crypto/subtle"
 	"encoding/json"
+	"net"
 	"net/http"
+	"net/url"
+	"strings"
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -155,6 +159,66 @@ func (s *Server) streamableHandler() http.Handler {
 	return jsonrpcHTTP(router)
 }
 
+// isAllowedOrigin reports whether an Origin header is permitted to access the
+// server. Origins from loopback are permitted by default; non-loopback origins
+// must match an entry in ServerOptions.AllowedOrigins.
+func (s *Server) isAllowedOrigin(origin string) bool {
+	for _, allowed := range s.opts.AllowedOrigins {
+		if strings.EqualFold(origin, allowed) {
+			return true
+		}
+	}
+	u, err := url.Parse(origin)
+	if err != nil {
+		return false
+	}
+	host := u.Hostname()
+	if host == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
+}
+
+// wrapAuth attaches Bearer token authentication, CORS headers, and Origin
+// header validation (anti-DNS rebinding and CSRF protection) to an HTTP
+// transport handler.
+func (s *Server) wrapAuth(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if origin := r.Header.Get("Origin"); origin != "" {
+			if !s.isAllowedOrigin(origin) {
+				http.Error(w, "Forbidden: cross-origin request rejected", http.StatusForbidden)
+				return
+			}
+			w.Header().Set("Access-Control-Allow-Origin", origin)
+			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
+			w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type, Mcp-Session-Id, Mcp-Method, Mcp-Name, io.modelcontextprotocol.protocol-version")
+			w.Header().Set("Access-Control-Expose-Headers", "Mcp-Session-Id, WWW-Authenticate")
+			if r.Method == http.MethodOptions {
+				w.WriteHeader(http.StatusNoContent)
+				return
+			}
+		}
+
+		if s.opts.AuthToken != "" {
+			authHeader := r.Header.Get("Authorization")
+			const prefix = "Bearer "
+			if !strings.HasPrefix(authHeader, prefix) {
+				w.Header().Set("WWW-Authenticate", `Bearer realm="corral-mcp"`)
+				http.Error(w, "Unauthorized: missing Bearer token", http.StatusUnauthorized)
+				return
+			}
+			token := strings.TrimPrefix(authHeader, prefix)
+			if subtle.ConstantTimeCompare([]byte(token), []byte(s.opts.AuthToken)) != 1 {
+				http.Error(w, "Forbidden: invalid token", http.StatusForbidden)
+				return
+			}
+		}
+
+		next.ServeHTTP(w, r)
+	})
+}
+
 // httpHandler is the mux ServeHTTP serves: the Streamable HTTP transport at
 // StreamableEndpoint, and at the root for a client configured against the
 // address alone, which is what `--http` documented before the endpoint had
@@ -169,7 +233,7 @@ func (s *Server) httpHandler() http.Handler {
 	mux := http.NewServeMux()
 	mux.Handle(StreamableEndpoint, h)
 	mux.Handle("/", h)
-	return mux
+	return s.wrapAuth(mux)
 }
 
 // sseHandler is the mux ServeSSE serves: the SDK's legacy HTTP+SSE transport
@@ -179,7 +243,7 @@ func (s *Server) sseHandler() http.Handler {
 	h := mcp.NewSSEHandler(func(*http.Request) *mcp.Server { return s.mcp }, nil)
 	mux := http.NewServeMux()
 	mux.Handle(SSEEndpoint, h)
-	return mux
+	return s.wrapAuth(mux)
 }
 
 // ServeSSE runs the server on the legacy HTTP+SSE transport (protocol

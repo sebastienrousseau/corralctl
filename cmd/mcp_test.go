@@ -118,16 +118,22 @@ func resetMCPFlags(t *testing.T) {
 	oldRoot, oldMut := mcpRoot, mcpEnableMutations
 	oldHTTP, oldRemote, oldNoConfirm := mcpHTTP, mcpAllowRemote, mcpNoConfirmDeletes
 	oldTransport, oldHost, oldPort := mcpTransport, mcpHost, mcpPort
+	oldToken, oldOrigins := mcpToken, mcpAllowedOrigins
+	oldAudit, oldDestruct, oldCache, oldExts := mcpAuditLog, mcpEnableDestructiveMutations, mcpSymbolCache, mcpAllowFileExts
 	mcpRoot = ""
 	mcpEnableMutations = false
 	mcpHTTP = ""
 	mcpAllowRemote = false
 	mcpNoConfirmDeletes = false
 	mcpTransport, mcpHost, mcpPort = string(transportStdio), "127.0.0.1", 8000
+	mcpToken, mcpAllowedOrigins = "", ""
+	mcpAuditLog, mcpEnableDestructiveMutations, mcpSymbolCache, mcpAllowFileExts = "", false, "", ""
 	t.Cleanup(func() {
 		mcpRoot, mcpEnableMutations = oldRoot, oldMut
 		mcpHTTP, mcpAllowRemote, mcpNoConfirmDeletes = oldHTTP, oldRemote, oldNoConfirm
 		mcpTransport, mcpHost, mcpPort = oldTransport, oldHost, oldPort
+		mcpToken, mcpAllowedOrigins = oldToken, oldOrigins
+		mcpAuditLog, mcpEnableDestructiveMutations, mcpSymbolCache, mcpAllowFileExts = oldAudit, oldDestruct, oldCache, oldExts
 	})
 }
 
@@ -186,6 +192,39 @@ func TestRunMCPMutationsFlagPropagates(t *testing.T) {
 	}
 	if !captured.EnableMutations {
 		t.Error("expected --enable-mutations to reach ServerOptions")
+	}
+}
+
+func TestRunMCPTokenAndOriginsPropagate(t *testing.T) {
+	resetMCPFlags(t)
+	dir := t.TempDir()
+	mcpRoot = dir
+	mcpToken = "secret-test-token"
+	mcpAllowedOrigins = "https://example.com, https://app.example.com"
+
+	stub := &stubMCPServer{root: dir}
+	captured := withStubServer(t, stub, nil)
+
+	if err := runMCP(nil, nil); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if captured.AuthToken != "secret-test-token" {
+		t.Errorf("expected AuthToken 'secret-test-token', got %q", captured.AuthToken)
+	}
+	if len(captured.AllowedOrigins) != 2 || captured.AllowedOrigins[0] != "https://example.com" || captured.AllowedOrigins[1] != "https://app.example.com" {
+		t.Errorf("expected AllowedOrigins [https://example.com https://app.example.com], got %v", captured.AllowedOrigins)
+	}
+
+	// Environment variable fallback when flag is empty.
+	resetMCPFlags(t)
+	mcpRoot = dir
+	t.Setenv("CORRAL_MCP_TOKEN", "env-secret-token")
+	captured = withStubServer(t, stub, nil)
+	if err := runMCP(nil, nil); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if captured.AuthToken != "env-secret-token" {
+		t.Errorf("expected AuthToken from env 'env-secret-token', got %q", captured.AuthToken)
 	}
 }
 

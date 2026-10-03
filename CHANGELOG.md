@@ -28,6 +28,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   saying so, on every transport and revision. Under `2026-07-28` the SDK's
   protocol error would have carried HTTP 400, which a client's transport
   layer retries rather than reads.
+- **Bearer token authentication on HTTP and SSE transports.** The MCP server
+  supports `--token` (and `CORRAL_MCP_TOKEN`) to require a constant-time
+  validated Bearer token in the `Authorization` header for HTTP and SSE
+  connections.
+- **Origin header validation and CORS protection.** Cross-origin browser requests
+  are rejected by default unless the request originates from loopback
+  (`localhost`, `127.0.0.0/8`, `::1`) or matches an explicit `--allowed-origins`
+  whitelist, mitigating DNS rebinding and cross-site request forgery.
+
+### Security
+
+- **Neutralize git hooks during automated operations.** Subprocess git invocations
+  (`clone`, `pull`, `submodule update`, `mirror`) now explicitly pass
+  `-c core.hooksPath=/dev/null` and `-c protocol.ext.allow=never` to disarm local
+  hooks and external transport helpers, closing local code execution vectors
+  when cloning untrusted repositories.
 
 ### Changed
 

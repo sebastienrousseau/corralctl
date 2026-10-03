@@ -29,6 +29,8 @@ var (
 	mcpPort                       int
 	mcpAllowRemote                bool
 	mcpNoConfirmDeletes           bool
+	mcpToken                      string
+	mcpAllowedOrigins             string
 )
 
 // mcpCmd registers the `corralctl mcp` subcommand. It runs a Model
@@ -189,6 +191,11 @@ func runMCP(cmd *cobra.Command, args []string) error {
 			addr, abs)
 	}
 
+	token := mcpToken
+	if token == "" {
+		token = os.Getenv("CORRAL_MCP_TOKEN")
+	}
+
 	srv, err := mcpNewServer(mcp.ServerOptions{
 		Root:                       abs,
 		Version:                    Version,
@@ -198,6 +205,8 @@ func runMCP(cmd *cobra.Command, args []string) error {
 		AuditLogPath:               mcpAuditLog,
 		AllowFileExts:              parseCSV(mcpAllowFileExts),
 		SymbolCacheDir:             mcpSymbolCache,
+		AuthToken:                  token,
+		AllowedOrigins:             parseCSV(mcpAllowedOrigins),
 	})
 	if err != nil {
 		return fmt.Errorf("constructing mcp server: %w", err)
@@ -323,5 +332,9 @@ func init() {
 	mcpCmd.Flags().StringVar(&mcpSymbolCache, "symbol-cache", "",
 		"where to persist the symbol index between runs (defaults to $XDG_CACHE_HOME/corral/symbols; \"off\" disables it)")
 	mcpCmd.Flags().StringVar(&mcpAuditLog, "audit-log", "", "path to the mutation audit log (defaults to $XDG_STATE_HOME/corral/mutations.log or ~/.local/state/corral/mutations.log)")
+	mcpCmd.Flags().StringVar(&mcpToken, "token", "",
+		"bearer token required for HTTP and SSE requests (or CORRAL_MCP_TOKEN env var)")
+	mcpCmd.Flags().StringVar(&mcpAllowedOrigins, "allowed-origins", "",
+		"comma-separated list of origins allowed for HTTP and SSE requests")
 	rootCmd.AddCommand(mcpCmd)
 }

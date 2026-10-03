@@ -73,6 +73,14 @@ type ServerOptions struct {
 	// ($XDG_STATE_HOME/corral/mutations.log). Only consulted when at
 	// least one mutation gate is enabled.
 	AuditLogPath string
+	// AuthToken, when non-empty, requires requests against the HTTP and SSE
+	// transports to present a matching Bearer token in the Authorization
+	// header. When empty, no bearer authentication is enforced.
+	AuthToken string
+	// AllowedOrigins lists origins permitted to connect to HTTP and SSE endpoints.
+	// When empty, cross-origin browser requests are rejected to protect against
+	// DNS rebinding and cross-site request forgery.
+	AllowedOrigins []string
 }
 
 // Server wraps an mcp-go MCPServer with the corral-specific configuration.
