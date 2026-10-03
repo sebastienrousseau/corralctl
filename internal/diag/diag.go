@@ -26,12 +26,49 @@
 package diag
 
 import (
+	"context"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"strings"
 	"sync"
+	"time"
 )
+
+// Format represents the encoding of diagnostic log records.
+type Format int
+
+const (
+	// FormatText emits human-readable level-prefixed lines ("LEVEL: message").
+	FormatText Format = iota
+	// FormatJSON emits structured JSON records using log/slog.
+	FormatJSON
+)
+
+// String returns the name of the format ("text" or "json").
+func (f Format) String() string {
+	switch f {
+	case FormatJSON:
+		return "json"
+	case FormatText:
+		return "text"
+	default:
+		return fmt.Sprintf("Format(%d)", int(f))
+	}
+}
+
+// ParseFormat maps a format name to a Format. Names are case-insensitive.
+func ParseFormat(name string) (Format, error) {
+	switch strings.ToLower(strings.TrimSpace(name)) {
+	case "json":
+		return FormatJSON, nil
+	case "text", "":
+		return FormatText, nil
+	default:
+		return FormatText, fmt.Errorf("unknown log format %q (want text or json)", name)
+	}
+}
 
 // Level is the verbosity threshold: a message is emitted when its own level
 // is at or below the configured one.
@@ -83,9 +120,11 @@ func ParseLevel(name string) (Level, error) {
 }
 
 var (
-	mu     sync.RWMutex
-	level            = LevelInfo
-	output io.Writer = os.Stderr
+	mu      sync.RWMutex
+	level             = LevelInfo
+	format            = FormatText
+	output  io.Writer = os.Stderr
+	timeNow           = time.Now
 )
 
 // SetLevel sets the verbosity threshold.
@@ -100,6 +139,20 @@ func CurrentLevel() Level {
 	mu.RLock()
 	defer mu.RUnlock()
 	return level
+}
+
+// SetFormat sets the diagnostic encoding format.
+func SetFormat(f Format) {
+	mu.Lock()
+	defer mu.Unlock()
+	format = f
+}
+
+// CurrentFormat reports the diagnostic encoding format in force.
+func CurrentFormat() Format {
+	mu.RLock()
+	defer mu.RUnlock()
+	return format
 }
 
 // SetOutput redirects diagnostics. Intended for tests; production writes to
@@ -120,17 +173,36 @@ func Enabled(l Level) bool {
 }
 
 // emit writes one diagnostic line if the level permits it.
-func emit(l Level, format string, args ...any) {
+func emit(l Level, formatStr string, args ...any) {
 	mu.RLock()
-	threshold, w := level, output
+	threshold, fmtMode, w := level, format, output
 	mu.RUnlock()
 	if l > threshold {
 		return
 	}
-	msg := fmt.Sprintf(format, args...)
+	msg := fmt.Sprintf(formatStr, args...)
+	msg = strings.TrimRight(msg, "\n")
+
+	if fmtMode == FormatJSON {
+		var slogLvl slog.Level
+		switch l {
+		case LevelError:
+			slogLvl = slog.LevelError
+		case LevelWarn:
+			slogLvl = slog.LevelWarn
+		case LevelInfo:
+			slogLvl = slog.LevelInfo
+		case LevelDebug:
+			slogLvl = slog.LevelDebug
+		}
+		h := slog.NewJSONHandler(w, &slog.HandlerOptions{Level: slogLvl})
+		_ = h.Handle(context.Background(), slog.NewRecord(timeNow(), slogLvl, msg, 0))
+		return
+	}
+
 	// One line per diagnostic, prefixed with its level, so stderr stays
 	// greppable when it is the only evidence available.
-	_, _ = fmt.Fprintf(w, "%s: %s\n", strings.ToUpper(l.String()), strings.TrimRight(msg, "\n"))
+	_, _ = fmt.Fprintf(w, "%s: %s\n", strings.ToUpper(l.String()), msg)
 }
 
 // Errorf reports a failure that stopped something from working.

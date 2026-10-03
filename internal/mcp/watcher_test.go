@@ -327,3 +327,99 @@ func TestWorkspaceWatcherServeStdioAndHTTP(t *testing.T) {
 		t.Fatal("ServeHTTP did not return on cancel")
 	}
 }
+
+func TestWorkspaceWatcherAutoWarmsSymbolsOnActiveQuery(t *testing.T) {
+	base := t.TempDir()
+	srv, err := NewServer(ServerOptions{
+		Root:           base,
+		WatchWorkspace: true,
+	})
+	if err != nil {
+		t.Fatalf("NewServer failed: %v", err)
+	}
+
+	mock := newMockWatcher()
+	oldWatcher := newFSWatcher
+	newFSWatcher = func() (fsWatcher, error) { return mock, nil }
+	defer func() { newFSWatcher = oldWatcher }()
+
+	warmCalled := make(chan struct{}, 1)
+	oldWarm := warmSymbolsAsync
+	warmSymbolsAsync = func(s *Server, ctx context.Context) {
+		warmCalled <- struct{}{}
+	}
+	defer func() { warmSymbolsAsync = oldWarm }()
+
+	// Mark query active
+	srv.noteSymbolQuery()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	srv.startWorkspaceWatcher(ctx)
+
+	// Send an event
+	mock.events <- fsnotify.Event{
+		Name: filepath.Join(base, "file.go"),
+		Op:   fsnotify.Write,
+	}
+
+	select {
+	case <-warmCalled:
+		// Success!
+	case <-time.After(2 * time.Second):
+		t.Fatal("expected warmSymbolsAsync to be called on file change with active query")
+	}
+}
+
+func TestWorkspaceWatcherSkipsWarmingWhenIdle(t *testing.T) {
+	base := t.TempDir()
+	srv, err := NewServer(ServerOptions{
+		Root:           base,
+		WatchWorkspace: true,
+	})
+	if err != nil {
+		t.Fatalf("NewServer failed: %v", err)
+	}
+
+	mock := newMockWatcher()
+	oldWatcher := newFSWatcher
+	newFSWatcher = func() (fsWatcher, error) { return mock, nil }
+	defer func() { newFSWatcher = oldWatcher }()
+
+	warmCalled := make(chan struct{}, 1)
+	oldWarm := warmSymbolsAsync
+	warmSymbolsAsync = func(s *Server, ctx context.Context) {
+		warmCalled <- struct{}{}
+	}
+	defer func() { warmSymbolsAsync = oldWarm }()
+
+	// Symbol queries are idle (never called)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	srv.startWorkspaceWatcher(ctx)
+
+	mock.events <- fsnotify.Event{
+		Name: filepath.Join(base, "file.go"),
+		Op:   fsnotify.Write,
+	}
+
+	// Wait past debounce delay
+	time.Sleep(100 * time.Millisecond)
+	select {
+	case <-warmCalled:
+		t.Fatal("warmSymbolsAsync should not be called when idle")
+	default:
+		// Success!
+	}
+}
+
+func TestWarmSymbolsAsyncDefaultExecution(t *testing.T) {
+	base := t.TempDir()
+	srv, err := NewServer(ServerOptions{Root: base})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	warmSymbolsAsync(srv, ctx)
+}

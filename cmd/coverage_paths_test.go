@@ -585,3 +585,49 @@ func TestPersistentPreRunAppliesLogLevel(t *testing.T) {
 		t.Fatal("an unknown level was accepted")
 	}
 }
+
+func TestEnvLogFormat(t *testing.T) {
+	cases := []struct {
+		name string
+		env  string
+		want string
+		why  string
+	}{
+		{"json format", "json", "json", "explicit json format should be honoured"},
+		{"text format", "text", "text", "explicit text format should be honoured"},
+		{"empty string", "", "text", "empty environment should default to text"},
+		{"invalid format", "xml", "text", "unrecognised format should fall back to default"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("CORRAL_LOG_FORMAT", tc.env)
+			if got := envLogFormat(); got != tc.want {
+				t.Fatalf("envLogFormat() with CORRAL_LOG_FORMAT=%q = %q, want %q. %s", tc.env, got, tc.want, tc.why)
+			}
+		})
+	}
+}
+
+func TestApplyLogLevelRejectsUnknownFormat(t *testing.T) {
+	origLevel, origFormat := logLevel, logFormat
+	origDiagLevel, origDiagFormat := diag.CurrentLevel(), diag.CurrentFormat()
+	t.Cleanup(func() {
+		logLevel, logFormat = origLevel, origFormat
+		diag.SetLevel(origDiagLevel)
+		diag.SetFormat(origDiagFormat)
+	})
+
+	logLevel = "info"
+	logFormat = "json"
+	if err := applyLogLevel(); err != nil {
+		t.Fatalf("valid json format rejected: %v", err)
+	}
+	if diag.CurrentFormat() != diag.FormatJSON {
+		t.Fatalf("format is %v, want json", diag.CurrentFormat())
+	}
+
+	logFormat = "unsupported"
+	if err := applyLogLevel(); err == nil {
+		t.Fatal("expected error for unsupported format, got nil")
+	}
+}

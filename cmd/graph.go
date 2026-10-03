@@ -11,16 +11,19 @@ import (
 
 	"github.com/sebastienrousseau/corralctl/internal/graph"
 	corralmcp "github.com/sebastienrousseau/corralctl/internal/mcp"
+	"github.com/sebastienrousseau/corralctl/internal/tui"
 	"github.com/spf13/cobra"
 )
 
 var (
-	graphRepo    string
-	graphJSON    bool
-	graphMermaid bool
-	graphDOT     bool
-	graphOutput  string
-	graphScan    = corralmcp.Scan
+	graphRepo        string
+	graphJSON        bool
+	graphMermaid     bool
+	graphDOT         bool
+	graphInteractive bool
+	graphOutput      string
+	graphScan        = corralmcp.Scan
+	graphRunBrowser  = tui.RunGraphBrowser
 )
 
 // RepoGraphDetail represents single-repository dependency inspection details.
@@ -71,6 +74,9 @@ var graphCmd = &cobra.Command{
 		}
 
 		g := graph.BuildGraph(repos)
+		if graphInteractive {
+			return graphRunBrowser(g)
+		}
 		format := "text"
 		switch {
 		case graphJSON || graphOutput == "json":
@@ -208,6 +214,7 @@ func runGraphWith(idx *corralmcp.Index, repoFilter string, format string, g *gra
 
 func init() {
 	graphCmd.Flags().StringVar(&graphRepo, "repo", "", "filter graph to a specific repository and its direct dependencies")
+	graphCmd.Flags().BoolVarP(&graphInteractive, "interactive", "i", false, "explore dependency graph in an interactive terminal UI")
 	graphCmd.Flags().BoolVar(&graphJSON, "json", false, "output graph as JSON")
 	graphCmd.Flags().BoolVar(&graphMermaid, "mermaid", false, "output graph as a Mermaid flowchart")
 	graphCmd.Flags().BoolVar(&graphDOT, "dot", false, "output graph as Graphviz DOT")

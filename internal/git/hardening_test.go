@@ -248,9 +248,65 @@ func TestWorktreeLifecycle(t *testing.T) {
 	if err := CreateWorktree(context.Background(), workDir, wtPath2, ""); err != nil {
 		t.Fatalf("CreateWorktree with empty branch failed: %v", err)
 	}
+
+	// 6. ListWorktrees includes main and linked worktree
+	wts, err := ListWorktrees(context.Background(), workDir)
+	if err != nil {
+		t.Fatalf("ListWorktrees failed: %v", err)
+	}
+	if len(wts) < 2 {
+		t.Fatalf("expected at least 2 worktrees, got %d", len(wts))
+	}
+
 	if err := RemoveWorktree(context.Background(), workDir, wtPath2, false); err != nil {
 		t.Fatalf("RemoveWorktree clean failed: %v", err)
 	}
 }
+
+func TestParseWorktreeListPorcelain(t *testing.T) {
+	raw := `worktree /path/to/main
+HEAD abcdef1234567890
+branch refs/heads/main
+
+worktree /path/to/bare
+bare
+
+worktree /path/to/detached
+HEAD 123456abcdef7890
+detached
+
+`
+	wts := parseWorktreeListPorcelain(raw)
+	if len(wts) != 3 {
+		t.Fatalf("expected 3 worktrees, got %d", len(wts))
+	}
+	if wts[0].Path != "/path/to/main" || wts[0].Branch != "main" || wts[0].Commit != "abcdef1234567890" {
+		t.Errorf("unexpected wt[0]: %+v", wts[0])
+	}
+	if wts[1].Path != "/path/to/bare" || !wts[1].Bare {
+		t.Errorf("unexpected wt[1]: %+v", wts[1])
+	}
+	if wts[2].Path != "/path/to/detached" || wts[2].Branch != "detached" {
+		t.Errorf("unexpected wt[2]: %+v", wts[2])
+	}
+
+	// Non-existent directory returns error
+	if _, err := ListWorktrees(context.Background(), "/nonexistent/path"); err == nil {
+		t.Error("expected error listing worktrees for non-existent path")
+	}
+
+	// Empty input
+	if empty := parseWorktreeListPorcelain(""); len(empty) != 0 {
+		t.Errorf("expected 0 for empty, got %d", len(empty))
+	}
+
+	// Input without trailing newline
+	single := parseWorktreeListPorcelain("worktree /path/to/extra\nbranch refs/heads/extra")
+	if len(single) != 1 || single[0].Path != "/path/to/extra" || single[0].Branch != "extra" {
+		t.Errorf("unexpected single worktree: %+v", single)
+	}
+}
+
+
 
 

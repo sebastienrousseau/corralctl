@@ -26,7 +26,7 @@ func TestRootCommandExposesTheRealTree(t *testing.T) {
 	want := map[string]bool{
 		"clone": false, "sync": false, "mcp": false, "exec": false, "status": false,
 		"plan": false, "prune": false, "profile": false, "config": false, "graph": false,
-		"search": false,
+		"search": false, "worktree": false,
 	}
 	for _, sub := range root.Commands() {
 		if _, ok := want[sub.Name()]; ok {
