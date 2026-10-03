@@ -17,7 +17,7 @@ Versions pinned in `go.mod`. Refresh this table whenever a direct dependency is 
 | `github.com/charmbracelet/lipgloss` | v1.1.0 | TUI Styling | MIT |
 | `github.com/google/go-github/v90` | v90.0.0 | GitHub API Client | BSD-3-Clause |
 | `github.com/mattn/go-isatty` | v0.0.24 | Terminal Detection | MIT |
-| `github.com/modelcontextprotocol/go-sdk` | v1.7.0 | MCP Server Protocol | Apache-2.0 |
+| `github.com/modelcontextprotocol/go-sdk` | v1.8.0 | MCP Server Protocol | Apache-2.0 |
 | `github.com/spf13/cobra` | v1.10.2 | CLI Framework | Apache-2.0 |
 | `github.com/spf13/pflag` | v1.0.10 | CLI Flag Parsing | BSD-3-Clause |
 | `go.uber.org/goleak` | v1.3.0 | Goroutine leak detection (tests only) | MIT |
