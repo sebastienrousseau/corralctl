@@ -5,24 +5,29 @@ package diag
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"io"
 	"os"
 	"strings"
 	"testing"
+	"time"
 )
 
 // capture installs a buffer as the diagnostic sink for one test and restores
-// the previous level and sink afterwards, so tests cannot leak verbosity into
-// each other.
+// the previous level, format and sink afterwards, so tests cannot leak verbosity
+// or formatting into each other.
 func capture(t *testing.T, l Level) *bytes.Buffer {
 	t.Helper()
-	previous := CurrentLevel()
+	prevLevel := CurrentLevel()
+	prevFormat := CurrentFormat()
 	var buf bytes.Buffer
 	SetOutput(&buf)
 	SetLevel(l)
+	SetFormat(FormatText)
 	t.Cleanup(func() {
-		SetLevel(previous)
+		SetLevel(prevLevel)
+		SetFormat(prevFormat)
 		SetOutput(nil)
 	})
 	return &buf
@@ -166,5 +171,109 @@ func TestSetOutputNilRestoresStderr(t *testing.T) {
 	mu.RUnlock()
 	if restored != io.Writer(os.Stderr) {
 		t.Fatalf("SetOutput(nil) left the sink at %#v, want os.Stderr", restored)
+	}
+}
+
+func TestFormatNames(t *testing.T) {
+	if got := FormatText.String(); got != "text" {
+		t.Errorf("FormatText.String() = %q, want %q", got, "text")
+	}
+	if got := FormatJSON.String(); got != "json" {
+		t.Errorf("FormatJSON.String() = %q, want %q", got, "json")
+	}
+	if got := Format(99).String(); !strings.Contains(got, "99") {
+		t.Errorf("out-of-range format string = %q, want it to contain 99", got)
+	}
+}
+
+func TestParseFormat(t *testing.T) {
+	cases := []struct {
+		in      string
+		want    Format
+		wantErr bool
+	}{
+		{"text", FormatText, false},
+		{"TEXT", FormatText, false},
+		{"", FormatText, false},
+		{"json", FormatJSON, false},
+		{"JSON", FormatJSON, false},
+		{" xml ", FormatText, true},
+	}
+	for _, tc := range cases {
+		got, err := ParseFormat(tc.in)
+		if tc.wantErr {
+			if err == nil {
+				t.Errorf("ParseFormat(%q) accepted unknown format", tc.in)
+			}
+			continue
+		}
+		if err != nil {
+			t.Errorf("ParseFormat(%q) returned unexpected error: %v", tc.in, err)
+			continue
+		}
+		if got != tc.want {
+			t.Errorf("ParseFormat(%q) = %v, want %v", tc.in, got, tc.want)
+		}
+	}
+}
+
+func TestEmitJSON(t *testing.T) {
+	buf := capture(t, LevelDebug)
+	SetFormat(FormatJSON)
+
+	fixedTime := time.Date(2026, 10, 3, 12, 0, 0, 0, time.UTC)
+	origTimeNow := timeNow
+	timeNow = func() time.Time { return fixedTime }
+	t.Cleanup(func() { timeNow = origTimeNow })
+
+	Errorf("failure: %s", "disk full")
+	Warnf("warning: %s\n", "quota near")
+	Infof("info: %s", "syncing")
+	Debugf("debug: %s", "tracing")
+
+	lines := strings.Split(strings.TrimSpace(buf.String()), "\n")
+	if len(lines) != 4 {
+		t.Fatalf("expected 4 lines of JSON, got %d:\n%s", len(lines), buf.String())
+	}
+
+	expectedLevels := []string{"ERROR", "WARN", "INFO", "DEBUG"}
+	expectedMsgs := []string{"failure: disk full", "warning: quota near", "info: syncing", "debug: tracing"}
+
+	for i, line := range lines {
+		var record struct {
+			Time  string `json:"time"`
+			Level string `json:"level"`
+			Msg   string `json:"msg"`
+		}
+		if err := json.Unmarshal([]byte(line), &record); err != nil {
+			t.Fatalf("line %d is not valid JSON (%v): %s", i, err, line)
+		}
+		if record.Level != expectedLevels[i] {
+			t.Errorf("line %d: level = %q, want %q", i, record.Level, expectedLevels[i])
+		}
+		if record.Msg != expectedMsgs[i] {
+			t.Errorf("line %d: msg = %q, want %q", i, record.Msg, expectedMsgs[i])
+		}
+		if record.Time == "" {
+			t.Errorf("line %d: time is empty", i)
+		}
+	}
+}
+
+func TestEmitJSONFiltering(t *testing.T) {
+	buf := capture(t, LevelWarn)
+	SetFormat(FormatJSON)
+
+	Errorf("fatal error")
+	Warnf("subsystem warning")
+	Infof("routine progress")
+	Debugf("verbose detail")
+
+	out := buf.String()
+	if !strings.Contains(out, "fatal error") || !strings.Contains(out, "subsystem warning") {
+		t.Fatalf("expected error and warning in JSON output, got:\n%s", out)
+	}
+	if strings.Contains(out, "routine progress") || strings.Contains(out, "verbose detail") {
+		t.Fatalf("unexpected info/debug in warn-level JSON output, got:\n%s", out)
 	}
 }

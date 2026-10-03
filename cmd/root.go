@@ -62,6 +62,7 @@ var (
 	apiRequestTimeout   time.Duration
 	apiTotalTimeout     time.Duration
 	logLevel            string
+	logFormat           string
 	osExit              = os.Exit
 	engineRun           = engine.Run
 	preflightRunner     = runPreflight
@@ -158,6 +159,8 @@ func init() {
 	// while giving a bug report something to attach.
 	rootCmd.PersistentFlags().StringVar(&logLevel, "log-level", envLogLevel(),
 		"diagnostic verbosity on stderr: error, warn, info or debug")
+	rootCmd.PersistentFlags().StringVar(&logFormat, "log-format", envLogFormat(),
+		"diagnostic format on stderr: text or json")
 
 	// Shared groups, also registered on plan/prune/profile so those commands
 	// can set what they already consume. See cmd/flags.go.
@@ -277,8 +280,21 @@ func envLogLevel() string {
 	return diag.LevelInfo.String()
 }
 
-// applyLogLevel installs the requested verbosity, rejecting an unknown name
-// rather than silently falling back — a typo'd level that quietly does
+// envLogFormat is the default for --log-format, taken from CORRAL_LOG_FORMAT so
+// the setting can be exported for a whole shell session rather than repeated
+// on every invocation. An unset or unrecognised value leaves the default at
+// "text"; a bad value passed explicitly is reported when the flag is applied.
+func envLogFormat() string {
+	if v := strings.TrimSpace(os.Getenv("CORRAL_LOG_FORMAT")); v != "" {
+		if _, err := diag.ParseFormat(v); err == nil {
+			return strings.ToLower(v)
+		}
+	}
+	return diag.FormatText.String()
+}
+
+// applyLogLevel installs the requested verbosity and format, rejecting an unknown name
+// rather than silently falling back — a typo'd level or format that quietly does
 // nothing is how someone ends up filing a bug report with no debug output in
 // it.
 func applyLogLevel() error {
@@ -286,7 +302,12 @@ func applyLogLevel() error {
 	if err != nil {
 		return err
 	}
+	format, err := diag.ParseFormat(logFormat)
+	if err != nil {
+		return err
+	}
 	diag.SetLevel(level)
+	diag.SetFormat(format)
 	return nil
 }
 
