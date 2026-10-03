@@ -199,6 +199,12 @@ func evalScenarios() []scenario {
 			args:     map[string]any{"query": "billing-ui"},
 			wants:    []string{"billing-ui", "typescript"},
 		},
+		{
+			question: "What are the cross-package dependencies between repositories in this workspace?",
+			tool:     "corral_graph_dependencies",
+			args:     map[string]any{},
+			wants:    []string{"nodes", "edges"},
+		},
 	}
 }
 

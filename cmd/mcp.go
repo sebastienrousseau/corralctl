@@ -48,18 +48,19 @@ var mcpCmd = &cobra.Command{
 
 The server exposes the local Corral-organised workspace (cloned
 repositories under the configured base directory) to AI coding agents
-through eight read-only tools and four resources. No network calls are
+through nine read-only tools and four resources. No network calls are
 made and no forge API is contacted.
 
 Tools:
-  corral_find_symbol       - where a symbol is defined, across EVERY clone
-  corral_search_code       - where text appears, across EVERY clone
-  corral_repo_overview     - one repository's shape in a single call
-  corral_list_repos        - filter clones by visibility/language/name
-  corral_find_repo         - resolve a fuzzy name to one clone
-  corral_get_repo_metadata - detailed info incl. current branch
-  corral_status_summary    - aggregate counts by visibility + language
-  corral_workspace_index   - full workspace index as JSON
+  corral_find_symbol        - where a symbol is defined, across EVERY clone
+  corral_search_code        - where text appears, across EVERY clone
+  corral_repo_overview      - one repository's shape in a single call
+  corral_list_repos         - filter clones by visibility/language/name
+  corral_find_repo          - resolve a fuzzy name to one clone
+  corral_get_repo_metadata  - detailed info incl. current branch
+  corral_status_summary     - aggregate counts by visibility + language
+  corral_workspace_index    - full workspace index as JSON
+  corral_graph_dependencies - analyze cross-repo package dependencies
 
 corral_find_symbol is the one a single-repository code index cannot
 offer: it resolves a function, method, type, interface, constant or

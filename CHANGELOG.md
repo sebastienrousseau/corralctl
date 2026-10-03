@@ -48,6 +48,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (enabled by default via `--watch=true`), debouncing filesystem events by
   50ms to automatically invalidate the cached repository index when branches,
   remotes, or worktrees change on disk without descending into loose git objects.
+- **Cross-repo workspace dependency graph analysis.** Added `corral_graph_dependencies`
+  tool to analyze inter-repository package dependencies across Go modules, Rust crates,
+  Node/TypeScript packages, and Python projects in the workspace corral, computing
+  directed dependency edges, topological build/test execution order, and circular
+  dependency cycles.
+- **Prometheus telemetry endpoint on HTTP and SSE transports.** The MCP server
+  serves standard Prometheus metrics (v0.0.4) at `/metrics` tracking request rates,
+  tool execution outcomes, active MCP sessions, workspace repository totals, and cache
+  invalidations.
 
 ### Performance
 
@@ -58,6 +67,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Pooled trigram candidate buffers.** `internal/search` pools trigram index
   intersection candidate buffers via `sync.Pool`, eliminating per-query slice
   allocations during multi-token code searches.
+- **Zero-allocation HTTP body peeking in eraRouter.** `internal/mcp` pools request
+  buffer readers via `sync.Pool` and caches the inspected JSON-RPC body within the
+  request context, eliminating duplicate body read and slice allocation cycles during
+  dual-revision Streamable HTTP routing.
 
 ### Security
 

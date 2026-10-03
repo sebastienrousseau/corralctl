@@ -14,6 +14,7 @@ import (
 
 	"github.com/sebastienrousseau/corralctl/internal/diag"
 	"github.com/sebastienrousseau/corralctl/internal/git"
+	"github.com/sebastienrousseau/corralctl/internal/graph"
 	"github.com/sebastienrousseau/corralctl/internal/sanitize"
 )
 
@@ -44,6 +45,11 @@ type listReposInput struct {
 // queryInput is the single-field argument set shared by the lookup tools.
 type queryInput struct {
 	Query string `json:"query" jsonschema:"Repository identifier: bare name ('corral'), relative path ('Public/go/corral'), or any path suffix that uniquely identifies a repo."`
+}
+
+// graphDependenciesInput is the argument set for corral_graph_dependencies.
+type graphDependenciesInput struct {
+	Repo string `json:"repo,omitempty" jsonschema:"Optional repository identifier to focus on. If provided, returns the direct dependencies and dependents for this repository."`
 }
 
 // pageInput is the argument set for corral_workspace_index.
@@ -104,6 +110,13 @@ func (s *Server) registerTools() {
 		Annotations: readOnlyAnnotations(),
 		Description: "Return a whole-workspace summary plus a bounded page of repositories. Prefer corral_list_repos when you can filter — this returns everything and is the most expensive read here. Paginated: pass next_offset back as 'offset'. Defaults to the concise projection; 'detailed' adds origin URLs and sync state.",
 	}, s.handleWorkspaceIndex)
+
+	addTool(s, &mcp.Tool{
+		Name:        "corral_graph_dependencies",
+		Title:       "Analyze cross-repository dependencies",
+		Annotations: readOnlyAnnotations(),
+		Description: "Analyze package dependencies across all repositories in the Corral workspace (Go modules, Rust crates, Node/TypeScript packages, Python projects). Returns the directed dependency graph, topological build and test execution order, detected cycles, and reverse dependent lookups.",
+	}, s.handleGraphDependencies)
 }
 
 func (s *Server) handleListRepos(ctx context.Context, _ *mcp.CallToolRequest, in listReposInput) (*mcp.CallToolResult, PageOutput, error) {
@@ -283,7 +296,72 @@ func sortedLangCounts(m map[string]int) []LanguageCount {
 	return out
 }
 
+// GraphDependenciesOutput is the structured content returned by corral_graph_dependencies.
+type GraphDependenciesOutput struct {
+	Nodes            []graph.Node        `json:"nodes"`
+	Edges            []graph.Edge        `json:"edges"`
+	TopologicalOrder []string            `json:"topological_order,omitempty"`
+	Cycles           [][]string          `json:"cycles,omitempty"`
+	Dependents       map[string][]string `json:"dependents,omitempty"`
+	TargetRepo       string              `json:"target_repo,omitempty"`
+	Dependencies     []string            `json:"dependencies,omitempty"`
+}
+
 // currentBranch shells out to git rev-parse to resolve HEAD's branch.
+func (s *Server) handleGraphDependencies(ctx context.Context, _ *mcp.CallToolRequest, in graphDependenciesInput) (*mcp.CallToolResult, GraphDependenciesOutput, error) {
+	idx, err := s.scan()
+	if err != nil {
+		return nil, GraphDependenciesOutput{}, fmt.Errorf("scan workspace: %v", err)
+	}
+
+	repos := make([]graph.RepoInput, 0, len(idx.Repos))
+	for _, r := range idx.Repos {
+		repos = append(repos, graph.RepoInput{
+			Name:      r.Name,
+			Path:      r.Path,
+			Language:  r.Language,
+			RemoteURL: r.RemoteURL,
+		})
+	}
+
+	g := graph.BuildGraph(repos)
+
+	if in.Repo != "" {
+		match, err := idx.Find(in.Repo)
+		if err != nil {
+			return toolError("repo %q: %v", in.Repo, err), GraphDependenciesOutput{}, nil
+		}
+		repoName := match.Name
+		var node *graph.Node
+		for i := range g.Nodes {
+			if g.Nodes[i].Name == repoName {
+				node = &g.Nodes[i]
+				break
+			}
+		}
+		res := GraphDependenciesOutput{
+			Nodes:        []graph.Node{},
+			Edges:        []graph.Edge{},
+			TargetRepo:   repoName,
+			Dependencies: []string{},
+			Dependents:   g.Dependents,
+		}
+		if node != nil {
+			res.Dependencies = node.Dependencies
+		}
+		return jsonResult(res), res, nil
+	}
+
+	res := GraphDependenciesOutput{
+		Nodes:            g.Nodes,
+		Edges:            g.Edges,
+		TopologicalOrder: g.TopologicalOrder,
+		Cycles:           g.Cycles,
+		Dependents:       g.Dependents,
+	}
+	return jsonResult(res), res, nil
+}
+
 // Indirected through a package var so tests can stub without spawning
 // a real subprocess. On error the caller gets an empty string (the
 // tool result still succeeds with "current_branch": "") but the error
