@@ -361,7 +361,7 @@ jobs:
       # deploy workflow, because a change that breaks it was previously
       # invisible until after it had merged.
       - name: Install cargo-binstall
-        uses: cargo-bins/cargo-binstall@b874e25ea559687bec77e281e9b271aa1367b624 # v1.23.0
+        uses: cargo-bins/cargo-binstall@422f3094be6a0843857aa008b499caaf6bce0da8 # v1.24.0
 
       - name: Install ssg
         run: |
