@@ -38,7 +38,14 @@ LDFLAGS = -s -w \
 
 .PHONY: all build docs install uninstall install-smoke test test-race vet lint \
         clean format sbom-check sbom-fix example-check doc-check spdx-check pkg-check eval staticcheck race-hard bench claims-check \
-        docs-lint help
+        docs-lint help demo
+
+VHS ?= $(shell which vhs 2>/dev/null || echo /opt/homebrew/bin/vhs)
+
+## demo: generate terminal demo animation gif using vhs
+demo: build
+	$(VHS) .github/demo.tape
+
 
 all: format vet staticcheck spdx-check sbom-check pkg-check claims-check example-check test test-race build
 
