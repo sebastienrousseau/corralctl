@@ -211,10 +211,14 @@ func TestCorralPruneWorktrees(t *testing.T) {
 	}
 
 	// 7. Audit failure
+	blocker := filepath.Join(t.TempDir(), "not-a-directory")
+	if err := os.WriteFile(blocker, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	failingAuditHarness := newHarness(t, ServerOptions{
 		Root:            base,
 		EnableMutations: true,
-		AuditLogPath:    "/nonexistent/directory/audit.log",
+		AuditLogPath:    filepath.Join(blocker, "audit.log"),
 	})
 	_, isErr = failingAuditHarness.callTool("corral_prune_worktrees", map[string]any{})
 	if !isErr {
