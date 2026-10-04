@@ -23,13 +23,15 @@ func resetWorktreeFlags() {
 	worktreeForce = false
 	worktreeOutput = "text"
 	worktreeJSON = false
+	worktreePruneDryRun = false
+	worktreePruneTempOnly = false
 }
 
 func TestWorktreeCommandsPreRunE(t *testing.T) {
 	origOutput := worktreeOutput
 	t.Cleanup(func() { worktreeOutput = origOutput })
 
-	commands := []*cobra.Command{worktreeListCmd, worktreeCreateCmd, worktreeRemoveCmd}
+	commands := []*cobra.Command{worktreeListCmd, worktreeCreateCmd, worktreeRemoveCmd, worktreePruneCmd}
 	for _, cmd := range commands {
 		worktreeOutput = "text"
 		if err := cmd.PreRunE(cmd, nil); err != nil {
@@ -377,3 +379,178 @@ func TestWorktreeRemoveCommand(t *testing.T) {
 		t.Fatalf("unexpected remove result: %+v", removeRes)
 	}
 }
+
+func TestIsTemporaryPath(t *testing.T) {
+	cases := []struct {
+		path string
+		want bool
+	}{
+		{filepath.Join(os.TempDir(), "wt-1"), true},
+		{"/tmp/scratch/wt", true},
+		{"/private/tmp/scratchpad/wt", true},
+		{"/Users/seb/code/repo/.git/corral-worktrees/wt-123", true},
+		{"/Users/seb/code/repo/scratchpad/branch-wt", true},
+		{"/Users/seb/code/repo", false},
+		{"/home/user/worktrees/feature", false},
+	}
+	for _, tc := range cases {
+		if got := isTemporaryPath(tc.path); got != tc.want {
+			t.Errorf("isTemporaryPath(%q) = %v, want %v", tc.path, got, tc.want)
+		}
+	}
+}
+
+func TestWorktreePruneCommand(t *testing.T) {
+	root := t.TempDir()
+	origScan, origList, origStat, origPrune, origRemove := worktreeScan, worktreeListOp, worktreeStat, worktreePruneOp, worktreeRemoveOp
+	t.Cleanup(func() {
+		worktreeScan = origScan
+		worktreeListOp = origList
+		worktreeStat = origStat
+		worktreePruneOp = origPrune
+		worktreeRemoveOp = origRemove
+		resetWorktreeFlags()
+	})
+
+	// 1. Scan error
+	resetWorktreeFlags()
+	worktreeScan = func(string) (*corralmcp.Index, error) {
+		return nil, errors.New("simulated scan error")
+	}
+	if err := worktreePruneCmd.RunE(worktreePruneCmd, []string{root}); err == nil {
+		t.Fatal("expected scan error, got nil")
+	}
+
+	// 2. Repo filter error and success
+	resetWorktreeFlags()
+	worktreeScan = func(string) (*corralmcp.Index, error) {
+		return &corralmcp.Index{Root: root, Repos: []corralmcp.RepoEntry{{Name: "alpha", Path: "/path/alpha"}}}, nil
+	}
+	worktreeRepoFilter = "nonexistent"
+	if err := worktreePruneCmd.RunE(worktreePruneCmd, []string{root}); err == nil {
+		t.Fatal("expected repo filter error, got nil")
+	}
+
+	// 3. Empty workspace text and JSON
+	resetWorktreeFlags()
+	worktreeScan = func(string) (*corralmcp.Index, error) {
+		return &corralmcp.Index{Root: root, Repos: []corralmcp.RepoEntry{}}, nil
+	}
+	out := captureStdout(t, func() {
+		_ = worktreePruneCmd.RunE(worktreePruneCmd, []string{root})
+	})
+	if !strings.Contains(out, "No repositories found.") {
+		t.Fatalf("expected 'No repositories found.', got: %s", out)
+	}
+
+	worktreeJSON = true
+	out = captureStdout(t, func() {
+		_ = worktreePruneCmd.RunE(worktreePruneCmd, []string{root})
+	})
+	var pruneRes WorktreePruneResult
+	if err := json.Unmarshal([]byte(out), &pruneRes); err != nil {
+		t.Fatalf("failed to decode JSON: %v", err)
+	}
+
+	// 4. Repositories with no stale or temporary worktrees
+	resetWorktreeFlags()
+	worktreeScan = func(string) (*corralmcp.Index, error) {
+		return &corralmcp.Index{Root: root, Repos: []corralmcp.RepoEntry{
+			{Name: "alpha", Path: "/path/alpha"},
+		}}, nil
+	}
+	worktreeListOp = func(ctx context.Context, dir string) ([]git.WorktreeInfo, error) {
+		return []git.WorktreeInfo{
+			{Path: "/path/alpha", Bare: false}, // main worktree, skipped
+			{Path: "/path/alpha-wt", Bare: false},
+		}, nil
+	}
+	worktreeStat = func(name string) (os.FileInfo, error) {
+		return fakeFileInfo{name: "alpha-wt", isDir: true}, nil
+	}
+	worktreePruneTempOnly = true // /path/alpha-wt is not temp
+	out = captureStdout(t, func() {
+		_ = worktreePruneCmd.RunE(worktreePruneCmd, []string{root})
+	})
+	if !strings.Contains(out, "No stale or temporary worktrees found.") {
+		t.Fatalf("expected 'No stale or temporary worktrees found.', got: %s", out)
+	}
+
+	// 5. Repositories with list error
+	worktreeListOp = func(ctx context.Context, dir string) ([]git.WorktreeInfo, error) {
+		return nil, errors.New("list error")
+	}
+	out = captureStdout(t, func() {
+		_ = worktreePruneCmd.RunE(worktreePruneCmd, []string{root})
+	})
+	if !strings.Contains(out, "No stale or temporary worktrees found.") {
+		t.Fatalf("expected 'No stale or temporary worktrees found.', got: %s", out)
+	}
+
+	// 6. Stale (missing) and Temporary worktree in Dry-Run mode
+	resetWorktreeFlags()
+	worktreePruneDryRun = true
+	worktreeScan = func(string) (*corralmcp.Index, error) {
+		return &corralmcp.Index{Root: root, Repos: []corralmcp.RepoEntry{
+			{Name: "alpha", Path: "/path/alpha"},
+		}}, nil
+	}
+	worktreeListOp = func(ctx context.Context, dir string) ([]git.WorktreeInfo, error) {
+		return []git.WorktreeInfo{
+			{Path: "/path/missing-wt", Branch: "feat/missing"},
+			{Path: "/tmp/scratchpad/temp-wt", Branch: "feat/temp"},
+		}, nil
+	}
+	worktreeStat = func(name string) (os.FileInfo, error) {
+		if strings.Contains(name, "missing") {
+			return nil, os.ErrNotExist
+		}
+		return fakeFileInfo{name: "temp-wt", isDir: true}, nil
+	}
+	out = captureStdout(t, func() {
+		_ = worktreePruneCmd.RunE(worktreePruneCmd, []string{root})
+	})
+	if !strings.Contains(out, "Would prune") {
+		t.Fatalf("expected 'Would prune' in dry-run, got: %s", out)
+	}
+
+	// 7. Non-dry-run mode: execution of remove and prune
+	resetWorktreeFlags()
+	var removedPaths []string
+	var prunedRepos []string
+	worktreeRemoveOp = func(ctx context.Context, dir, path string, force bool) error {
+		removedPaths = append(removedPaths, path)
+		return nil
+	}
+	worktreePruneOp = func(ctx context.Context, dir string) error {
+		prunedRepos = append(prunedRepos, dir)
+		return nil
+	}
+	worktreeListOp = func(ctx context.Context, dir string) ([]git.WorktreeInfo, error) {
+		return []git.WorktreeInfo{
+			{Path: "/path/missing-wt", Branch: "feat/missing"},
+			{Path: "/tmp/scratchpad/temp-wt", Branch: "feat/temp"},
+			{Path: "/path/normal-wt", Branch: "feat/normal"},
+		}, nil
+	}
+	worktreeStat = func(name string) (os.FileInfo, error) {
+		if strings.Contains(name, "missing") {
+			return nil, os.ErrNotExist
+		}
+		return fakeFileInfo{name: "wt", isDir: true}, nil
+	}
+	worktreeRepoFilter = "alpha"
+	out = captureStdout(t, func() {
+		_ = worktreePruneCmd.RunE(worktreePruneCmd, []string{root})
+	})
+	if !strings.Contains(out, "Pruned") || !strings.Contains(out, "Summary:") {
+		t.Fatalf("expected Pruned summary, got: %s", out)
+	}
+	if len(removedPaths) != 1 || !strings.Contains(removedPaths[0], "temp-wt") {
+		t.Fatalf("expected temp-wt to be removed, got: %v", removedPaths)
+	}
+	if len(prunedRepos) != 1 || prunedRepos[0] != "/path/alpha" {
+		t.Fatalf("expected alpha to be pruned, got: %v", prunedRepos)
+	}
+}
+

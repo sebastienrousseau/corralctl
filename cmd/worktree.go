@@ -18,11 +18,13 @@ import (
 )
 
 var (
-	worktreeRepoFilter string
-	worktreePathFlag   string
-	worktreeForce      bool
-	worktreeOutput     string
-	worktreeJSON       bool
+	worktreeRepoFilter    string
+	worktreePathFlag      string
+	worktreeForce         bool
+	worktreeOutput        string
+	worktreeJSON          bool
+	worktreePruneDryRun   bool
+	worktreePruneTempOnly bool
 
 	worktreeScan           = corralmcp.Scan
 	worktreeCreateOp       = git.CreateWorktree
@@ -30,6 +32,7 @@ var (
 	worktreePruneOp        = git.PruneWorktrees
 	worktreeListOp         = git.ListWorktrees
 	worktreeMkdirAll       = os.MkdirAll
+	worktreeStat           = os.Stat
 	worktreeCurrentTimeSec = func() int64 { return time.Now().Unix() }
 )
 
@@ -55,6 +58,23 @@ type WorktreeRemoveResult struct {
 	Repo   string `json:"repo"`
 	Path   string `json:"path"`
 	Result string `json:"result"`
+}
+
+// WorktreePruneEntry describes one pruned or candidate worktree.
+type WorktreePruneEntry struct {
+	Repo   string `json:"repo"`
+	Path   string `json:"path"`
+	Branch string `json:"branch,omitempty"`
+	Reason string `json:"reason"`
+	Pruned bool   `json:"pruned"`
+}
+
+// WorktreePruneResult summarizes worktrees cleaned up across repositories.
+type WorktreePruneResult struct {
+	TotalChecked int                  `json:"total_checked"`
+	TotalPruned  int                  `json:"total_pruned"`
+	DryRun       bool                 `json:"dry_run"`
+	Worktrees    []WorktreePruneEntry `json:"worktrees"`
 }
 
 var worktreeCmd = &cobra.Command{
@@ -263,6 +283,135 @@ func runWorktreeRemove(ctx context.Context, root, repoName, wtPath string) error
 	return nil
 }
 
+// isTemporaryPath reports whether a worktree path resides in an ephemeral or scratchpad location.
+func isTemporaryPath(p string) bool {
+	clean := filepath.Clean(p)
+	tmp := os.TempDir()
+	if strings.HasPrefix(clean, tmp) || strings.HasPrefix(clean, "/tmp/") || strings.HasPrefix(clean, "/private/tmp/") {
+		return true
+	}
+	if strings.Contains(clean, filepath.Join(".git", "corral-worktrees")) || strings.Contains(clean, "scratchpad") {
+		return true
+	}
+	return false
+}
+
+var worktreePruneCmd = &cobra.Command{
+	Use:   "prune [base_dir]",
+	Short: "Prune stale, orphaned, and temporary linked Git worktrees",
+	Long:  "Detect and clean up linked Git worktrees whose paths no longer exist on disk or reside in ephemeral scratchpad locations.",
+	Args:  cobra.MaximumNArgs(1),
+	PreRunE: func(cmd *cobra.Command, args []string) error {
+		if worktreeOutput != "" && worktreeOutput != "text" && worktreeOutput != "json" {
+			return errors.New("--output must be text or json")
+		}
+		return nil
+	},
+	RunE: func(cmd *cobra.Command, args []string) error {
+		root := resolvedBaseDir(args)
+		return runWorktreePrune(cmdContext(cmd), root)
+	},
+}
+
+func runWorktreePrune(ctx context.Context, root string) error {
+	idx, err := worktreeScan(root)
+	if err != nil {
+		return err
+	}
+
+	targets := idx.Repos
+	if worktreeRepoFilter != "" {
+		match, findErr := idx.Find(worktreeRepoFilter)
+		if findErr != nil {
+			return fmt.Errorf("repository %q: %w", worktreeRepoFilter, findErr)
+		}
+		targets = []corralmcp.RepoEntry{*match}
+	}
+
+	res := WorktreePruneResult{
+		DryRun:    worktreePruneDryRun,
+		Worktrees: []WorktreePruneEntry{},
+	}
+
+	for _, repo := range targets {
+		wts, listErr := worktreeListOp(ctx, repo.Path)
+		if listErr != nil {
+			continue
+		}
+		repoNeedsPrune := false
+		for _, wt := range wts {
+			if wt.Bare || wt.Path == repo.Path {
+				continue
+			}
+			res.TotalChecked++
+
+			_, statErr := worktreeStat(wt.Path)
+			isMissing := statErr != nil
+			isTemp := isTemporaryPath(wt.Path)
+
+			var reason string
+			switch {
+			case isMissing:
+				reason = "path does not exist on disk"
+			case isTemp:
+				reason = "ephemeral scratchpad location"
+			case !worktreePruneTempOnly:
+				reason = "linked worktree pruned"
+			default:
+				continue
+			}
+
+			entry := WorktreePruneEntry{
+				Repo:   repo.Name,
+				Path:   wt.Path,
+				Branch: wt.Branch,
+				Reason: reason,
+			}
+
+			if worktreePruneDryRun {
+				entry.Pruned = false
+			} else {
+				if isTemp && !isMissing {
+					_ = worktreeRemoveOp(ctx, repo.Path, wt.Path, worktreeForce)
+				}
+				repoNeedsPrune = true
+				entry.Pruned = true
+				res.TotalPruned++
+			}
+			res.Worktrees = append(res.Worktrees, entry)
+		}
+		if repoNeedsPrune && !worktreePruneDryRun {
+			_ = worktreePruneOp(ctx, repo.Path)
+		}
+	}
+
+	if worktreeJSON || worktreeOutput == "json" {
+		return writeJSON(os.Stdout, res)
+	}
+
+	if len(targets) == 0 {
+		fmt.Println("No repositories found.")
+		return nil
+	}
+
+	if len(res.Worktrees) == 0 {
+		fmt.Println("No stale or temporary worktrees found.")
+		return nil
+	}
+
+	action := "Pruned"
+	if worktreePruneDryRun {
+		action = "Would prune"
+	}
+
+	for _, wt := range res.Worktrees {
+		fmt.Printf("%s %s (%s) in %s: %s\n", action, wt.Path, wt.Branch, wt.Repo, wt.Reason)
+	}
+	fmt.Printf("\nSummary: %d checked, %d %s across %d repositories.\n",
+		res.TotalChecked, len(res.Worktrees), strings.ToLower(action), len(targets))
+	return nil
+}
+
 func init() {
 	worktreeListCmd.Flags().StringVar(&worktreeRepoFilter, "repo", "", "Filter worktrees to a specific repository")
 	worktreeListCmd.Flags().StringVar(&worktreeOutput, "output", "text", "Output format (text, json)")
@@ -276,6 +425,13 @@ func init() {
 	worktreeRemoveCmd.Flags().StringVar(&worktreeOutput, "output", "text", "Output format (text, json)")
 	worktreeRemoveCmd.Flags().BoolVar(&worktreeJSON, "json", false, "Output as JSON (shorthand for --output json)")
 
-	worktreeCmd.AddCommand(worktreeListCmd, worktreeCreateCmd, worktreeRemoveCmd)
+	worktreePruneCmd.Flags().StringVar(&worktreeRepoFilter, "repo", "", "Filter to a specific repository")
+	worktreePruneCmd.Flags().BoolVar(&worktreePruneDryRun, "dry-run", false, "Simulate pruning without removing worktrees")
+	worktreePruneCmd.Flags().BoolVarP(&worktreeForce, "force", "f", false, "Force removal of temporary worktrees even if modified")
+	worktreePruneCmd.Flags().BoolVar(&worktreePruneTempOnly, "temp-only", false, "Only prune temporary scratchpad worktrees")
+	worktreePruneCmd.Flags().StringVar(&worktreeOutput, "output", "text", "Output format (text, json)")
+	worktreePruneCmd.Flags().BoolVar(&worktreeJSON, "json", false, "Output as JSON (shorthand for --output json)")
+
+	worktreeCmd.AddCommand(worktreeListCmd, worktreeCreateCmd, worktreeRemoveCmd, worktreePruneCmd)
 	rootCmd.AddCommand(worktreeCmd)
 }
