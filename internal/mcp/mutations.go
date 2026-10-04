@@ -35,6 +35,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/sebastienrousseau/corralctl/internal/git"
+	"github.com/sebastienrousseau/corralctl/internal/sanitize"
 )
 
 // gitPull / gitClone are indirected through package vars so tests can
@@ -46,10 +47,12 @@ var (
 	gitCreateWorktree  = git.CreateWorktree
 	gitRemoveWorktree  = git.RemoveWorktree
 	gitPruneWorktrees  = git.PruneWorktrees
+	gitListWorktrees   = git.ListWorktrees
 	hasLocalChanges    = git.HasLocalChanges
 	hasUnpushedCommits = git.HasUnpublishedWork
 	gitIsRepository    = git.IsRepository
 	statMutation       = os.Stat
+	statPath           = os.Stat
 	mkdirMutation      = os.MkdirAll
 	removeMutation     = os.RemoveAll
 	markSynced         = markStateSynced
@@ -130,6 +133,18 @@ func (s *Server) registerMutationTools() {
 		},
 		Description: "Remove a linked agent worktree created under .git/corral-worktrees. Requires --enable-mutations. Refuses when uncommitted or untracked changes exist in the worktree unless force=true is passed. Prunes stale worktree administrative metadata.",
 	}, s.handleReleaseWorktree)
+
+	addTool(s, &mcp.Tool{
+		Name:  "corral_prune_worktrees",
+		Title: "Prune stale or temporary agent worktrees",
+		Annotations: &mcp.ToolAnnotations{
+			ReadOnlyHint:    false,
+			DestructiveHint: &f,
+			IdempotentHint:  false,
+			OpenWorldHint:   &f,
+		},
+		Description: "Prune stale, detached, or temporary agent worktrees across workspace repositories. Requires --enable-mutations. Skips main repository worktrees and refuses removal of modified worktrees unless force=true is passed.",
+	}, s.handlePruneWorktrees)
 }
 
 // registerDestructiveTools attaches corral_delete_repo. Kept in its
@@ -438,6 +453,137 @@ func (s *Server) handleReleaseWorktree(ctx context.Context, _ *mcp.CallToolReque
 		Result: "released",
 	}
 	return jsonResult(out), out, nil
+}
+
+// pruneWorktreesInput is the argument set for corral_prune_worktrees.
+type pruneWorktreesInput struct {
+	Repo     string `json:"repo,omitempty" jsonschema:"Filter pruning to a specific repository name or relative path."`
+	DryRun   bool   `json:"dry_run,omitempty" jsonschema:"When true, reports which worktrees would be pruned without removing them."`
+	TempOnly bool   `json:"temp_only,omitempty" jsonschema:"When true, only prune worktrees located in temporary or scratchpad paths."`
+	Force    bool   `json:"force,omitempty" jsonschema:"When true, force remove worktrees even if local modifications exist."`
+}
+
+// WorktreePrunedItem describes one worktree cleaned up by corral_prune_worktrees.
+type WorktreePrunedItem struct {
+	Repo   string `json:"repo"`
+	Path   string `json:"path"`
+	Branch string `json:"branch,omitempty"`
+	Reason string `json:"reason"`
+	Pruned bool   `json:"pruned"`
+}
+
+// PruneWorktreesOutput is the structured content returned by corral_prune_worktrees.
+type PruneWorktreesOutput struct {
+	TotalChecked int                  `json:"total_checked"`
+	PrunedCount  int                  `json:"pruned_count"`
+	DryRun       bool                 `json:"dry_run"`
+	Pruned       []WorktreePrunedItem `json:"pruned"`
+}
+
+func isTempWorktreePath(p string) bool {
+	slashPath := filepath.ToSlash(p)
+	tmp := filepath.ToSlash(os.TempDir())
+	if strings.HasPrefix(slashPath, tmp) || strings.HasPrefix(slashPath, "/tmp/") || strings.HasPrefix(slashPath, "/private/tmp/") {
+		return true
+	}
+	return strings.Contains(slashPath, ".git/corral-worktrees") || strings.Contains(slashPath, "scratchpad")
+}
+
+func (s *Server) handlePruneWorktrees(ctx context.Context, _ *mcp.CallToolRequest, in pruneWorktreesInput) (*mcp.CallToolResult, PruneWorktreesOutput, error) {
+	idx, err := s.scan()
+	if err != nil {
+		return nil, PruneWorktreesOutput{}, fmt.Errorf("scan workspace: %v", err)
+	}
+
+	targets := idx.Repos
+	if in.Repo != "" {
+		match, findErr := idx.Find(in.Repo)
+		if findErr != nil {
+			return nil, PruneWorktreesOutput{}, fmt.Errorf("%v", findErr)
+		}
+		targets = []RepoEntry{*match}
+	}
+
+	rec := AuditRecord{
+		Tool:   "corral_prune_worktrees",
+		Target: s.opts.Root,
+		Args:   map[string]any{"repo": in.Repo, "dry_run": in.DryRun, "temp_only": in.TempOnly, "force": in.Force},
+	}
+	rec, err = s.beginMutation(rec)
+	if err != nil {
+		return nil, PruneWorktreesOutput{}, fmt.Errorf("audit intent failed: %v", err)
+	}
+
+	output := PruneWorktreesOutput{
+		DryRun: in.DryRun,
+		Pruned: []WorktreePrunedItem{},
+	}
+
+	for _, repo := range targets {
+		safeRepo, safeErr := idx.SafeMutationPath(repo.Path)
+		if safeErr != nil {
+			continue
+		}
+		wts, listErr := gitListWorktrees(ctx, safeRepo)
+		if listErr != nil {
+			continue
+		}
+		for _, wt := range wts {
+			output.TotalChecked++
+			if wt.Bare || wt.Path == safeRepo || wt.Path == repo.Path {
+				continue
+			}
+
+			_, statErr := statPath(wt.Path)
+			isMissing := statErr != nil
+			isTemp := isTempWorktreePath(wt.Path)
+
+			if in.TempOnly && !isTemp {
+				continue
+			}
+
+			var reason string
+			switch {
+			case isMissing:
+				reason = "stale worktree (path missing on disk)"
+			case isTemp:
+				reason = "temporary worktree path"
+			default:
+				reason = "linked worktree pruned"
+			}
+
+			item := WorktreePrunedItem{
+				Repo:   repo.Name,
+				Path:   sanitize.Untrusted(wt.Path, 1024),
+				Branch: wt.Branch,
+				Reason: reason,
+			}
+
+			if in.DryRun {
+				item.Pruned = false
+				output.Pruned = append(output.Pruned, item)
+				output.PrunedCount++
+			} else {
+				if !isMissing {
+					if rmErr := gitRemoveWorktree(ctx, safeRepo, wt.Path, in.Force); rmErr != nil {
+						item.Reason = fmt.Sprintf("failed to remove: %v", rmErr)
+						item.Pruned = false
+						output.Pruned = append(output.Pruned, item)
+						continue
+					}
+				}
+				_ = gitPruneWorktrees(ctx, safeRepo)
+				item.Pruned = true
+				output.Pruned = append(output.Pruned, item)
+				output.PrunedCount++
+			}
+		}
+	}
+
+	if err := s.completeMutation(rec, "ok", ""); err != nil {
+		return nil, PruneWorktreesOutput{}, fmt.Errorf("audit completion failed: %v", err)
+	}
+	return jsonResult(output), output, nil
 }
 
 // deleteRepoTool returns corral_delete_repo. This is the highest-risk

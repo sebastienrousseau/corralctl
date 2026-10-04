@@ -33,7 +33,7 @@ func TestToolsListExposesTheExpectedSet(t *testing.T) {
 
 	readOnly := []string{
 		"corral_list_repos", "corral_find_repo", "corral_get_repo_metadata",
-		"corral_status_summary", "corral_workspace_index",
+		"corral_status_summary", "corral_workspace_index", "corral_doctor",
 	}
 	for _, name := range readOnly {
 		if tools[name] == nil {
@@ -41,7 +41,10 @@ func TestToolsListExposesTheExpectedSet(t *testing.T) {
 		}
 	}
 	// Write tools must not appear unless explicitly enabled.
-	for _, name := range []string{"corral_sync_repo", "corral_clone_repo", "corral_delete_repo"} {
+	for _, name := range []string{
+		"corral_sync_repo", "corral_clone_repo", "corral_delete_repo",
+		"corral_create_worktree", "corral_release_worktree", "corral_prune_worktrees",
+	} {
 		if tools[name] != nil {
 			t.Errorf("%s must not be registered on a read-only server", name)
 		}
@@ -67,8 +70,12 @@ func TestToolAnnotationsOnTheWire(t *testing.T) {
 		"corral_get_repo_metadata": {true, false},
 		"corral_status_summary":    {true, false},
 		"corral_workspace_index":   {true, false},
+		"corral_doctor":            {true, false},
 		"corral_sync_repo":         {false, false},
 		"corral_clone_repo":        {false, false},
+		"corral_create_worktree":   {false, false},
+		"corral_release_worktree":  {false, false},
+		"corral_prune_worktrees":   {false, false},
 		"corral_delete_repo":       {false, true},
 	}
 	for name, exp := range want {

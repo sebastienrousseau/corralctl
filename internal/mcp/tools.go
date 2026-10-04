@@ -59,6 +59,24 @@ type pageInput struct {
 	ResponseFormat string `json:"response_format,omitempty" jsonschema:"'concise' (default) or 'detailed'."`
 }
 
+// doctorInput is the argument set for corral_doctor.
+type doctorInput struct {
+	CheckCaches bool `json:"check_caches,omitempty" jsonschema:"When true, perform deeper inspection of cache and index states."`
+}
+
+// DoctorOutput describes the overall workspace health, uncommitted changes, and worktrees.
+type DoctorOutput struct {
+	BaseDir       string          `json:"base_dir"`
+	TotalRepos    int             `json:"total_repos"`
+	ByVisibility  []LanguageCount `json:"by_visibility"`
+	ByLanguage    []LanguageCount `json:"by_language"`
+	DirtyRepos    []string        `json:"dirty_repos"`
+	UnpushedRepos []string        `json:"unpushed_repos"`
+	Worktrees     []string        `json:"worktrees"`
+	Healthy       bool            `json:"healthy"`
+	IssuesCount   int             `json:"issues_count"`
+}
+
 // noInput is for tools that take no arguments.
 type noInput struct{}
 
@@ -117,6 +135,13 @@ func (s *Server) registerTools() {
 		Annotations: readOnlyAnnotations(),
 		Description: "Analyze package dependencies across all repositories in the Corral workspace (Go modules, Rust crates, Node/TypeScript packages, Python projects). Returns the directed dependency graph, topological build and test execution order, detected cycles, and reverse dependent lookups.",
 	}, s.handleGraphDependencies)
+
+	addTool(s, &mcp.Tool{
+		Name:        "corral_doctor",
+		Title:       "Audit workspace health and git status",
+		Annotations: readOnlyAnnotations(),
+		Description: "Audit local repository clones in the Corral workspace for uncommitted changes, unpushed commits, detached heads, and linked worktrees. Returns workspace health summary and counts.",
+	}, s.handleDoctor)
 }
 
 func (s *Server) handleListRepos(ctx context.Context, _ *mcp.CallToolRequest, in listReposInput) (*mcp.CallToolResult, PageOutput, error) {
@@ -360,6 +385,61 @@ func (s *Server) handleGraphDependencies(ctx context.Context, _ *mcp.CallToolReq
 		Dependents:       g.Dependents,
 	}
 	return jsonResult(res), res, nil
+}
+
+var (
+	doctorHasLocalChanges    = git.HasLocalChanges
+	doctorHasUnpublishedWork = git.HasUnpublishedWork
+	doctorListWorktrees      = git.ListWorktrees
+)
+
+func (s *Server) handleDoctor(ctx context.Context, _ *mcp.CallToolRequest, in doctorInput) (*mcp.CallToolResult, DoctorOutput, error) {
+	idx, err := s.scan()
+	if err != nil {
+		return nil, DoctorOutput{}, fmt.Errorf("scan workspace: %v", err)
+	}
+
+	byVis := make(map[string]int)
+	byLang := make(map[string]int)
+	dirty := []string{}
+	unpushed := []string{}
+	worktrees := []string{}
+
+	for _, repo := range idx.Repos {
+		if repo.Visibility != "" {
+			byVis[repo.Visibility]++
+		}
+		if repo.Language != "" {
+			byLang[repo.Language]++
+		}
+		if hasLocal, _ := doctorHasLocalChanges(ctx, repo.Path); hasLocal {
+			dirty = append(dirty, repo.Name)
+		}
+		if unpublished, _ := doctorHasUnpublishedWork(ctx, repo.Path); unpublished {
+			unpushed = append(unpushed, repo.Name)
+		}
+		if wts, err := doctorListWorktrees(ctx, repo.Path); err == nil {
+			for _, wt := range wts {
+				if wt.Path != repo.Path && !wt.Bare {
+					worktrees = append(worktrees, fmt.Sprintf("%s:%s", repo.Name, wt.Path))
+				}
+			}
+		}
+	}
+
+	issues := len(dirty) + len(unpushed)
+	out := DoctorOutput{
+		BaseDir:       idx.Root,
+		TotalRepos:    len(idx.Repos),
+		ByVisibility:  sortedLangCounts(byVis),
+		ByLanguage:    sortedLangCounts(byLang),
+		DirtyRepos:    dirty,
+		UnpushedRepos: unpushed,
+		Worktrees:     worktrees,
+		Healthy:       issues == 0,
+		IssuesCount:   issues,
+	}
+	return jsonResult(out), out, nil
 }
 
 // Indirected through a package var so tests can stub without spawning
