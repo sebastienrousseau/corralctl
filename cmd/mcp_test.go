@@ -681,5 +681,3 @@ func TestRunMCPTraceFileFlag(t *testing.T) {
 		t.Errorf("expected trace path in banner, got: %s", banner)
 	}
 }
-
-

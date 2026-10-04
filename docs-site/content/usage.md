@@ -245,3 +245,35 @@ corralctl doctor --json
 Custom rule thresholds can be declared in `.corral.json` at your workspace root
 to configure warnings and limits for unpushed work and stale worktrees.
 
+## Adopting local repositories
+
+`corralctl adopt` discovers untracked or unmanaged repositories on your filesystem,
+optionally relocates them into your structured corral layout, provisions the remote
+repository on your target forge (GitHub, GitLab, Gitea, Forgejo, Codeberg, Bitbucket),
+and links the local repository's origin remote:
+
+```bash
+# Discover untracked repositories and run interactive selection
+corralctl adopt ~/Projects --interactive
+
+# Adopt into your workspace and provision on GitHub
+corralctl adopt ~/Projects --forge github --owner sebastienrousseau --relocate --target-dir ~/Code
+
+# Dry run adoption preview
+corralctl adopt ~/Projects --dry-run
+```
+
+| Option | Default | Description |
+| --- | --- | --- |
+| `--forge` | | Target remote forge (github, gitlab, gitea, forgejo, codeberg, bitbucket) |
+| `--forge-url` | | Base URL for self-hosted instances |
+| `--owner` | | Remote namespace or user |
+| `--visibility` | `private` | Visibility of created remote repo (`private`, `public`) |
+| `--relocate` | off | Relocate local repository into structured corral workspace layout |
+| `--target-dir` | | Destination root directory for relocation |
+| `--protocol` | `https` | Git transfer protocol (`https`, `ssh`) |
+| `--interactive`, `-i` | off | Enable interactive Bubble Tea candidate selection wizard |
+| `--untracked-only` | `true` | Only inspect untracked repositories |
+| `--dry-run` | off | Simulate operations without modifying local disk or remotes |
+| `--output` | `text` | Output format: `text`, `json`, or `ndjson` |
+

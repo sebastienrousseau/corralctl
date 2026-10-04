@@ -478,7 +478,7 @@ func TestHTTPTransportOriginProtection(t *testing.T) {
 	// 1. Rejected origin
 	badOrigin := map[string]string{
 		protocolVersionHeader: statelessRevision,
-		"Origin":                "https://evil.com",
+		"Origin":              "https://evil.com",
 	}
 	status, _, body := do(t, http.MethodPost, url, bodyDiscover, badOrigin)
 	if status != http.StatusForbidden || !strings.Contains(body, "cross-origin request rejected") {
@@ -488,7 +488,7 @@ func TestHTTPTransportOriginProtection(t *testing.T) {
 	// 2. Allowed origin configured explicitly
 	allowedOrigin := map[string]string{
 		protocolVersionHeader: statelessRevision,
-		"Origin":                "https://app.custom.io",
+		"Origin":              "https://app.custom.io",
 	}
 	status, hdr, body := do(t, http.MethodPost, url, bodyDiscover, allowedOrigin)
 	if status != http.StatusOK {
@@ -556,7 +556,7 @@ func TestHTTPTransportBearerAuth(t *testing.T) {
 	// 2. Non-Bearer Authorization header
 	basicAuth := map[string]string{
 		protocolVersionHeader: statelessRevision,
-		"Authorization":         "Basic dXNlcjpwYXNz",
+		"Authorization":       "Basic dXNlcjpwYXNz",
 	}
 	status, _, _ = do(t, http.MethodPost, url, body, basicAuth)
 	if status != http.StatusUnauthorized {
@@ -566,7 +566,7 @@ func TestHTTPTransportBearerAuth(t *testing.T) {
 	// 3. Invalid Bearer token
 	badToken := map[string]string{
 		protocolVersionHeader: statelessRevision,
-		"Authorization":         "Bearer wrong-token",
+		"Authorization":       "Bearer wrong-token",
 	}
 	status, _, _ = do(t, http.MethodPost, url, body, badToken)
 	if status != http.StatusForbidden {
@@ -576,7 +576,7 @@ func TestHTTPTransportBearerAuth(t *testing.T) {
 	// 4. Valid Bearer token
 	goodToken := map[string]string{
 		protocolVersionHeader: statelessRevision,
-		"Authorization":         "Bearer " + secretToken,
+		"Authorization":       "Bearer " + secretToken,
 	}
 	status, _, b = do(t, http.MethodPost, url, body, goodToken)
 	if status != http.StatusOK {
@@ -682,4 +682,3 @@ func TestJSONRPCMethodParsing(t *testing.T) {
 		})
 	}
 }
-

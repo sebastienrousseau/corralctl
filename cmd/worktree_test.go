@@ -553,4 +553,3 @@ func TestWorktreePruneCommand(t *testing.T) {
 		t.Fatalf("expected alpha to be pruned, got: %v", prunedRepos)
 	}
 }
-

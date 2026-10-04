@@ -359,4 +359,3 @@ func TestTraceContext(t *testing.T) {
 		t.Errorf("expected json message with nil ctx, got %q", buf.String())
 	}
 }
-

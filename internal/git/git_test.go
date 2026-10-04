@@ -1040,4 +1040,3 @@ func TestParseBranchListEdgeCases(t *testing.T) {
 		}
 	}
 }
-

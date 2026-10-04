@@ -552,7 +552,3 @@ detached
 		t.Errorf("unexpected single worktree: %+v", single)
 	}
 }
-
-
-
-

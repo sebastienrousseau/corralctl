@@ -325,4 +325,3 @@ func TestGraphVisualization(t *testing.T) {
 		t.Fatalf("sanitizeID = %q, want %q", got, "my_repo_test_123")
 	}
 }
-

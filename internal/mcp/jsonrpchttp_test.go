@@ -260,4 +260,3 @@ func TestReadAndRestoreContextCaching(t *testing.T) {
 		t.Errorf("cached body mismatch: %q vs %q", string(body1), string(body2))
 	}
 }
-

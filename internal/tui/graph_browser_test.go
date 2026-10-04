@@ -200,4 +200,3 @@ type immediateQuitModel struct{}
 func (immediateQuitModel) Init() tea.Cmd                       { return tea.Quit }
 func (immediateQuitModel) Update(tea.Msg) (tea.Model, tea.Cmd) { return immediateQuitModel{}, tea.Quit }
 func (immediateQuitModel) View() string                        { return "" }
-

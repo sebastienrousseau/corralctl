@@ -631,8 +631,8 @@ func TestStartMetricsServerListenError(t *testing.T) {
 type mockErrListener struct{}
 
 func (mockErrListener) Accept() (net.Conn, error) { return nil, errors.New("simulated accept error") }
-func (mockErrListener) Close() error               { return nil }
-func (mockErrListener) Addr() net.Addr             { return &net.TCPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 9099} }
+func (mockErrListener) Close() error              { return nil }
+func (mockErrListener) Addr() net.Addr            { return &net.TCPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 9099} }
 
 func TestStartMetricsServerServeError(t *testing.T) {
 	oldListen := listenMetrics

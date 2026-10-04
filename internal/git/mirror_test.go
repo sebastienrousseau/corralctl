@@ -137,6 +137,31 @@ func TestPushMirrorSemantics(t *testing.T) {
 	}
 }
 
+func TestPushBranch(t *testing.T) {
+	ctx := context.Background()
+	bare := t.TempDir()
+	mirrorGit(t, bare, "init", "-q", "--bare")
+
+	repo := mirrorRepo(t)
+	if err := EnsureRemote(ctx, repo, "origin", bare); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := PushBranch(ctx, repo, "origin", "main", bare, nil); err != nil {
+		t.Fatalf("push branch failed: %v", err)
+	}
+	if got := bareRefs(t, bare)["refs/heads/main"]; got == "" {
+		t.Fatal("main was not pushed to bare remote")
+	}
+
+	if err := PushBranch(ctx, repo, "bad name", "main", bare, nil); err == nil {
+		t.Fatal("expected bad remote name to be refused")
+	}
+	if err := PushBranch(ctx, repo, "origin", "main", "https://%zz", &PushCredential{Username: "u", Secret: "s"}); err == nil {
+		t.Fatal("expected unscopable credential to be refused")
+	}
+}
+
 // TestPushMirrorScopesTheCredential asserts the header reaches git for the
 // push URL's origin only. The push itself goes to a local bare repository,
 // and the environment git received is checked through a wrapper that

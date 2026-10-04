@@ -186,7 +186,7 @@ type EventTracer struct {
 }
 
 var (
-	openTraceFile     = func(name string, flag int, perm os.FileMode) (auditFile, error) {
+	openTraceFile = func(name string, flag int, perm os.FileMode) (auditFile, error) {
 		// #nosec G304 -- destination configured by operator flag or option.
 		return os.OpenFile(name, flag, perm)
 	}
@@ -249,4 +249,3 @@ func (t *EventTracer) Record(ctx context.Context, ev TraceEvent) error {
 	_, err = f.Write(data)
 	return err
 }
-
