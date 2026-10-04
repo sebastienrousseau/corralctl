@@ -31,7 +31,7 @@ func TestOperationalCommandsAcceptTheFlagsTheyConsume(t *testing.T) {
 	}
 	cloneOwned := []string{
 		"concurrency", "protocol", "no-sync", "recurse-submodules",
-		"clone-blobless", "clone-single-branch", "clone-depth",
+		"clone-blobless", "blobless", "clone-single-branch", "clone-depth",
 		"force-sync", "ignore-submodule-failures", "layout", "finder-tags",
 	}
 
