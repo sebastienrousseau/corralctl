@@ -285,12 +285,12 @@ func runWorktreeRemove(ctx context.Context, root, repoName, wtPath string) error
 
 // isTemporaryPath reports whether a worktree path resides in an ephemeral or scratchpad location.
 func isTemporaryPath(p string) bool {
-	clean := filepath.Clean(p)
-	tmp := os.TempDir()
-	if strings.HasPrefix(clean, tmp) || strings.HasPrefix(clean, "/tmp/") || strings.HasPrefix(clean, "/private/tmp/") {
+	slashPath := filepath.ToSlash(filepath.Clean(p))
+	tmp := filepath.ToSlash(os.TempDir())
+	if strings.HasPrefix(slashPath, tmp) || strings.HasPrefix(slashPath, "/tmp/") || strings.HasPrefix(slashPath, "/private/tmp/") {
 		return true
 	}
-	if strings.Contains(clean, filepath.Join(".git", "corral-worktrees")) || strings.Contains(clean, "scratchpad") {
+	if strings.Contains(slashPath, ".git/corral-worktrees") || strings.Contains(slashPath, "scratchpad") {
 		return true
 	}
 	return false
