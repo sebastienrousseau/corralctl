@@ -6,6 +6,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.41] — 2026-10-04
+
+### Added
+
+- **Workspace Health Diagnostics (`corralctl doctor`).** Added diagnostic health
+  doctor checks verifying repository counts by forge and ecosystem, total disk
+  size, linked worktrees, unpushed branches, dirty working trees, and cache
+  integrity with structured text and JSON reports.
+- **Dedicated Metrics Port for Stdio Mode (`--metrics-addr` / `--metrics-port`).**
+  Enabled running a dedicated background Prometheus telemetry loopback listener
+  on `/metrics` during stdio sessions with automatic clean shutdown.
+- **Polyglot Symbol Extraction for JVM & Swift.** Added pure-Go tokenizers in
+  `internal/symbols` for Java (`.java`), Kotlin (`.kt`, `.kts`), and Swift (`.swift`),
+  extracting classes, interfaces, records, enums, functions, methods, and constants
+  without CGO.
+- **Zero-Allocation Method Peeking for Streamable HTTP.** Optimized JSON-RPC method
+  inspection in `transports.go` and `jsonrpchttp.go` with fast pre-checking,
+  eliminating payload unmarshaling on session routing.
+- **Blobless Clone Support (`--blobless`).** Added `--blobless` CLI flag alias for
+  `--clone-blobless` enabling partial clone filter (`blob:none`) across clone and sync.
+
 ## [0.0.40] — 2026-10-03
 
 ### Added
@@ -2539,7 +2560,8 @@ cron-safety overhaul.
   100 % doc coverage.
 - All tests green under `-race -count=1`.
 
-[Unreleased]: https://github.com/sebastienrousseau/corralctl/compare/v0.0.40...HEAD
+[Unreleased]: https://github.com/sebastienrousseau/corralctl/compare/v0.0.41...HEAD
+[0.0.41]: https://github.com/sebastienrousseau/corralctl/compare/v0.0.40...v0.0.41
 [0.0.40]: https://github.com/sebastienrousseau/corralctl/compare/v0.0.39...v0.0.40
 [0.0.39]: https://github.com/sebastienrousseau/corralctl/compare/v0.0.38...v0.0.39
 [0.0.38]: https://github.com/sebastienrousseau/corralctl/compare/v0.0.37...v0.0.38

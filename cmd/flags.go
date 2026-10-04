@@ -107,6 +107,7 @@ func newCloneFlags() *pflag.FlagSet {
 	fs.BoolVar(&noSync, "no-sync", false, "skip pulling latest changes for existing repos")
 	fs.BoolVar(&recurseSubmodules, "recurse-submodules", false, "initialize submodules on clone and sync")
 	fs.BoolVar(&cloneBlobless, "clone-blobless", false, "use partial clone filter=blob:none")
+	fs.BoolVar(&cloneBlobless, "blobless", false, "alias for --clone-blobless (use partial clone filter=blob:none)")
 	fs.BoolVar(&cloneSingleBranch, "clone-single-branch", false, "clone only the default branch")
 	fs.IntVar(&cloneDepth, "clone-depth", 0, "perform shallow clone with the given depth (0 disables)")
 	fs.BoolVar(&forceSync, "force-sync", false, "always run git pull, ignoring the cached pushed_at state")

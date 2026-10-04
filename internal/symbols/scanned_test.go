@@ -594,7 +594,11 @@ func TestScannersSurviveGarbage(t *testing.T) {
 // extractor being written and never wired up — the failure mode is silence,
 // not an error.
 func TestEveryScannedLanguageIsRegistered(t *testing.T) {
-	want := map[string]bool{"go": true, "python": true, "typescript": true, "rust": true}
+	want := map[string]bool{
+		"c": true, "cpp": true, "go": true, "java": true,
+		"javascript": true, "kotlin": true, "protobuf": true,
+		"python": true, "rust": true, "swift": true, "typescript": true,
+	}
 	got := map[string]bool{}
 	for _, l := range Languages() {
 		got[l] = true
@@ -1297,6 +1301,251 @@ func TestProtoExtractor(t *testing.T) {
 	}
 	if protoIsTest("schema/user.proto") {
 		t.Error("schema/user.proto should not be test")
+	}
+}
+
+func TestJavaExtraction(t *testing.T) {
+	src := `package com.example.service;
+
+import java.util.List;
+
+// class FakeClassInComment { }
+@Deprecated
+public abstract class UserService {
+    public static final int MAX_COUNT = 100;
+    private static final String SECRET_KEY = "xyz";
+
+    public UserService() {
+    }
+
+    public synchronized void process(String item) {
+        String msg = "class FakeInString";
+        if (item != null) {
+            return;
+        }
+    }
+
+    protected int calculateTotal() {
+        return 42;
+    }
+
+    private boolean isInternal() {
+        return true;
+    }
+}
+
+public interface DataHandler {
+    void handle();
+}
+
+public enum Status {
+    ACTIVE, INACTIVE
+}
+
+public record Profile(String id, String email) {
+}
+
+@interface Audited {
+}
+`
+	syms := extract(t, "UserService.java", src)
+
+	found(t, syms, "UserService", KindType, 7)
+	found(t, syms, "UserService.MAX_COUNT", KindConst, 8)
+	found(t, syms, "UserService.SECRET_KEY", KindConst, 9)
+	found(t, syms, "UserService.UserService", KindMethod, 11)
+	found(t, syms, "UserService.process", KindMethod, 14)
+	found(t, syms, "UserService.calculateTotal", KindMethod, 21)
+	found(t, syms, "UserService.isInternal", KindMethod, 25)
+	found(t, syms, "DataHandler", KindInterface, 30)
+	found(t, syms, "DataHandler.handle", KindMethod, 31)
+	found(t, syms, "Status", KindType, 34)
+	found(t, syms, "Profile", KindType, 38)
+	found(t, syms, "Audited", KindInterface, 41)
+
+	absent(t, syms, "FakeClassInComment")
+	absent(t, syms, "FakeInString")
+
+	// Test naming conventions
+	if !jvmIsTest("src/test/java/UserServiceTest.java") ||
+		!jvmIsTest("UserServiceTests.java") ||
+		!jvmIsTest("UserServiceTestCase.java") ||
+		!jvmIsTest("testService.java") ||
+		!jvmIsTest("androidTest/Foo.java") ||
+		!jvmIsTest("UserIT.java") {
+		t.Error("expected Java test naming conventions to match")
+	}
+	if jvmIsTest("src/main/java/UserService.java") {
+		t.Error("src/main/java/UserService.java should not be marked as test")
+	}
+}
+
+func TestKotlinExtraction(t *testing.T) {
+	src := `package com.example.app
+
+// class FakeComment
+@Target(AnnotationTarget.CLASS)
+class AccountManager {
+
+    val timeout = 3000
+    var retryCount = 0
+
+    fun authenticate() {
+        val s = "fun fake()"
+    }
+
+    private fun validateCredentials() {
+    }
+
+    companion object {
+        val DEFAULT_PORT = 8080
+    }
+}
+
+interface Authenticator {
+    fun verify()
+}
+
+object NetworkClient {
+    fun send() {}
+}
+
+fun <T> genericHelper() {
+}
+
+fun globalHelper() {
+}
+
+internal fun internalFunc() {
+}
+
+val GLOBAL_CONFIG = "prod"
+`
+	syms := extract(t, "App.kt", src)
+
+	found(t, syms, "AccountManager", KindType, 5)
+	found(t, syms, "AccountManager.timeout", KindConst, 7)
+	found(t, syms, "AccountManager.retryCount", KindVar, 8)
+	found(t, syms, "AccountManager.authenticate", KindMethod, 10)
+	priv := found(t, syms, "AccountManager.validateCredentials", KindMethod, 14)
+	if priv.Exported {
+		t.Error("private Kotlin method should not be exported")
+	}
+	found(t, syms, "AccountManager.Companion", KindType, 17)
+	found(t, syms, "Authenticator", KindInterface, 22)
+	found(t, syms, "Authenticator.verify", KindMethod, 23)
+	found(t, syms, "NetworkClient", KindType, 26)
+	found(t, syms, "NetworkClient.send", KindMethod, 27)
+	found(t, syms, "genericHelper", KindFunc, 30)
+	found(t, syms, "globalHelper", KindFunc, 33)
+	intern := found(t, syms, "internalFunc", KindFunc, 36)
+	if intern.Exported {
+		t.Error("internal Kotlin function should not be exported")
+	}
+	found(t, syms, "GLOBAL_CONFIG", KindConst, 39)
+
+	absent(t, syms, "FakeComment")
+	absent(t, syms, "fake")
+
+	// Test naming conventions
+	if !jvmIsTest("AccountTest.kt") || !jvmIsTest("AccountTests.kt") || !jvmIsTest("account_test.kt") {
+		t.Error("expected Kotlin test naming conventions to match")
+	}
+	if jvmIsTest("Account.kt") {
+		t.Error("Account.kt should not be marked as test")
+	}
+}
+
+func TestSwiftExtraction(t *testing.T) {
+	src := `import Foundation
+
+// struct FakeStruct { }
+@objc
+struct GeoCoordinate {
+
+    let latitude: Double
+    var longitude: Double
+
+    func format() -> String {
+        return "\(latitude), \(longitude)"
+    }
+}
+
+open class NetworkSession {
+    public class func classMethod() {}
+    public func resume() {
+    }
+
+    fileprivate func fileLocal() {
+    }
+
+    private func cancelInternal() {
+    }
+}
+
+actor DataStore {
+    func load() {}
+}
+
+enum ConnectionState {
+    case connected
+    case disconnected
+}
+
+protocol RequestDelegate {
+    func didComplete()
+}
+
+extension GeoCoordinate {
+    func distanceTo() {}
+}
+
+func topLevelFunction() {
+}
+
+let APP_VERSION = "1.0"
+var activeRequests = 0
+`
+	syms := extract(t, "Geo.swift", src)
+
+	found(t, syms, "GeoCoordinate", KindType, 5)
+	found(t, syms, "GeoCoordinate.latitude", KindConst, 7)
+	found(t, syms, "GeoCoordinate.longitude", KindVar, 8)
+	found(t, syms, "GeoCoordinate.format", KindMethod, 10)
+
+	found(t, syms, "NetworkSession", KindType, 15)
+	found(t, syms, "NetworkSession.classMethod", KindMethod, 16)
+	pubFn := found(t, syms, "NetworkSession.resume", KindMethod, 17)
+	if !pubFn.Exported {
+		t.Error("public Swift method should be exported")
+	}
+	filePrivFn := found(t, syms, "NetworkSession.fileLocal", KindMethod, 20)
+	if filePrivFn.Exported {
+		t.Error("fileprivate Swift method should not be exported")
+	}
+	privFn := found(t, syms, "NetworkSession.cancelInternal", KindMethod, 23)
+	if privFn.Exported {
+		t.Error("private Swift method should not be exported")
+	}
+
+	found(t, syms, "DataStore", KindType, 27)
+	found(t, syms, "DataStore.load", KindMethod, 28)
+	found(t, syms, "ConnectionState", KindType, 31)
+	found(t, syms, "RequestDelegate", KindInterface, 36)
+	found(t, syms, "RequestDelegate.didComplete", KindMethod, 37)
+	found(t, syms, "GeoCoordinate.distanceTo", KindMethod, 41)
+	found(t, syms, "topLevelFunction", KindFunc, 44)
+	found(t, syms, "APP_VERSION", KindConst, 47)
+	found(t, syms, "activeRequests", KindVar, 48)
+
+	absent(t, syms, "FakeStruct")
+
+	// Test naming conventions
+	if !swiftIsTest("GeoTests.swift") || !swiftIsTest("GeoTest.swift") || !swiftIsTest("geo_test.swift") || !swiftIsTest("Tests/Geo.swift") {
+		t.Error("expected Swift test naming conventions to match")
+	}
+	if swiftIsTest("Sources/Geo.swift") {
+		t.Error("Sources/Geo.swift should not be marked as test")
 	}
 }
 

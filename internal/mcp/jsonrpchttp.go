@@ -335,6 +335,9 @@ func jsonrpcCall(body []byte) (id json.RawMessage, method string, ok bool) {
 	if len(trimmed) == 0 || trimmed[0] != '{' {
 		return nil, "", false
 	}
+	if !bytes.Contains(trimmed, []byte(`"method"`)) {
+		return nil, "", false
+	}
 	var req struct {
 		ID     json.RawMessage `json:"id"`
 		Method string          `json:"method"`

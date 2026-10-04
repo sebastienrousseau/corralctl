@@ -120,6 +120,7 @@ func resetMCPFlags(t *testing.T) {
 	oldTransport, oldHost, oldPort := mcpTransport, mcpHost, mcpPort
 	oldToken, oldOrigins := mcpToken, mcpAllowedOrigins
 	oldAudit, oldDestruct, oldCache, oldExts := mcpAuditLog, mcpEnableDestructiveMutations, mcpSymbolCache, mcpAllowFileExts
+	oldMetricsAddr, oldMetricsPort := mcpMetricsAddr, mcpMetricsPort
 	mcpRoot = ""
 	mcpEnableMutations = false
 	mcpHTTP = ""
@@ -128,12 +129,14 @@ func resetMCPFlags(t *testing.T) {
 	mcpTransport, mcpHost, mcpPort = string(transportStdio), "127.0.0.1", 8000
 	mcpToken, mcpAllowedOrigins = "", ""
 	mcpAuditLog, mcpEnableDestructiveMutations, mcpSymbolCache, mcpAllowFileExts = "", false, "", ""
+	mcpMetricsAddr, mcpMetricsPort = "", 0
 	t.Cleanup(func() {
 		mcpRoot, mcpEnableMutations = oldRoot, oldMut
 		mcpHTTP, mcpAllowRemote, mcpNoConfirmDeletes = oldHTTP, oldRemote, oldNoConfirm
 		mcpTransport, mcpHost, mcpPort = oldTransport, oldHost, oldPort
 		mcpToken, mcpAllowedOrigins = oldToken, oldOrigins
 		mcpAuditLog, mcpEnableDestructiveMutations, mcpSymbolCache, mcpAllowFileExts = oldAudit, oldDestruct, oldCache, oldExts
+		mcpMetricsAddr, mcpMetricsPort = oldMetricsAddr, oldMetricsPort
 	})
 }
 
@@ -589,3 +592,53 @@ func TestRunMCPReportsAnSSEFailure(t *testing.T) {
 		t.Fatalf("the cause should survive: %v", err)
 	}
 }
+
+func TestRunMCPMetricsFlags(t *testing.T) {
+	resetMCPFlags(t)
+	dir := t.TempDir()
+	mcpRoot = dir
+	stub := &stubMCPServer{root: dir}
+
+	// 1. Explicit --metrics-addr
+	mcpMetricsAddr = "127.0.0.1:9095"
+	captured := withStubServer(t, stub, nil)
+	if err := runMCP(nil, nil); err != nil {
+		t.Fatalf("unexpected error with --metrics-addr: %v", err)
+	}
+	if captured.MetricsAddr != "127.0.0.1:9095" {
+		t.Errorf("expected MetricsAddr 127.0.0.1:9095, got %q", captured.MetricsAddr)
+	}
+
+	// 2. Synthesized from --metrics-port
+	resetMCPFlags(t)
+	mcpRoot = dir
+	mcpMetricsPort = 9096
+	captured = withStubServer(t, stub, nil)
+	if err := runMCP(nil, nil); err != nil {
+		t.Fatalf("unexpected error with --metrics-port: %v", err)
+	}
+	if captured.MetricsAddr != "127.0.0.1:9096" {
+		t.Errorf("expected MetricsAddr 127.0.0.1:9096, got %q", captured.MetricsAddr)
+	}
+
+	// 3. Non-loopback metrics address rejected without allow-remote
+	resetMCPFlags(t)
+	mcpRoot = dir
+	mcpMetricsAddr = "192.168.1.50:9097"
+	withStubServer(t, stub, nil)
+	err := runMCP(nil, nil)
+	if err == nil || !strings.Contains(err.Error(), "must be on loopback") {
+		t.Fatalf("expected loopback refusal for metrics addr, got: %v", err)
+	}
+
+	// 4. Non-loopback permitted with allow-remote
+	mcpAllowRemote = true
+	captured = withStubServer(t, stub, nil)
+	if err := runMCP(nil, nil); err != nil {
+		t.Fatalf("expected allow-remote to permit routable metrics addr: %v", err)
+	}
+	if captured.MetricsAddr != "192.168.1.50:9097" {
+		t.Errorf("expected MetricsAddr 192.168.1.50:9097, got %q", captured.MetricsAddr)
+	}
+}
+

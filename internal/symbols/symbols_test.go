@@ -239,7 +239,12 @@ func TestExtractorForAndLanguages(t *testing.T) {
 	if _, ok := ExtractorFor("script.rb"); ok {
 		t.Error("an unindexed extension should have no extractor")
 	}
-	want := []string{"c", "cpp", "go", "javascript", "protobuf", "python", "rust", "typescript"}
+	for _, extFile := range []string{"App.java", "Main.kt", "Build.kts", "Item.swift"} {
+		if _, ok := ExtractorFor(extFile); !ok {
+			t.Errorf("%s should have an extractor", extFile)
+		}
+	}
+	want := []string{"c", "cpp", "go", "java", "javascript", "kotlin", "protobuf", "python", "rust", "swift", "typescript"}
 	got := Languages()
 	if len(got) != len(want) {
 		t.Fatalf("Languages = %v, want %v", got, want)

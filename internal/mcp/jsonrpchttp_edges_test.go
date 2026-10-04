@@ -199,6 +199,8 @@ func TestJSONRPCCallParsing(t *testing.T) {
 		{"empty", ``, false},
 		{"not json", `hello`, false},
 		{"no method", `{"jsonrpc":"2.0","id":1}`, false},
+		{"empty method", `{"method":""}`, false},
+		{"malformed with method", `{"method":`, false},
 		{"malformed object", `{"jsonrpc":`, false},
 		{"single call", `{"jsonrpc":"2.0","id":1,"method":"x"}`, true},
 	} {

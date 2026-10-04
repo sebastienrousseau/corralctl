@@ -32,6 +32,8 @@ var (
 	mcpToken                      string
 	mcpAllowedOrigins             string
 	mcpWatch                      bool
+	mcpMetricsAddr                string
+	mcpMetricsPort                int
 )
 
 // mcpCmd registers the `corralctl mcp` subcommand. It runs a Model
@@ -200,6 +202,14 @@ func runMCP(cmd *cobra.Command, args []string) error {
 		token = os.Getenv("CORRAL_MCP_TOKEN")
 	}
 
+	metricsAddr := mcpMetricsAddr
+	if mcpMetricsPort > 0 && metricsAddr == "" {
+		metricsAddr = net.JoinHostPort("127.0.0.1", strconv.Itoa(mcpMetricsPort))
+	}
+	if metricsAddr != "" && !mcpAllowRemote && !loopbackOnly(metricsAddr) {
+		return fmt.Errorf("metrics address %s must be on loopback (use --allow-remote to override)", metricsAddr)
+	}
+
 	srv, err := mcpNewServer(mcp.ServerOptions{
 		Root:                       abs,
 		Version:                    Version,
@@ -212,6 +222,7 @@ func runMCP(cmd *cobra.Command, args []string) error {
 		AuthToken:                  token,
 		AllowedOrigins:             parseCSV(mcpAllowedOrigins),
 		WatchWorkspace:             mcpWatch,
+		MetricsAddr:                metricsAddr,
 	})
 	if err != nil {
 		return fmt.Errorf("constructing mcp server: %w", err)
@@ -226,6 +237,11 @@ func runMCP(cmd *cobra.Command, args []string) error {
 	}
 	fmt.Fprintf(os.Stderr, "corral-mcp %s starting; root=%s mutations=%t destructive=%t audit=%s\n",
 		version.Display(Version), srv.Root(), srv.MutationsEnabled(), mcpEnableDestructiveMutations, auditNote)
+
+	if metricsAddr != "" {
+		fmt.Fprintf(os.Stderr, "corral-mcp: metrics listener running on http://%s%s\n",
+			metricsAddr, mcp.MetricsEndpoint)
+	}
 
 	if mcpHTTP != "" {
 		fmt.Fprintf(os.Stderr, "corral-mcp: --http is deprecated; use --transport streamable-http --host HOST --port PORT\n")
@@ -343,5 +359,9 @@ func init() {
 		"comma-separated list of origins allowed for HTTP and SSE requests")
 	mcpCmd.Flags().BoolVar(&mcpWatch, "watch", true,
 		"watch the workspace for filesystem changes and invalidate the cache in real time")
+	mcpCmd.Flags().StringVar(&mcpMetricsAddr, "metrics-addr", "",
+		"host:port for dedicated Prometheus telemetry listener (e.g. 127.0.0.1:9090)")
+	mcpCmd.Flags().IntVar(&mcpMetricsPort, "metrics-port", 0,
+		"TCP port for dedicated Prometheus telemetry listener on 127.0.0.1")
 	rootCmd.AddCommand(mcpCmd)
 }
