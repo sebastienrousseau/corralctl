@@ -4,11 +4,13 @@
 package tui
 
 import (
+	"context"
 	"errors"
 	"strings"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/sebastienrousseau/corralctl/internal/git"
 	"github.com/sebastienrousseau/corralctl/internal/graph"
 )
 
@@ -125,6 +127,38 @@ func TestGraphBrowserModelView(t *testing.T) {
 	v1 := m.View()
 	if !strings.Contains(v1, "repo-b") || !strings.Contains(v1, "none") || !strings.Contains(v1, "repo-a") {
 		t.Fatalf("unexpected view for cursor 1:\n%s", v1)
+	}
+
+	// 4. Toggle worktrees with 'w'
+	res, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'w'}})
+	m = res.(GraphBrowserModel)
+	if !m.showWorktrees {
+		t.Fatal("expected showWorktrees to be true after pressing 'w'")
+	}
+
+	origList := listWorktreesOp
+	defer func() { listWorktreesOp = origList }()
+
+	// Worktrees present (with branch, with bare, and with detached)
+	listWorktreesOp = func(ctx context.Context, targetDir string) ([]git.WorktreeInfo, error) {
+		return []git.WorktreeInfo{
+			{Path: "/b/feat", Branch: "feat"},
+			{Path: "/b/bare", Bare: true},
+			{Path: "/b/detached", Branch: ""},
+		}, nil
+	}
+	vw := m.View()
+	if !strings.Contains(vw, "Linked Worktrees") || !strings.Contains(vw, "feat") || !strings.Contains(vw, "(bare)") || !strings.Contains(vw, "(detached)") {
+		t.Fatalf("unexpected worktree view:\n%s", vw)
+	}
+
+	// Worktrees error / none
+	listWorktreesOp = func(ctx context.Context, targetDir string) ([]git.WorktreeInfo, error) {
+		return nil, errors.New("git error")
+	}
+	vErr := m.View()
+	if !strings.Contains(vErr, "none") {
+		t.Fatalf("expected none when list fails:\n%s", vErr)
 	}
 }
 

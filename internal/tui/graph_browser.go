@@ -4,19 +4,24 @@
 package tui
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/sebastienrousseau/corralctl/internal/git"
 	"github.com/sebastienrousseau/corralctl/internal/graph"
 )
 
+var listWorktreesOp = git.ListWorktrees
+
 // GraphBrowserModel manages the interactive dependency graph viewer state.
 type GraphBrowserModel struct {
-	graph    *graph.Graph
-	cursor   int
-	quitting bool
+	graph         *graph.Graph
+	cursor        int
+	quitting      bool
+	showWorktrees bool
 }
 
 // NewGraphBrowserModel creates a new model for browsing a dependency graph.
@@ -47,6 +52,8 @@ func (m GraphBrowserModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.graph != nil && m.cursor < len(m.graph.Nodes)-1 {
 				m.cursor++
 			}
+		case "w":
+			m.showWorktrees = !m.showWorktrees
 		}
 	}
 	return m, nil
@@ -67,7 +74,7 @@ func (m GraphBrowserModel) View() string {
 	dimStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#888888"))
 	boxStyle := lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).Padding(0, 1).BorderForeground(lipgloss.Color("#0288D1"))
 
-	b.WriteString(titleStyle.Render("corralctl graph explorer") + "  " + dimStyle.Render("(navigate: ↑/↓/j/k, quit: q)") + "\n\n")
+	b.WriteString(titleStyle.Render("corralctl graph explorer") + "  " + dimStyle.Render("(navigate: ↑/↓/j/k, toggle worktrees: w, quit: q)") + "\n\n")
 
 	curr := m.graph.Nodes[m.cursor]
 
@@ -94,22 +101,43 @@ func (m GraphBrowserModel) View() string {
 	if curr.PackageName != "" {
 		fmt.Fprintf(&right, "Package:      %s\n", curr.PackageName)
 	}
-	right.WriteString("\nDependencies:\n")
-	if len(curr.Dependencies) == 0 {
-		right.WriteString("  none\n")
-	} else {
-		for _, d := range curr.Dependencies {
-			fmt.Fprintf(&right, "  - %s\n", d)
-		}
-	}
 
-	dependents := m.graph.Dependents[curr.Name]
-	right.WriteString("\nDependents:\n")
-	if len(dependents) == 0 {
-		right.WriteString("  none\n")
+	if m.showWorktrees {
+		right.WriteString("\nLinked Worktrees:\n")
+		wts, err := listWorktreesOp(context.Background(), curr.Path)
+		if err != nil || len(wts) == 0 {
+			right.WriteString("  none\n")
+		} else {
+			for _, wt := range wts {
+				branch := wt.Branch
+				if branch == "" {
+					if wt.Bare {
+						branch = "(bare)"
+					} else {
+						branch = "(detached)"
+					}
+				}
+				fmt.Fprintf(&right, "  - %s [%s]\n", branch, wt.Path)
+			}
+		}
 	} else {
-		for _, dep := range dependents {
-			fmt.Fprintf(&right, "  - %s\n", dep)
+		right.WriteString("\nDependencies:\n")
+		if len(curr.Dependencies) == 0 {
+			right.WriteString("  none\n")
+		} else {
+			for _, d := range curr.Dependencies {
+				fmt.Fprintf(&right, "  - %s\n", d)
+			}
+		}
+
+		dependents := m.graph.Dependents[curr.Name]
+		right.WriteString("\nDependents:\n")
+		if len(dependents) == 0 {
+			right.WriteString("  none\n")
+		} else {
+			for _, dep := range dependents {
+				fmt.Fprintf(&right, "  - %s\n", dep)
+			}
 		}
 	}
 
