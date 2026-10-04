@@ -656,3 +656,30 @@ func TestSSETransportAuthAndOrigin(t *testing.T) {
 	}
 }
 
+func TestJSONRPCMethodParsing(t *testing.T) {
+	cases := []struct {
+		name string
+		body string
+		want string
+	}{
+		{"empty", "", ""},
+		{"not an object", `[1, 2, 3]`, ""},
+		{"object without method", `{"id": 1, "params": {}}`, ""},
+		{"object with method in other key name", `{"other_method": 1}`, ""},
+		{"lone brace", `{`, ""},
+		{"unclosed method key", `{"method`, ""},
+		{"method first", `{"method": "initialize", "id": 1}`, "initialize"},
+		{"method after other keys", `{"jsonrpc": "2.0", "id": 1, "method": "ping"}`, "ping"},
+		{"method truncated", `{"method":`, ""},
+		{"malformed before method", `{"bad": {bad, "method": "ping"}`, ""},
+		{"unparsable object", `{invalid-json}`, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := jsonrpcMethod([]byte(tc.body)); got != tc.want {
+				t.Errorf("jsonrpcMethod(%q) = %q, want %q", tc.body, got, tc.want)
+			}
+		})
+	}
+}
+

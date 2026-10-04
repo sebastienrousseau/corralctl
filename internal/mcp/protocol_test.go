@@ -4,12 +4,17 @@
 package mcp
 
 import (
+	"context"
+	"errors"
 	"io/fs"
+	"net"
+	"net/http"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -556,6 +561,88 @@ func TestServeStdioDelegates(t *testing.T) {
 	}
 	if !called {
 		t.Error("ServeStdio should delegate to the stdio runner")
+	}
+}
+
+func TestServeStdioWithMetricsAddr(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	addr := ln.Addr().String()
+	_ = ln.Close()
+
+	called := false
+	stubSeam(t, &serveStdio, func(*mcp.Server) error {
+		called = true
+		resp, err := http.Get("http://" + addr + MetricsEndpoint)
+		if err != nil {
+			t.Errorf("metrics request failed: %v", err)
+			return nil
+		}
+		defer func() { _ = resp.Body.Close() }()
+		if resp.StatusCode != http.StatusOK {
+			t.Errorf("metrics status = %d, want %d", resp.StatusCode, http.StatusOK)
+		}
+		return nil
+	})
+
+	srv, err := NewServer(ServerOptions{
+		Root:        t.TempDir(),
+		MetricsAddr: addr,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := srv.ServeStdio(); err != nil {
+		t.Fatalf("ServeStdio: %v", err)
+	}
+	if !called {
+		t.Error("expected serveStdio to be called")
+	}
+}
+
+func TestStartMetricsServerListenError(t *testing.T) {
+	oldListen := listenMetrics
+	defer func() { listenMetrics = oldListen }()
+	listenMetrics = func(network, address string) (net.Listener, error) {
+		return nil, errors.New("simulated listen error")
+	}
+
+	srv, err := NewServer(ServerOptions{Root: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := srv.startMetricsServer(context.Background(), "127.0.0.1:9099")
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for startMetricsServer to return on listen error")
+	}
+}
+
+type mockErrListener struct{}
+
+func (mockErrListener) Accept() (net.Conn, error) { return nil, errors.New("simulated accept error") }
+func (mockErrListener) Close() error               { return nil }
+func (mockErrListener) Addr() net.Addr             { return &net.TCPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 9099} }
+
+func TestStartMetricsServerServeError(t *testing.T) {
+	oldListen := listenMetrics
+	defer func() { listenMetrics = oldListen }()
+	listenMetrics = func(network, address string) (net.Listener, error) {
+		return mockErrListener{}, nil
+	}
+
+	srv, err := NewServer(ServerOptions{Root: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := srv.startMetricsServer(context.Background(), "127.0.0.1:9099")
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for startMetricsServer to return on serve error")
 	}
 }
 

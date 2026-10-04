@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"strings"
 	"sync"
@@ -15,6 +16,7 @@ import (
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/sebastienrousseau/corralctl/internal/diag"
 	"github.com/sebastienrousseau/corralctl/internal/symbols"
 )
 
@@ -85,6 +87,10 @@ type ServerOptions struct {
 	// the workspace root and structural directories to invalidate the workspace
 	// scan cache dynamically in real time upon filesystem changes.
 	WatchWorkspace bool
+	// MetricsAddr, when non-empty, runs a dedicated HTTP listener serving Prometheus
+	// telemetry on addr (e.g. 127.0.0.1:9090) even when the MCP server is operating
+	// over stdio.
+	MetricsAddr string
 }
 
 // Server wraps an mcp-go MCPServer with the corral-specific configuration.
@@ -316,11 +322,68 @@ func (s *Server) AuditLogPath() string {
 	return s.auditor.Path()
 }
 
+// listenMetrics is a package seam allowing tests to mock network listener creation.
+var listenMetrics = net.Listen
+
+// startMetricsServer starts a dedicated HTTP listener serving Prometheus
+// telemetry on addr, protected with auth if AuthToken is set.
+// It returns a channel that is closed when the server shuts down.
+func (s *Server) startMetricsServer(ctx context.Context, addr string) <-chan struct{} {
+	done := make(chan struct{})
+	mux := http.NewServeMux()
+	mux.Handle(MetricsEndpoint, s.metricsHandler())
+	handler := s.wrapAuth(mux)
+
+	srv := &http.Server{
+		Addr:              addr,
+		Handler:           handler,
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      30 * time.Second,
+		IdleTimeout:       time.Minute,
+	}
+
+	ln, err := listenMetrics("tcp", addr)
+	if err != nil {
+		diag.Warnf("corral-mcp: failed to listen on metrics addr %s: %v", addr, err)
+		close(done)
+		return done
+	}
+
+	go func() {
+		defer close(done)
+		stopWatch := make(chan struct{})
+		defer close(stopWatch)
+		go func() {
+			select {
+			case <-ctx.Done():
+				shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer cancel()
+				_ = srv.Shutdown(shutdownCtx)
+			case <-stopWatch:
+				return
+			}
+		}()
+		if err := srv.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			diag.Warnf("corral-mcp: metrics server terminated: %v", err)
+		}
+	}()
+
+	return done
+}
+
 // ServeStdio runs the server on the stdio transport (the MCP standard
 // for local servers). Blocks until stdin closes or the server errors.
 // Stdout is reserved for the JSON-RPC protocol stream — any debug logging
 // the cmd layer wants to emit must go to stderr.
 func (s *Server) ServeStdio() error {
+	var metricsDone <-chan struct{}
+	var stopMetrics context.CancelFunc
+	if s.opts.MetricsAddr != "" {
+		var metricsCtx context.Context
+		metricsCtx, stopMetrics = context.WithCancel(context.Background())
+		metricsDone = s.startMetricsServer(metricsCtx, s.opts.MetricsAddr)
+	}
 	if s.opts.WatchWorkspace {
 		ctx, cancel := context.WithCancel(context.Background())
 		watchDone := s.startWorkspaceWatcher(ctx)
@@ -329,6 +392,12 @@ func (s *Server) ServeStdio() error {
 			<-watchDone
 		}()
 	}
+	defer func() {
+		if stopMetrics != nil {
+			stopMetrics()
+			<-metricsDone
+		}
+	}()
 	return serveStdio(s.mcp)
 }
 

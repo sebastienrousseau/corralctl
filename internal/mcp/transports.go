@@ -127,6 +127,9 @@ func jsonrpcMethod(body []byte) string {
 	if len(trimmed) == 0 || trimmed[0] != '{' {
 		return ""
 	}
+	if !bytes.Contains(trimmed, []byte(`"method"`)) {
+		return ""
+	}
 	var req struct {
 		Method string `json:"method"`
 	}
