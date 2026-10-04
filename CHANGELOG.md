@@ -6,6 +6,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.44] — 2026-10-04
+
+### Added
+
+- **Repository Adoption & Discovery Engine (`corralctl adopt`).**
+  Added `adopt` command and discovery engine to scan local filesystem trees for
+  existing Git repositories and adopt them into the managed corralctl hierarchy
+  by forge, owner, and ecosystem, with options for target path, `--dry-run`,
+  and structured output.
+- **Interactive TUI Adoption Wizard (`corralctl adopt --interactive`).**
+  Introduced an interactive Bubble Tea terminal wizard for discovering
+  unmanaged repositories, resolving forge assignments, previewing destination
+  paths, and adopting repositories with live progress feedback.
+- **MCP Discovery and Adoption Tools (`corral_discover_repos` & `corral_adopt_repos`).**
+  Extended the Model Context Protocol surface to expose discovery and adoption
+  capabilities directly to AI coding agents under mutation policy controls.
+- **Discovery and Graph Performance Benchmarks.**
+  Added comprehensive benchmark suites in `internal/discover` and
+  `internal/graph` to track discovery throughput and graph traversal latency.
+
 ## [0.0.43] — 2026-10-04
 
 ### Added
@@ -2605,7 +2625,8 @@ cron-safety overhaul.
   100 % doc coverage.
 - All tests green under `-race -count=1`.
 
-[Unreleased]: https://github.com/sebastienrousseau/corralctl/compare/v0.0.43...HEAD
+[Unreleased]: https://github.com/sebastienrousseau/corralctl/compare/v0.0.44...HEAD
+[0.0.44]: https://github.com/sebastienrousseau/corralctl/compare/v0.0.43...v0.0.44
 [0.0.43]: https://github.com/sebastienrousseau/corralctl/compare/v0.0.42...v0.0.43
 [0.0.42]: https://github.com/sebastienrousseau/corralctl/compare/v0.0.41...v0.0.42
 [0.0.41]: https://github.com/sebastienrousseau/corralctl/compare/v0.0.40...v0.0.41

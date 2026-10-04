@@ -1548,4 +1548,3 @@ var activeRequests = 0
 		t.Error("Sources/Geo.swift should not be marked as test")
 	}
 }
-

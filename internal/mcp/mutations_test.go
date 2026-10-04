@@ -1035,4 +1035,3 @@ func TestWorktreeAuditAndFilesystemFailures(t *testing.T) {
 		}
 	})
 }
-

@@ -51,7 +51,7 @@ var mcpCmd = &cobra.Command{
 
 The server exposes the local Corral-organised workspace (cloned
 repositories under the configured base directory) to AI coding agents
-through ten read-only tools and four resources. No network calls are
+through eleven read-only tools and four resources. No network calls are
 made and no forge API is contacted.
 
 Tools:
@@ -65,6 +65,7 @@ Tools:
   corral_workspace_index    - full workspace index as JSON
   corral_graph_dependencies - analyze cross-repo package dependencies
   corral_doctor             - audit workspace health and git status
+  corral_discover_repos     - find unmanaged and untracked repositories
 
 corral_find_symbol is the one a single-repository code index cannot
 offer: it resolves a function, method, type, interface, constant or
@@ -80,6 +81,7 @@ never match.
 Write tools, registered only with --enable-mutations, and audited:
   corral_sync_repo         - git pull one clone
   corral_clone_repo        - clone into the workspace
+  corral_adopt_repo        - adopt untracked repository into workspace
   corral_create_worktree   - create isolated worktree in .git/corral-worktrees
   corral_release_worktree  - remove isolated worktree after branch work
   corral_prune_worktrees   - prune stale or temporary agent worktrees

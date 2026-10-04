@@ -359,8 +359,8 @@ func TestDoctorWorktreePruningAndStale(t *testing.T) {
 
 	doctorListWorktrees = func(ctx context.Context, targetDir string) ([]gitutil.WorktreeInfo, error) {
 		return []gitutil.WorktreeInfo{
-			{Path: filepath.Join(dir, "alpha"), Bare: false}, // main repo
-			{Path: filepath.Join(dir, "missing-wt"), Branch: ""}, // missing path, empty branch
+			{Path: filepath.Join(dir, "alpha"), Bare: false},       // main repo
+			{Path: filepath.Join(dir, "missing-wt"), Branch: ""},   // missing path, empty branch
 			{Path: "/tmp/scratchpad/temp-wt", Branch: "feat/temp"}, // temp path
 		}, nil
 	}
@@ -606,5 +606,3 @@ func TestDoctorCustomRulesAndViolations(t *testing.T) {
 	}
 	_ = zero
 }
-
-

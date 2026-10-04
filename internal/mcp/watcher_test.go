@@ -66,7 +66,7 @@ func (m *mockWatcher) closeErrors() {
 }
 
 func (m *mockWatcher) Events() <-chan fsnotify.Event { return m.events }
-func (m *mockWatcher) Errors() <-chan error { return m.errors }
+func (m *mockWatcher) Errors() <-chan error          { return m.errors }
 
 func TestWorkspaceWatcherInvalidatesScanCache(t *testing.T) {
 	base := t.TempDir()

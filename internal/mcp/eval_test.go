@@ -211,6 +211,12 @@ func evalScenarios() []scenario {
 			args:     map[string]any{},
 			wants:    []string{"healthy", "total_repos"},
 		},
+		{
+			question: "Are there any untracked or unmanaged code repositories on my machine?",
+			tool:     "corral_discover_repos",
+			args:     map[string]any{},
+			wants:    []string{"base_dir", "candidates"},
+		},
 	}
 }
 

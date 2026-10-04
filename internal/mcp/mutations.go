@@ -34,7 +34,10 @@ import (
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/sebastienrousseau/corralctl/internal/engine"
+	"github.com/sebastienrousseau/corralctl/internal/forge"
 	"github.com/sebastienrousseau/corralctl/internal/git"
+	"github.com/sebastienrousseau/corralctl/internal/github"
 	"github.com/sebastienrousseau/corralctl/internal/sanitize"
 )
 
@@ -56,6 +59,10 @@ var (
 	mkdirMutation      = os.MkdirAll
 	removeMutation     = os.RemoveAll
 	markSynced         = markStateSynced
+	adoptExecFunc      = engine.ExecuteAdoption
+	adoptForgeResolve  = forge.Resolve
+	adoptForgeAsTarget = forge.AsTarget
+	adoptForgeToken    = engine.ForgeToken
 )
 
 var mutationSequence atomic.Uint64
@@ -145,6 +152,18 @@ func (s *Server) registerMutationTools() {
 		},
 		Description: "Prune stale, detached, or temporary agent worktrees across workspace repositories. Requires --enable-mutations. Skips main repository worktrees and refuses removal of modified worktrees unless force=true is passed.",
 	}, s.handlePruneWorktrees)
+
+	addTool(s, &mcp.Tool{
+		Name:  "corral_adopt_repo",
+		Title: "Adopt an untracked repository into the workspace",
+		Annotations: &mcp.ToolAnnotations{
+			ReadOnlyHint:    false,
+			DestructiveHint: &f,
+			IdempotentHint:  false,
+			OpenWorldHint:   &t,
+		},
+		Description: "Adopt a local repository into the Corral workspace, optionally relocating it into layout taxonomy, provisioning a matching remote repository on a forge (GitHub, GitLab, Gitea, Bitbucket), and linking the remote origin. Requires --enable-mutations.",
+	}, s.handleAdoptRepo)
 }
 
 // registerDestructiveTools attaches corral_delete_repo. Kept in its
@@ -825,4 +844,99 @@ var randRead = rand.Read
 // under a name they would never think to look for.
 var unstageRemoval = func(staged, original string) error {
 	return os.Rename(staged, original)
+}
+
+// adoptRepoInput is the argument set for corral_adopt_repo.
+type adoptRepoInput struct {
+	LocalPath     string `json:"local_path" jsonschema:"Filesystem path of the repository to adopt."`
+	NewTargetDir  string `json:"new_target_dir,omitempty" jsonschema:"Optional destination directory to relocate the repository into."`
+	Forge         string `json:"forge,omitempty" jsonschema:"Optional destination forge (e.g. github, gitlab)."`
+	ForgeURL      string `json:"forge_url,omitempty" jsonschema:"Custom instance URL for self-hosted forges."`
+	Owner         string `json:"owner,omitempty" jsonschema:"Owner or namespace under which the remote repository is created."`
+	RepoName      string `json:"repo_name" jsonschema:"Name of the repository."`
+	Private       bool   `json:"private,omitempty" jsonschema:"Repository visibility: true for private, false for public."`
+	Protocol      string `json:"protocol,omitempty" jsonschema:"Transport protocol: 'https' (default) or 'ssh'."`
+	RelocateLocal bool   `json:"relocate_local,omitempty" jsonschema:"When true, move repository into new_target_dir."`
+	DryRun        bool   `json:"dry_run,omitempty" jsonschema:"When true, simulate without disk or network mutations."`
+}
+
+func (s *Server) handleAdoptRepo(ctx context.Context, _ *mcp.CallToolRequest, input adoptRepoInput) (*mcp.CallToolResult, MutationOutput, error) {
+	if strings.TrimSpace(input.RepoName) == "" {
+		return nil, MutationOutput{}, fmt.Errorf("repo_name must not be empty")
+	}
+	idx, err := s.scan()
+	if err != nil {
+		return nil, MutationOutput{}, fmt.Errorf("scan workspace: %v", err)
+	}
+	cleanLocal, err := idx.SafeMutationPath(input.LocalPath)
+	if err != nil {
+		return nil, MutationOutput{}, fmt.Errorf("invalid local_path: %w", err)
+	}
+	cleanTarget := cleanLocal
+	if input.RelocateLocal && input.NewTargetDir != "" {
+		targetResolved, err := idx.SafeMutationPath(input.NewTargetDir)
+		if err != nil {
+			return nil, MutationOutput{}, fmt.Errorf("invalid new_target_dir: %w", err)
+		}
+		cleanTarget = targetResolved
+	}
+
+	opts := engine.AdoptOptions{
+		LocalPath:     cleanLocal,
+		NewTargetDir:  cleanTarget,
+		Owner:         input.Owner,
+		RepoName:      input.RepoName,
+		Private:       input.Private,
+		Protocol:      input.Protocol,
+		RelocateLocal: input.RelocateLocal,
+		DryRun:        input.DryRun,
+	}
+
+	if input.Forge != "" {
+		f, err := adoptForgeResolve(input.Forge, input.ForgeURL)
+		if err != nil {
+			return nil, MutationOutput{}, fmt.Errorf("resolving forge: %w", err)
+		}
+		tf, ok := adoptForgeAsTarget(f)
+		if !ok {
+			return nil, MutationOutput{}, fmt.Errorf("forge %s cannot receive repositories", input.Forge)
+		}
+		opts.Forge = tf
+		tok := adoptForgeToken(ctx, f.Name(), github.AuthModeAuto)
+		opts.ForgeOptions = forge.TargetOptions{
+			Token:   tok,
+			BaseURL: input.ForgeURL,
+		}
+	}
+
+	rec := AuditRecord{
+		Tool:   "corral_adopt_repo",
+		Target: cleanTarget,
+		Args: map[string]any{
+			"repo_name":  input.RepoName,
+			"local_path": cleanLocal,
+		},
+	}
+	rec, err = s.beginMutation(rec)
+	if err != nil {
+		return nil, MutationOutput{}, fmt.Errorf("audit intent failed: %v", err)
+	}
+
+	res, err := adoptExecFunc(ctx, opts)
+	if err != nil {
+		_ = s.completeMutation(rec, "error", err.Error())
+		return nil, MutationOutput{}, fmt.Errorf("adoption failed: %w", err)
+	}
+
+	if err := s.completeMutation(rec, "ok", ""); err != nil {
+		return nil, MutationOutput{}, fmt.Errorf("audit completion failed: %v", err)
+	}
+	s.invalidateScanCache()
+	out := MutationOutput{
+		Tool:   "corral_adopt_repo",
+		Repo:   res.RepoName,
+		Result: res.Action,
+		Target: res.FinalPath,
+	}
+	return jsonResult(out), out, nil
 }

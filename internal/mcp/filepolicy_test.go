@@ -230,4 +230,3 @@ func TestExportedFileAllowed(t *testing.T) {
 		t.Error("expected .env to be refused")
 	}
 }
-

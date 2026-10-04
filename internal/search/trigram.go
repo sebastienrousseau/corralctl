@@ -382,20 +382,20 @@ func (ix *Index) Candidates(m *Matcher) ([]string, bool) {
 		}
 	}
 
-// candidateScratch holds reusable buffers for posting list intersection and merging.
-type candidateScratch struct {
-	bufA []uint32
-	bufB []uint32
-}
+	// candidateScratch holds reusable buffers for posting list intersection and merging.
+	type candidateScratch struct {
+		bufA []uint32
+		bufB []uint32
+	}
 
-var candidateScratchPool = sync.Pool{
-	New: func() any {
-		return &candidateScratch{
-			bufA: make([]uint32, 0, 128),
-			bufB: make([]uint32, 0, 128),
-		}
-	},
-}
+	var candidateScratchPool = sync.Pool{
+		New: func() any {
+			return &candidateScratch{
+				bufA: make([]uint32, 0, 128),
+				bufB: make([]uint32, 0, 128),
+			}
+		},
+	}
 
 	// Every trigram of the pattern must be present in a matching file, so
 	// the answer is the intersection of their posting lists. Folding both

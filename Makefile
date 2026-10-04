@@ -38,7 +38,7 @@ LDFLAGS = -s -w \
 
 .PHONY: all build docs install uninstall install-smoke test test-race vet lint \
         clean format sbom-check sbom-fix example-check doc-check spdx-check pkg-check eval staticcheck race-hard bench claims-check \
-        docs-lint help demo
+        docs-lint help demo vuln-check check
 
 VHS ?= $(shell which vhs 2>/dev/null || echo /opt/homebrew/bin/vhs)
 
@@ -47,7 +47,10 @@ demo: build
 	$(VHS) .github/demo.tape
 
 
-all: format vet staticcheck spdx-check sbom-check pkg-check claims-check example-check test test-race build
+## check: run all static analysis, security, documentation, and integrity gates
+check: format vet staticcheck vuln-check spdx-check doc-check sbom-check pkg-check claims-check example-check test-race
+
+all: check build
 
 ## build: compile the binary with version metadata
 build:
@@ -142,6 +145,14 @@ vet:
 # locally and fails in CI, which has now happened twice.
 staticcheck:
 	go run honnef.co/go/tools/cmd/staticcheck@latest ./...
+
+## vuln-check: verify no known vulnerabilities in dependencies using govulncheck
+vuln-check:
+	@if command -v govulncheck >/dev/null 2>&1; then \
+		govulncheck ./...; \
+	else \
+		go run golang.org/x/vuln/cmd/govulncheck@latest ./...; \
+	fi
 
 ## lint: run golangci-lint
 lint:

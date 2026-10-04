@@ -36,10 +36,10 @@ type realWatcher struct {
 	w *fsnotify.Watcher
 }
 
-func (r *realWatcher) Add(name string) error { return r.w.Add(name) }
-func (r *realWatcher) Close() error { return r.w.Close() }
+func (r *realWatcher) Add(name string) error         { return r.w.Add(name) }
+func (r *realWatcher) Close() error                  { return r.w.Close() }
 func (r *realWatcher) Events() <-chan fsnotify.Event { return r.w.Events }
-func (r *realWatcher) Errors() <-chan error { return r.w.Errors }
+func (r *realWatcher) Errors() <-chan error          { return r.w.Errors }
 
 var fsnotifyNewWatcher = fsnotify.NewWatcher
 

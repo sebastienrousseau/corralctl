@@ -90,6 +90,19 @@ func PushMirror(ctx context.Context, targetDir, remote, pushURL string, cred *Pu
 	return runMirror(ctx, targetDir, env, args...)
 }
 
+// PushBranch pushes a branch to remote and configures upstream tracking.
+func PushBranch(ctx context.Context, targetDir, remote, branch, pushURL string, cred *PushCredential) error {
+	if err := validateRemoteName(remote); err != nil {
+		return err
+	}
+	env, err := pushAuthEnv(pushURL, cred)
+	if err != nil {
+		return err
+	}
+	args := []string{"push", "-u", "--no-verify", remote, branch}
+	return runMirror(ctx, targetDir, env, args...)
+}
+
 // pushAuthEnv renders a credential as the GIT_CONFIG_* environment that
 // injects an Authorization header scoped to pushURL's origin. A nil
 // credential, or a non-HTTPS URL, yields nothing: SSH authenticates

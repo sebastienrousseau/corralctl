@@ -946,4 +946,3 @@ func SwitchBranch(ctx context.Context, targetDir, branch string) error {
 	_, err := runGitOutput(ctx, targetDir, "switch", branch)
 	return err
 }
-

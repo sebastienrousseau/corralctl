@@ -13,6 +13,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/sebastienrousseau/corralctl/internal/diag"
+	"github.com/sebastienrousseau/corralctl/internal/discover"
 	"github.com/sebastienrousseau/corralctl/internal/git"
 	"github.com/sebastienrousseau/corralctl/internal/graph"
 	"github.com/sebastienrousseau/corralctl/internal/sanitize"
@@ -75,6 +76,23 @@ type DoctorOutput struct {
 	Worktrees     []string        `json:"worktrees"`
 	Healthy       bool            `json:"healthy"`
 	IssuesCount   int             `json:"issues_count"`
+}
+
+// discoverReposInput is the argument set for corral_discover_repos.
+type discoverReposInput struct {
+	BaseDir       string `json:"base_dir,omitempty" jsonschema:"Directory where discovery begins. Defaults to workspace root."`
+	UntrackedOnly bool   `json:"untracked_only,omitempty" jsonschema:"When true, returns only repositories without an origin remote."`
+	MaxDepth      int    `json:"max_depth,omitempty" jsonschema:"Maximum directory traversal depth. 0 for unlimited."`
+}
+
+// DiscoverReposOutput describes the results returned by corral_discover_repos.
+type DiscoverReposOutput struct {
+	// BaseDir is the directory path where discovery was run.
+	BaseDir string `json:"base_dir"`
+	// Count is the number of candidate repositories discovered.
+	Count int `json:"count"`
+	// Candidates contains the list of discovered repository details.
+	Candidates []discover.Candidate `json:"candidates"`
 }
 
 // noInput is for tools that take no arguments.
@@ -142,6 +160,13 @@ func (s *Server) registerTools() {
 		Annotations: readOnlyAnnotations(),
 		Description: "Audit local repository clones in the Corral workspace for uncommitted changes, unpushed commits, detached heads, and linked worktrees. Returns workspace health summary and counts.",
 	}, s.handleDoctor)
+
+	addTool(s, &mcp.Tool{
+		Name:        "corral_discover_repos",
+		Title:       "Discover unmanaged and untracked repositories",
+		Annotations: readOnlyAnnotations(),
+		Description: "Scan the filesystem under base_dir (defaults to workspace root) to find local Git repositories that are untracked or unmanaged by Corral. Returns candidate paths, detected primary languages, and remote status with aggressive boundary pruning.",
+	}, s.handleDiscoverRepos)
 }
 
 func (s *Server) handleListRepos(ctx context.Context, _ *mcp.CallToolRequest, in listReposInput) (*mcp.CallToolResult, PageOutput, error) {
@@ -391,6 +416,7 @@ var (
 	doctorHasLocalChanges    = git.HasLocalChanges
 	doctorHasUnpublishedWork = git.HasUnpublishedWork
 	doctorListWorktrees      = git.ListWorktrees
+	discoverReposFunc        = discover.Discover
 )
 
 func (s *Server) handleDoctor(ctx context.Context, _ *mcp.CallToolRequest, in doctorInput) (*mcp.CallToolResult, DoctorOutput, error) {
@@ -440,6 +466,35 @@ func (s *Server) handleDoctor(ctx context.Context, _ *mcp.CallToolRequest, in do
 		IssuesCount:   issues,
 	}
 	return jsonResult(out), out, nil
+}
+
+func (s *Server) handleDiscoverRepos(ctx context.Context, _ *mcp.CallToolRequest, input discoverReposInput) (*mcp.CallToolResult, DiscoverReposOutput, error) {
+	idx, err := s.scan()
+	if err != nil {
+		return nil, DiscoverReposOutput{}, fmt.Errorf("scan workspace: %v", err)
+	}
+	base := idx.Root
+	if input.BaseDir != "" {
+		resolved, err := idx.SafePath(input.BaseDir)
+		if err != nil {
+			return nil, DiscoverReposOutput{}, fmt.Errorf("invalid base_dir: %w", err)
+		}
+		base = resolved
+	}
+	candidates, err := discoverReposFunc(ctx, discover.Options{
+		BaseDir:       base,
+		UntrackedOnly: input.UntrackedOnly,
+		MaxDepth:      input.MaxDepth,
+	})
+	if err != nil {
+		return nil, DiscoverReposOutput{}, fmt.Errorf("discovery failed: %w", err)
+	}
+	body := DiscoverReposOutput{
+		BaseDir:    base,
+		Count:      len(candidates),
+		Candidates: candidates,
+	}
+	return jsonResult(body), body, nil
 }
 
 // Indirected through a package var so tests can stub without spawning

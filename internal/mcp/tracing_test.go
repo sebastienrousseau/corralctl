@@ -349,4 +349,3 @@ func TestEventTracer(t *testing.T) {
 		t.Errorf("expected no tracer on srvNoTrace, got %v", srvNoTrace.Tracer())
 	}
 }
-

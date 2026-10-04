@@ -50,3 +50,14 @@ func assertDefaultGraphRunner(t *testing.T) {
 	}
 	_ = runGraphProgram(immediateQuitModel{})
 }
+
+// assertDefaultAdoptRunner exercises the default runAdoptProgram implementation.
+func assertDefaultAdoptRunner(t *testing.T) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		return
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, _ = runAdoptProgram(ctx, NewAdoptWizardModel(nil))
+}

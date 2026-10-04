@@ -267,4 +267,3 @@ func TestIsTempWorktreePath(t *testing.T) {
 		t.Error("expected normal repo not to be temp")
 	}
 }
-

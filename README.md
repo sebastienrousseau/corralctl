@@ -430,11 +430,13 @@ Where GitHub's own MCP server covers the remote API surface (issues, PRs, search
 - `corral_find_symbol` — Where a symbol is declared, across *every* clone
 - `corral_search_code` — Where text appears, across *every* clone
 - `corral_repo_overview` — One repository's shape in a single call
+- `corral_discover_repos` — Discover untracked or unmanaged repositories on local disk
 
 **Write tools (v0.0.12, opt-in via `--enable-mutations`):**
 
 - `corral_sync_repo` — Runs `git pull --rebase --autostash` against one clone
 - `corral_clone_repo` — Clones a URL into a sandboxed target path
+- `corral_adopt_repo` — Adopts a local repository with optional relocation and remote creation
 - `corral_delete_repo` — Removes a clone. Requires `--enable-destructive-mutations`. Refuses on uncommitted/unpushed changes, and asks a person to approve each deletion
 
 Every mutation writes a JSONL audit record to
@@ -788,11 +790,13 @@ corralctl status --base-dir ~/Code
 corralctl plan sebastienrousseau --base-dir ~/Code
 corralctl prune sebastienrousseau --base-dir ~/Code --dry-run
 corralctl prune sebastienrousseau --base-dir ~/Code --yes
+corralctl adopt ~/Projects --forge github --owner sebastienrousseau
 ```
 
 `status` inventories local clones, `plan` emits a non-mutating reconciliation,
-and `prune` removes only upstream-orphaned clones that pass the unpublished-work
-checks. JSON output is available on each command.
+`prune` removes only upstream-orphaned clones that pass the unpublished-work
+checks, and `adopt` discovers untracked local repositories to relocate and link
+to remote forges. JSON output is available on each command.
 
 Multi-owner profiles use a strict JSON config (default
 `~/.config/corral/config.json`) and run with `corralctl profile <name>`:

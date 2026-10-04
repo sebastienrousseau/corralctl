@@ -23,3 +23,8 @@ func assertDefaultGraphRunner(t *testing.T) {
 	t.Helper()
 	t.Log("skipping the real Bubble Tea graph runner under -race: bubbletea/cancelreader race their own shutdown")
 }
+
+func assertDefaultAdoptRunner(t *testing.T) {
+	t.Helper()
+	t.Log("skipping the real Bubble Tea adopt runner under -race: bubbletea/cancelreader race their own shutdown")
+}
