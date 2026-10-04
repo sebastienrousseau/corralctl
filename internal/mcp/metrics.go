@@ -11,6 +11,7 @@ import (
 	"sort"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -137,21 +138,50 @@ func (s *Server) metricsHandler() http.Handler {
 	})
 }
 
-// toolInstrumentationMiddleware records invocation counts and outcomes per tool name.
+// toolInstrumentationMiddleware records invocation counts, outcomes, and event traces.
 func (s *Server) toolInstrumentationMiddleware() mcp.Middleware {
 	return func(next mcp.MethodHandler) mcp.MethodHandler {
 		return func(ctx context.Context, method string, req mcp.Request) (mcp.Result, error) {
+			start := time.Now()
 			res, err := next(ctx, method, req)
-			if method == "tools/call" && s.metrics != nil {
+			dur := float64(time.Since(start).Microseconds()) / 1000.0
+
+			if method == "tools/call" {
 				if call, ok := req.(*mcp.CallToolRequest); ok {
 					status := "ok"
+					errMsg := ""
 					if err != nil {
 						status = "error"
+						errMsg = err.Error()
 					} else if callRes, ok := res.(*mcp.CallToolResult); ok && callRes != nil && callRes.IsError {
 						status = "error"
+						errMsg = "tool returned error result"
 					}
-					s.metrics.incToolCall(call.Params.Name, status)
+					if s.metrics != nil {
+						s.metrics.incToolCall(call.Params.Name, status)
+					}
+					if s.tracer != nil {
+						_ = s.tracer.Record(ctx, TraceEvent{
+							Type:       EventToolCall,
+							Name:       call.Params.Name,
+							DurationMs: dur,
+							Success:    status == "ok",
+							Error:      errMsg,
+						})
+					}
 				}
+			} else if s.tracer != nil {
+				errMsg := ""
+				if err != nil {
+					errMsg = err.Error()
+				}
+				_ = s.tracer.Record(ctx, TraceEvent{
+					Type:       EventRequest,
+					Name:       method,
+					DurationMs: dur,
+					Success:    err == nil,
+					Error:      errMsg,
+				})
 			}
 			return res, err
 		}

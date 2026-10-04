@@ -34,6 +34,7 @@ var (
 	mcpWatch                      bool
 	mcpMetricsAddr                string
 	mcpMetricsPort                int
+	mcpTraceFile                  string
 )
 
 // mcpCmd registers the `corralctl mcp` subcommand. It runs a Model
@@ -145,6 +146,7 @@ type mcpServer interface {
 	Root() string
 	MutationsEnabled() bool
 	AuditLogPath() string
+	TraceLogPath() string
 	ServeStdio() error
 	ServeHTTP(ctx context.Context, addr string) error
 	ServeSSE(ctx context.Context, addr string) error
@@ -223,6 +225,7 @@ func runMCP(cmd *cobra.Command, args []string) error {
 		AllowedOrigins:             parseCSV(mcpAllowedOrigins),
 		WatchWorkspace:             mcpWatch,
 		MetricsAddr:                metricsAddr,
+		TraceLogPath:               mcpTraceFile,
 	})
 	if err != nil {
 		return fmt.Errorf("constructing mcp server: %w", err)
@@ -235,8 +238,12 @@ func runMCP(cmd *cobra.Command, args []string) error {
 	if p := srv.AuditLogPath(); p != "" {
 		auditNote = p
 	}
-	fmt.Fprintf(os.Stderr, "corral-mcp %s starting; root=%s mutations=%t destructive=%t audit=%s\n",
-		version.Display(Version), srv.Root(), srv.MutationsEnabled(), mcpEnableDestructiveMutations, auditNote)
+	traceNote := "off"
+	if p := srv.TraceLogPath(); p != "" {
+		traceNote = p
+	}
+	fmt.Fprintf(os.Stderr, "corral-mcp %s starting; root=%s mutations=%t destructive=%t audit=%s trace=%s\n",
+		version.Display(Version), srv.Root(), srv.MutationsEnabled(), mcpEnableDestructiveMutations, auditNote, traceNote)
 
 	if metricsAddr != "" {
 		fmt.Fprintf(os.Stderr, "corral-mcp: metrics listener running on http://%s%s\n",
@@ -363,5 +370,7 @@ func init() {
 		"host:port for dedicated Prometheus telemetry listener (e.g. 127.0.0.1:9090)")
 	mcpCmd.Flags().IntVar(&mcpMetricsPort, "metrics-port", 0,
 		"TCP port for dedicated Prometheus telemetry listener on 127.0.0.1")
+	mcpCmd.Flags().StringVar(&mcpTraceFile, "trace-file", "",
+		"path to write structured JSONL interaction traces (empty disables tracing)")
 	rootCmd.AddCommand(mcpCmd)
 }

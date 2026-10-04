@@ -5,8 +5,12 @@ package mcp
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -238,3 +242,111 @@ func TestTraceparentEchoedInHTTPResponse(t *testing.T) {
 		t.Fatalf("response traceparent %q is not a valid W3C traceparent", newTP)
 	}
 }
+
+func TestEventTracer(t *testing.T) {
+	// 1. nil and empty path handling
+	var nilTracer *EventTracer
+	if nilTracer.Path() != "" {
+		t.Errorf("nilTracer.Path() = %q, want empty", nilTracer.Path())
+	}
+	if err := nilTracer.Record(context.Background(), TraceEvent{}); err != nil {
+		t.Errorf("nilTracer.Record() = %v, want nil", err)
+	}
+
+	emptyTracer := NewEventTracer("")
+	if emptyTracer != nil {
+		t.Errorf("NewEventTracer(\"\") = %v, want nil", emptyTracer)
+	}
+
+	// 2. Normal recording
+	tmpDir := t.TempDir()
+	logPath := filepath.Join(tmpDir, "sub", "traces.jsonl")
+	tracer := NewEventTracer(logPath)
+	if tracer.Path() != logPath {
+		t.Errorf("tracer.Path() = %q, want %q", tracer.Path(), logPath)
+	}
+
+	tc := NewTraceContext()
+	ctx := ContextWithTrace(context.Background(), tc)
+
+	ev := TraceEvent{
+		Type:       EventToolCall,
+		Name:       "corral_list_repos",
+		DurationMs: 12.5,
+		Success:    true,
+	}
+
+	if err := tracer.Record(ctx, ev); err != nil {
+		t.Fatalf("tracer.Record error: %v", err)
+	}
+
+	// Read and verify record
+	// #nosec G304 -- test log file path in t.TempDir().
+	data, err := os.ReadFile(filepath.Clean(logPath))
+	if err != nil {
+		t.Fatalf("ReadFile error: %v", err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+	if len(lines) != 1 {
+		t.Fatalf("expected 1 line, got %d", len(lines))
+	}
+
+	var rec TraceEvent
+	if err := json.Unmarshal([]byte(lines[0]), &rec); err != nil {
+		t.Fatalf("Unmarshal error: %v", err)
+	}
+	if rec.Name != "corral_list_repos" || rec.Type != EventToolCall || rec.TraceID != tc.TraceID || rec.ParentID != tc.ParentID {
+		t.Errorf("unexpected record: %+v", rec)
+	}
+
+	// 3. Marshal error handling
+	badEv := TraceEvent{
+		Attributes: map[string]any{"bad": make(chan int)},
+	}
+	if err := tracer.Record(ctx, badEv); err == nil {
+		t.Fatal("expected marshal error, got nil")
+	}
+
+	// 4. Mkdir error handling
+	origMkdir := mkdirAllTraceDir
+	defer func() { mkdirAllTraceDir = origMkdir }()
+	mkdirAllTraceDir = func(path string, perm os.FileMode) error {
+		return errors.New("mkdir error")
+	}
+	if err := tracer.Record(ctx, ev); err == nil {
+		t.Fatal("expected mkdir error, got nil")
+	}
+	mkdirAllTraceDir = origMkdir
+
+	// 5. Open error handling
+	origOpen := openTraceFile
+	defer func() { openTraceFile = origOpen }()
+	openTraceFile = func(name string, flag int, perm os.FileMode) (auditFile, error) {
+		return nil, errors.New("open error")
+	}
+	if err := tracer.Record(ctx, ev); err == nil {
+		t.Fatal("expected open error, got nil")
+	}
+	openTraceFile = origOpen
+
+	// 6. Server integration and accessors
+	srv, err := NewServer(ServerOptions{
+		Root:         tmpDir,
+		TraceLogPath: filepath.Join(tmpDir, "server_traces.jsonl"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if srv.Tracer() == nil || srv.TraceLogPath() == "" {
+		t.Fatalf("expected server tracer configured, got tracer=%v, path=%q", srv.Tracer(), srv.TraceLogPath())
+	}
+
+	srvNoTrace, err := NewServer(ServerOptions{Root: tmpDir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if srvNoTrace.Tracer() != nil || srvNoTrace.TraceLogPath() != "" {
+		t.Errorf("expected no tracer on srvNoTrace, got %v", srvNoTrace.Tracer())
+	}
+}
+

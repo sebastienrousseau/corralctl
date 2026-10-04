@@ -91,6 +91,9 @@ type ServerOptions struct {
 	// telemetry on addr (e.g. 127.0.0.1:9090) even when the MCP server is operating
 	// over stdio.
 	MetricsAddr string
+	// TraceLogPath is where structured JSONL interaction events are appended.
+	// When empty, tracing is disabled.
+	TraceLogPath string
 }
 
 // Server wraps an mcp-go MCPServer with the corral-specific configuration.
@@ -101,6 +104,7 @@ type Server struct {
 	mcp     *mcp.Server
 	opts    ServerOptions
 	auditor *Auditor
+	tracer  *EventTracer
 
 	// toolNames records every tool registered on this server, so its own
 	// surface is knowable in code rather than only in prose.
@@ -253,6 +257,9 @@ func NewServer(opts ServerOptions) (*Server, error) {
 	if opts.EnableMutations || opts.EnableDestructiveMutations {
 		s.auditor = NewAuditor(opts.AuditLogPath)
 	}
+	if opts.TraceLogPath != "" {
+		s.tracer = NewEventTracer(opts.TraceLogPath)
+	}
 	s.registerTools()
 	s.registerSymbolTools()
 	s.registerSearchTool()
@@ -320,6 +327,19 @@ func (s *Server) AuditLogPath() string {
 		return ""
 	}
 	return s.auditor.Path()
+}
+
+// TraceLogPath returns the trace log path when tracing is enabled; empty otherwise.
+func (s *Server) TraceLogPath() string {
+	if s.tracer == nil {
+		return ""
+	}
+	return s.tracer.Path()
+}
+
+// Tracer returns the server's EventTracer, or nil if event tracing is disabled.
+func (s *Server) Tracer() *EventTracer {
+	return s.tracer
 }
 
 // listenMetrics is a package seam allowing tests to mock network listener creation.
