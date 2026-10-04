@@ -6,6 +6,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.43] — 2026-10-04
+
+### Added
+
+- **Multi-Repository Branch Management (`corralctl branch`).**
+  Added `branch` command suite with `list`, `create`, and `switch`/`checkout`
+  subcommands to coordinate Git branching across multiple workspace repositories
+  with filtering by `--repo`, `--language`, `--visibility`, and support for
+  `--start-point`, `--dry-run`, and structured `--json` output.
+- **MCP Workspace Doctor & Worktree Pruning Tools (`corral_doctor` & `corral_prune_worktrees`).**
+  Expanded the Model Context Protocol surface to 10 read-only tools and 6 mutation
+  tools with `corral_doctor` (read-only audit of workspace health, unpushed commits,
+  dirty working trees, and linked worktrees) and `corral_prune_worktrees`
+  (sandboxed mutation tool for policy-gated pruning of stale and ephemeral worktrees).
+- **Interactive TUI Worktree View (`corralctl graph`).**
+  Enhanced the Bubble Tea dependency graph explorer with a `'w'` key toggle to
+  display linked Git worktrees alongside dependencies and reverse dependents for the
+  selected repository.
+- **Documentation Site Parity & Comprehensive Guides.**
+  Updated the Corral documentation site (`docs-site/content/`) with complete usage,
+  reference, and MCP guides covering `branch`, `doctor`, `worktree prune`,
+  `.corral.json` rules, `--blobless`, `--trace-file`, and multi-language symbol extraction.
+
 ## [0.0.42] — 2026-10-04
 
 ### Added
@@ -2582,7 +2605,8 @@ cron-safety overhaul.
   100 % doc coverage.
 - All tests green under `-race -count=1`.
 
-[Unreleased]: https://github.com/sebastienrousseau/corralctl/compare/v0.0.42...HEAD
+[Unreleased]: https://github.com/sebastienrousseau/corralctl/compare/v0.0.43...HEAD
+[0.0.43]: https://github.com/sebastienrousseau/corralctl/compare/v0.0.42...v0.0.43
 [0.0.42]: https://github.com/sebastienrousseau/corralctl/compare/v0.0.41...v0.0.42
 [0.0.41]: https://github.com/sebastienrousseau/corralctl/compare/v0.0.40...v0.0.41
 [0.0.40]: https://github.com/sebastienrousseau/corralctl/compare/v0.0.39...v0.0.40

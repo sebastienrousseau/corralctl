@@ -205,6 +205,12 @@ func evalScenarios() []scenario {
 			args:     map[string]any{},
 			wants:    []string{"nodes", "edges"},
 		},
+		{
+			question: "Is my workspace healthy, or do I have unpushed or uncommitted changes?",
+			tool:     "corral_doctor",
+			args:     map[string]any{},
+			wants:    []string{"healthy", "total_repos"},
+		},
 	}
 }
 

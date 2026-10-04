@@ -186,7 +186,10 @@ func TestMutationToolsDeclareSchemasToo(t *testing.T) {
 	for _, tool := range res.Tools {
 		seen[tool.Name] = tool.OutputSchema != nil
 	}
-	for _, name := range []string{"corral_sync_repo", "corral_clone_repo", "corral_delete_repo"} {
+	for _, name := range []string{
+		"corral_sync_repo", "corral_clone_repo", "corral_delete_repo",
+		"corral_create_worktree", "corral_release_worktree", "corral_prune_worktrees",
+	} {
 		declared, present := seen[name]
 		if !present {
 			t.Errorf("%s is not registered even with mutations enabled", name)

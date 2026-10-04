@@ -909,3 +909,135 @@ func TestHasIgnoredContent(t *testing.T) {
 		t.Errorf("detail should name the path, got %q", detail)
 	}
 }
+
+func TestBranchOperations(t *testing.T) {
+	upstream, workDir := setupTestRepo(t)
+	t.Cleanup(func() { cleanup(t, upstream) })
+	t.Cleanup(func() { cleanup(t, workDir) })
+
+	ctx := context.Background()
+
+	// List branches in workDir (should have main)
+	branches, err := ListBranches(ctx, workDir, false)
+	if err != nil {
+		t.Fatalf("ListBranches failed: %v", err)
+	}
+	if len(branches) == 0 {
+		t.Fatal("expected at least one branch")
+	}
+	var foundMain bool
+	for _, b := range branches {
+		if b.Name == "main" && b.Current {
+			foundMain = true
+		}
+	}
+	if !foundMain {
+		t.Errorf("expected current main branch, got %+v", branches)
+	}
+
+	// List with all=true
+	allBranches, err := ListBranches(ctx, workDir, true)
+	if err != nil {
+		t.Fatalf("ListBranches with all=true failed: %v", err)
+	}
+	if len(allBranches) < len(branches) {
+		t.Errorf("expected at least %d branches, got %d", len(branches), len(allBranches))
+	}
+
+	// Invalid branch names
+	if err := CreateBranch(ctx, workDir, "", ""); err == nil {
+		t.Error("expected error for empty branch name")
+	}
+	if err := CreateBranch(ctx, workDir, "-bad", ""); err == nil {
+		t.Error("expected error for branch name starting with dash")
+	}
+	if err := SwitchBranch(ctx, workDir, ""); err == nil {
+		t.Error("expected error for empty switch branch name")
+	}
+	if err := SwitchBranch(ctx, workDir, "-bad"); err == nil {
+		t.Error("expected error for switch branch name starting with dash")
+	}
+
+	// Create new branch
+	if err := CreateBranch(ctx, workDir, "feature-x", ""); err != nil {
+		t.Fatalf("CreateBranch failed: %v", err)
+	}
+
+	// Create with startPoint
+	if err := CreateBranch(ctx, workDir, "feature-y", "main"); err != nil {
+		t.Fatalf("CreateBranch with startPoint failed: %v", err)
+	}
+
+	// Switch to feature-x
+	if err := SwitchBranch(ctx, workDir, "feature-x"); err != nil {
+		t.Fatalf("SwitchBranch failed: %v", err)
+	}
+
+	// Check current branch is now feature-x
+	branches, err = ListBranches(ctx, workDir, false)
+	if err != nil {
+		t.Fatalf("ListBranches after switch failed: %v", err)
+	}
+	var foundFeatureX bool
+	for _, b := range branches {
+		if b.Name == "feature-x" && b.Current {
+			foundFeatureX = true
+		}
+	}
+	if !foundFeatureX {
+		t.Errorf("expected feature-x to be current branch, got %+v", branches)
+	}
+
+	// Test error from runGitOutput
+	nonExistent := filepath.Join(t.TempDir(), "nonexistent")
+	if _, err := ListBranches(ctx, nonExistent, false); err == nil {
+		t.Error("expected error listing branches in non-existent directory")
+	}
+	if err := CreateBranch(ctx, nonExistent, "feat", ""); err == nil {
+		t.Error("expected error creating branch in non-existent directory")
+	}
+	if err := SwitchBranch(ctx, nonExistent, "feat"); err == nil {
+		t.Error("expected error switching branch in non-existent directory")
+	}
+}
+
+func TestParseBranchListEdgeCases(t *testing.T) {
+	cases := []struct {
+		input    string
+		expected []BranchInfo
+	}{
+		{
+			input:    "",
+			expected: nil,
+		},
+		{
+			input:    "\n   \n",
+			expected: nil,
+		},
+		{
+			input:    "*\n",
+			expected: nil,
+		},
+		{
+			input: "* main abc1234 origin/main\n  feat def5678\n  justname\n",
+			expected: []BranchInfo{
+				{Name: "main", Current: true, Commit: "abc1234", Remote: "origin/main"},
+				{Name: "feat", Current: false, Commit: "def5678"},
+				{Name: "justname", Current: false},
+			},
+		},
+	}
+
+	for _, tc := range cases {
+		got := parseBranchList(tc.input)
+		if len(got) != len(tc.expected) {
+			t.Fatalf("parseBranchList(%q) length %d, expected %d", tc.input, len(got), len(tc.expected))
+		}
+		for i := range got {
+			if got[i] != tc.expected[i] {
+				t.Errorf("item %d got %+v, expected %+v", i, got[i], tc.expected[i])
+			}
+		}
+	}
+}
+
