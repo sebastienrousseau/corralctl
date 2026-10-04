@@ -35,6 +35,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"sync"
 )
 
 // Kind classifies a declaration. The set is deliberately small and
@@ -156,6 +157,26 @@ func register(e Extractor) {
 	}
 }
 
+var (
+	fallbackMu        sync.RWMutex
+	fallbackExtractor Extractor
+)
+
+// SetFallbackExtractor registers a fallback extractor for file extensions
+// not claimed by any built-in extractor. Pass nil to disable fallback.
+func SetFallbackExtractor(e Extractor) {
+	fallbackMu.Lock()
+	defer fallbackMu.Unlock()
+	fallbackExtractor = e
+}
+
+// GetFallbackExtractor returns the current fallback extractor, if any.
+func GetFallbackExtractor() Extractor {
+	fallbackMu.RLock()
+	defer fallbackMu.RUnlock()
+	return fallbackExtractor
+}
+
 // ExtractorFor returns the extractor claiming path's extension, if any.
 func ExtractorFor(path string) (Extractor, bool) {
 	i := strings.LastIndexByte(path, '.')
@@ -163,7 +184,16 @@ func ExtractorFor(path string) (Extractor, bool) {
 		return nil, false
 	}
 	e, ok := registry[strings.ToLower(path[i:])]
-	return e, ok
+	if ok {
+		return e, true
+	}
+	fallbackMu.RLock()
+	fb := fallbackExtractor
+	fallbackMu.RUnlock()
+	if fb != nil {
+		return fb, true
+	}
+	return nil, false
 }
 
 // multiLanguage is implemented by an extractor that reports more than one

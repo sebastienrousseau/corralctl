@@ -4,8 +4,10 @@
 package cmd
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -22,6 +24,7 @@ type stubMCPServer struct {
 	root           string
 	mutations      bool
 	audit          string
+	trace          string
 	serveErr       error
 	serveCallCount int
 
@@ -37,6 +40,7 @@ type stubMCPServer struct {
 func (s *stubMCPServer) Root() string           { return s.root }
 func (s *stubMCPServer) MutationsEnabled() bool { return s.mutations }
 func (s *stubMCPServer) AuditLogPath() string   { return s.audit }
+func (s *stubMCPServer) TraceLogPath() string   { return s.trace }
 func (s *stubMCPServer) ServeStdio() error {
 	s.serveCallCount++
 	return s.serveErr
@@ -121,6 +125,7 @@ func resetMCPFlags(t *testing.T) {
 	oldToken, oldOrigins := mcpToken, mcpAllowedOrigins
 	oldAudit, oldDestruct, oldCache, oldExts := mcpAuditLog, mcpEnableDestructiveMutations, mcpSymbolCache, mcpAllowFileExts
 	oldMetricsAddr, oldMetricsPort := mcpMetricsAddr, mcpMetricsPort
+	oldTraceFile := mcpTraceFile
 	mcpRoot = ""
 	mcpEnableMutations = false
 	mcpHTTP = ""
@@ -130,6 +135,7 @@ func resetMCPFlags(t *testing.T) {
 	mcpToken, mcpAllowedOrigins = "", ""
 	mcpAuditLog, mcpEnableDestructiveMutations, mcpSymbolCache, mcpAllowFileExts = "", false, "", ""
 	mcpMetricsAddr, mcpMetricsPort = "", 0
+	mcpTraceFile = ""
 	t.Cleanup(func() {
 		mcpRoot, mcpEnableMutations = oldRoot, oldMut
 		mcpHTTP, mcpAllowRemote, mcpNoConfirmDeletes = oldHTTP, oldRemote, oldNoConfirm
@@ -137,6 +143,7 @@ func resetMCPFlags(t *testing.T) {
 		mcpToken, mcpAllowedOrigins = oldToken, oldOrigins
 		mcpAuditLog, mcpEnableDestructiveMutations, mcpSymbolCache, mcpAllowFileExts = oldAudit, oldDestruct, oldCache, oldExts
 		mcpMetricsAddr, mcpMetricsPort = oldMetricsAddr, oldMetricsPort
+		mcpTraceFile = oldTraceFile
 	})
 }
 
@@ -641,4 +648,38 @@ func TestRunMCPMetricsFlags(t *testing.T) {
 		t.Errorf("expected MetricsAddr 192.168.1.50:9097, got %q", captured.MetricsAddr)
 	}
 }
+
+func TestRunMCPTraceFileFlag(t *testing.T) {
+	resetMCPFlags(t)
+	dir := t.TempDir()
+	mcpRoot = dir
+	tracePath := filepath.Join(dir, "interaction.jsonl")
+	mcpTraceFile = tracePath
+
+	stub := &stubMCPServer{root: dir, trace: tracePath}
+	captured := withStubServer(t, stub, nil)
+
+	rescueStderr := os.Stderr
+	r, w, _ := os.Pipe()
+	os.Stderr = w
+
+	err := runMCP(nil, nil)
+	_ = w.Close()
+	os.Stderr = rescueStderr
+
+	if err != nil {
+		t.Fatalf("runMCP failed: %v", err)
+	}
+	if captured.TraceLogPath != tracePath {
+		t.Errorf("captured TraceLogPath = %q, want %q", captured.TraceLogPath, tracePath)
+	}
+
+	var buf bytes.Buffer
+	_, _ = io.Copy(&buf, r)
+	banner := buf.String()
+	if !strings.Contains(banner, "trace="+tracePath) {
+		t.Errorf("expected trace path in banner, got: %s", banner)
+	}
+}
+
 

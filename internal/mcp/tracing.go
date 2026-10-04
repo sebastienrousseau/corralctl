@@ -7,7 +7,12 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/sebastienrousseau/corralctl/internal/diag"
 )
@@ -148,3 +153,100 @@ func TraceFromContext(ctx context.Context) (TraceContext, bool) {
 	tc, ok := ctx.Value(traceContextKey{}).(TraceContext)
 	return tc, ok
 }
+
+// EventType classifies the category of an agentic interaction trace event.
+type EventType string
+
+const (
+	// EventToolCall records a tool invocation by an agent.
+	EventToolCall EventType = "tool_call"
+	// EventResourceRead records a resource read operation.
+	EventResourceRead EventType = "resource_read"
+	// EventRequest records an incoming JSON-RPC protocol request.
+	EventRequest EventType = "request"
+)
+
+// TraceEvent captures structured metadata for an agentic interaction.
+type TraceEvent struct {
+	Timestamp  string         `json:"ts"`
+	TraceID    string         `json:"trace_id,omitempty"`
+	ParentID   string         `json:"parent_id,omitempty"`
+	Type       EventType      `json:"type"`
+	Name       string         `json:"name"`
+	DurationMs float64        `json:"duration_ms"`
+	Success    bool           `json:"success"`
+	Error      string         `json:"error,omitempty"`
+	Attributes map[string]any `json:"attributes,omitempty"`
+}
+
+// EventTracer writes structured JSONL events to an append-only trace log.
+type EventTracer struct {
+	path string
+	mu   sync.Mutex
+}
+
+var (
+	openTraceFile     = func(name string, flag int, perm os.FileMode) (auditFile, error) {
+		// #nosec G304 -- destination configured by operator flag or option.
+		return os.OpenFile(name, flag, perm)
+	}
+	mkdirAllTraceDir = os.MkdirAll
+)
+
+// NewEventTracer constructs an EventTracer writing to path. Returns nil if path is empty.
+func NewEventTracer(path string) *EventTracer {
+	if path == "" {
+		return nil
+	}
+	return &EventTracer{path: path}
+}
+
+// Path returns the destination file path.
+func (t *EventTracer) Path() string {
+	if t == nil {
+		return ""
+	}
+	return t.path
+}
+
+// Record appends a TraceEvent to the trace file in JSONL format.
+func (t *EventTracer) Record(ctx context.Context, ev TraceEvent) error {
+	if t == nil || t.path == "" {
+		return nil
+	}
+	if ev.Timestamp == "" {
+		ev.Timestamp = time.Now().UTC().Format(time.RFC3339Nano)
+	}
+	if tc, ok := TraceFromContext(ctx); ok {
+		if ev.TraceID == "" {
+			ev.TraceID = tc.TraceID
+		}
+		if ev.ParentID == "" {
+			ev.ParentID = tc.ParentID
+		}
+	}
+
+	data, err := json.Marshal(ev)
+	if err != nil {
+		return err
+	}
+	data = append(data, '\n')
+
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	dir := filepath.Dir(t.path)
+	if err := mkdirAllTraceDir(dir, 0o700); err != nil {
+		return err
+	}
+
+	f, err := openTraceFile(t.path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = f.Close() }()
+
+	_, err = f.Write(data)
+	return err
+}
+

@@ -10,6 +10,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -117,7 +118,11 @@ func TestMetricsSSEEndpointIncludesMetrics(t *testing.T) {
 }
 
 func TestToolInstrumentationMiddleware(t *testing.T) {
-	srv, err := NewServer(ServerOptions{Root: t.TempDir()})
+	tmpDir := t.TempDir()
+	srv, err := NewServer(ServerOptions{
+		Root:         tmpDir,
+		TraceLogPath: filepath.Join(tmpDir, "traces.jsonl"),
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -148,11 +153,17 @@ func TestToolInstrumentationMiddleware(t *testing.T) {
 		Params: &mcp.CallToolParamsRaw{Name: "my_tool"},
 	})
 
-	// 4. Non-tools/call method
+	// 4. Non-tools/call method success
 	nextOther := mw(func(ctx context.Context, method string, req mcp.Request) (mcp.Result, error) {
 		return nil, nil
 	})
 	_, _ = nextOther(context.Background(), "tools/list", &mcp.ListToolsRequest{})
+
+	// 5. Non-tools/call method error
+	nextOtherErr := mw(func(ctx context.Context, method string, req mcp.Request) (mcp.Result, error) {
+		return nil, errors.New("non-tool error")
+	})
+	_, _ = nextOtherErr(context.Background(), "tools/list", &mcp.ListToolsRequest{})
 
 	var buf bytes.Buffer
 	srv.metrics.WritePrometheus(&buf, srv)
