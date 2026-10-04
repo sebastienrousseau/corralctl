@@ -6,6 +6,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.42] — 2026-10-04
+
+### Added
+
+- **Automatic Prune/Purge for Stale & Ephemeral Worktrees (`corralctl worktree prune` & `corralctl doctor --prune-worktrees`).**
+  Added automated detection and pruning of linked worktrees whose filesystem paths
+  no longer exist or reside in ephemeral scratchpad locations (`/tmp`, `/private/tmp`,
+  `.git/corral-worktrees`), with `--dry-run`, `--force`, `--temp-only`, and integrated
+  doctor health repair.
+- **Universal Ctags Fallback for Polyglot Symbol Extraction.**
+  Introduced extensible fallback parsing in `internal/symbols` supporting Universal Ctags
+  JSON and classic tags formats with `SetFallbackExtractor` and `CtagsExtractor`,
+  unlocking cross-repository symbol indexing for Ruby, PHP, C#, Lua, and all ctags languages.
+- **Structured MCP Agentic Interaction Tracing (`--trace-file`).**
+  Added structured JSONL interaction event tracing for the Model Context Protocol server.
+  Captures duration, W3C trace context, RPC methods, tool invocations, and outcomes for
+  agentic observability.
+- **Custom Doctor Diagnostics Rules & Thresholds (`.corral.json`).**
+  Enabled customizable workspace health rules via `.corral.json`, custom `--config`,
+  or user configuration files. Audits workspace against disk budgets, max unpushed/dirty
+  repositories, max active worktrees, required caches, and missing origin alerts.
+
 ## [0.0.41] — 2026-10-04
 
 ### Added
@@ -2560,7 +2582,8 @@ cron-safety overhaul.
   100 % doc coverage.
 - All tests green under `-race -count=1`.
 
-[Unreleased]: https://github.com/sebastienrousseau/corralctl/compare/v0.0.41...HEAD
+[Unreleased]: https://github.com/sebastienrousseau/corralctl/compare/v0.0.42...HEAD
+[0.0.42]: https://github.com/sebastienrousseau/corralctl/compare/v0.0.41...v0.0.42
 [0.0.41]: https://github.com/sebastienrousseau/corralctl/compare/v0.0.40...v0.0.41
 [0.0.40]: https://github.com/sebastienrousseau/corralctl/compare/v0.0.39...v0.0.40
 [0.0.39]: https://github.com/sebastienrousseau/corralctl/compare/v0.0.38...v0.0.39
