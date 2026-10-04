@@ -120,6 +120,7 @@ entirely.
 | `--languages` | | | Comma-separated language filter |
 | `--exclude-languages` | | | Comma-separated exclude list |
 | `--clone-depth` | | `0` | Shallow clone depth; `0` disables |
+| `--blobless` | | off | Partial clone with filter=blob:none |
 | `--api-timeout` | | `30s` | Deadline for GitHub API operations |
 | `--log-level` | | `info` | Verbosity on stderr: `error`, `warn`, `info`, `debug` |
 
@@ -172,3 +173,75 @@ Two things are refused. A repository is never pushed to the forge its origin
 lives on, so a clone taken *from* GitLab is not pruned against GitLab. And a
 destination that already holds a same-named repository with the other
 visibility is an error rather than a silent reuse.
+
+## Worktree management
+
+`corralctl worktree` creates, lists, removes, and prunes linked Git worktrees
+for repository clones across your workspace:
+
+```bash
+# List all linked worktrees across workspace repositories
+corralctl worktree list
+
+# Create an isolated worktree for a feature branch
+corralctl worktree create my-repo feature-branch
+
+# Remove a worktree
+corralctl worktree remove my-repo /path/to/worktree
+
+# Prune stale and temporary worktrees
+corralctl worktree prune --dry-run
+corralctl worktree prune --temp-only
+```
+
+| Option | Default | Description |
+| --- | --- | --- |
+| `--repo` | | Filter operation to a specific repository |
+| `--dry-run` | off | Preview pruning without deleting files |
+| `--temp-only` | off | Only prune ephemeral scratchpad worktrees |
+| `--force` | off | Force removal even if uncommitted changes exist |
+| `--output` | `text` | Output format: `text` or `json` |
+
+## Multi-repository branching
+
+`corralctl branch` coordinates Git branching operations across multiple
+workspace repositories matching your criteria:
+
+```bash
+# List branches across repositories
+corralctl branch list --language go --visibility public
+
+# Create a feature branch across all Go repositories
+corralctl branch create feat/new-api --language go --dry-run
+corralctl branch create feat/new-api --language go
+
+# Switch to the branch across all matching repositories
+corralctl branch switch feat/new-api --language go
+```
+
+| Option | Default | Description |
+| --- | --- | --- |
+| `--repo` | | Target a specific repository |
+| `--language` | | Filter repositories by language |
+| `--visibility` | | Filter repositories by visibility |
+| `--start-point` | HEAD | Starting point for new branch |
+| `--dry-run` | off | Simulate operations without modifying repositories |
+| `--all` | off | List remote branches as well as local branches |
+| `--output` | `text` | Output format: `text` or `json` |
+
+## Workspace health audits
+
+`corralctl doctor` audits all clones in your workspace for uncommitted changes,
+unpushed commits, detached heads, and stale linked worktrees:
+
+```bash
+# Run doctor audit
+corralctl doctor
+
+# Output as JSON for automated pipelines
+corralctl doctor --json
+```
+
+Custom rule thresholds can be declared in `.corral.json` at your workspace root
+to configure warnings and limits for unpushed work and stale worktrees.
+

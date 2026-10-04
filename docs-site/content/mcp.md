@@ -87,18 +87,30 @@ Read-only, available by default:
 | `corral_find_symbol` | Find where a symbol is declared, across *every* clone at once |
 | `corral_repo_overview` | Summarise one repository's shape — languages, entry points, layout |
 | `corral_search_code` | Find where text appears — call sites, config keys, error strings — across *every* clone |
+| `corral_graph_dependencies` | Analyze cross-repository dependencies and reverse dependents |
+| `corral_doctor` | Audit workspace health, dirty working trees, unpushed commits, and worktrees |
+
+### Multi-language symbol extraction
+
+`corral_find_symbol` uses fast native parsers for Go, Rust, Python, TypeScript,
+and JavaScript. When Universal Ctags is installed on the host system,
+corralctl automatically falls back to it to extract symbols from Java, Kotlin,
+Swift, C, C++, and C# source trees without external services.
 
 ## Mutations and audit
 
 Write tools are opt-in and off unless you ask for them.
 
-Passing `--enable-mutations` adds two tools that do reach the network, because
-they shell out to `git`. The GitHub API is still never contacted.
+Passing `--enable-mutations` adds tools that modify repository state or execute
+`git` operations. The GitHub API is still never contacted.
 
 | Tool | Behaviour | Requires |
 | --- | --- | --- |
 | `corral_sync_repo` | Runs `git pull --rebase --autostash` against one clone | `--enable-mutations` |
 | `corral_clone_repo` | Clones a URL into a sandboxed target path | `--enable-mutations` |
+| `corral_create_worktree` | Creates an isolated linked Git worktree under `.git/corral-worktrees` | `--enable-mutations` |
+| `corral_release_worktree` | Removes a linked Git worktree after branch work is finished | `--enable-mutations` |
+| `corral_prune_worktrees` | Prunes stale or temporary scratchpad worktrees across repositories | `--enable-mutations` |
 | `corral_delete_repo` | Removes a clone; refuses on uncommitted or unpushed changes, and asks a person to approve each deletion | `--enable-destructive-mutations` |
 
 Deletion sits behind a second, separate flag on purpose, and it refuses
@@ -118,6 +130,15 @@ Every mutation writes a JSONL audit record to
 `$XDG_STATE_HOME/corral/mutations.log`, falling back to
 `~/.local/state/corral/mutations.log`. What an agent did to your workspace is
 therefore reconstructable after the fact, which is the point.
+
+## Event tracing
+
+Passing `--trace-file <path.jsonl>` records structured event logs for every
+JSON-RPC request, tool invocation, and error with nanosecond timestamps:
+
+```bash
+corralctl mcp --trace-file /tmp/corral-trace.jsonl
+```
 
 ## Transport
 
