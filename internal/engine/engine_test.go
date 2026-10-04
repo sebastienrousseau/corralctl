@@ -482,6 +482,16 @@ func TestCanonicalLanguageAndCollection(t *testing.T) {
 	if got := canonicalCollectionName("Clients"); got != "" {
 		t.Errorf("unknown collection = %q", got)
 	}
+
+	if got := ResolveLayoutPath("/base", "public", "go", "my-repo"); got != filepath.Join("/base", "Public", "Go", "my-repo") {
+		t.Errorf("ResolveLayoutPath() = %q, want %q", got, filepath.Join("/base", "Public", "Go", "my-repo"))
+	}
+	if got := ResolveLayoutPath("/base", "", "", "my-repo"); got != filepath.Join("/base", "Public", "Other", "my-repo") {
+		t.Errorf("ResolveLayoutPath() with empty inputs = %q, want %q", got, filepath.Join("/base", "Public", "Other", "my-repo"))
+	}
+	if got := ResolveLayoutPath("/base", "work", "rust", "service"); got != filepath.Join("/base", "Work", "Rust", "service") {
+		t.Errorf("ResolveLayoutPath() work = %q, want %q", got, filepath.Join("/base", "Work", "Rust", "service"))
+	}
 }
 
 func TestEnsureAppleCollections(t *testing.T) {

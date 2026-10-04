@@ -943,6 +943,19 @@ func repositoryCollection(repo github.Repo) string {
 	return "Public"
 }
 
+// ResolveLayoutPath constructs the canonical destination directory path for an adopted
+// or relocated repository according to the collection, language ecosystem, and repository name.
+func ResolveLayoutPath(baseDir, collection, language, repoName string) string {
+	col := strings.TrimSpace(collection)
+	if col == "" {
+		col = "Public"
+	} else {
+		col = strings.ToUpper(col[:1]) + strings.ToLower(col[1:])
+	}
+	bucket := canonicalLanguage(language)
+	return filepath.Join(baseDir, col, bucket, repoName)
+}
+
 func migrateLegacy(baseDir string, repos []github.Repo) {
 	for _, repo := range repos {
 		legacyDir := filepath.Join(baseDir, normalizeLanguage(repo.Language), repo.Name)

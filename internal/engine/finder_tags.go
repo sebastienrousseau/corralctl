@@ -17,6 +17,7 @@ const (
 	finderPurple = 3
 	finderYellow = 5
 	finderRed    = 6
+	finderOrange = 7
 )
 
 var (
@@ -24,6 +25,23 @@ var (
 	writeFinderTags = platformWriteFinderTags
 	finderNow       = time.Now
 )
+
+// ApplyCandidateFinderTags applies macOS Finder tags and color labels to a candidate
+// repository, flagging whether it is a new/untracked repository to be committed as a new repo.
+func ApplyCandidateFinderTags(path string, isNew bool, ecosystem string) error {
+	existing, err := readFinderTags(path)
+	if err != nil {
+		return err
+	}
+	var managed []string
+	if ecosystem != "" {
+		managed = append(managed, finderTag("Ecosystem: "+ecosystem, 0))
+	}
+	if isNew {
+		managed = append(managed, finderTag("New Repo", finderOrange))
+	}
+	return writeFinderTags(path, mergeFinderTags(existing, managed))
+}
 
 func applyFinderTags(path string, repo github.Repo, result RepoResult) error {
 	existing, err := readFinderTags(path)
@@ -95,7 +113,7 @@ func mergeFinderTags(existing, managed []string) []string {
 func isManagedFinderTag(tag string) bool {
 	name := strings.SplitN(tag, "\n", 2)[0]
 	switch name {
-	case "Active", "On Hold", "Needs Fix", "Experiment", "GitHub", "Fork", "Archived", "Template", "Mirror":
+	case "Active", "On Hold", "Needs Fix", "Experiment", "New Repo", "GitHub", "Fork", "Archived", "Template", "Mirror":
 		return true
 	}
 	return strings.HasPrefix(name, "Visibility: ") || strings.HasPrefix(name, "Collection: ") || strings.HasPrefix(name, "Ecosystem: ") || strings.HasPrefix(name, "Owner: ")

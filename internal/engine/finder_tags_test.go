@@ -130,6 +130,40 @@ func TestApplyJobFinderTags(t *testing.T) {
 	}
 }
 
+func TestApplyCandidateFinderTags(t *testing.T) {
+	oldRead, oldWrite := readFinderTags, writeFinderTags
+	t.Cleanup(func() { readFinderTags, writeFinderTags = oldRead, oldWrite })
+
+	// Read error
+	readFinderTags = func(string) ([]string, error) { return nil, errors.New("read error") }
+	if err := ApplyCandidateFinderTags("repo", true, "Go"); err == nil {
+		t.Fatal("expected read error")
+	}
+
+	// Success with tags
+	var writtenTags []string
+	readFinderTags = func(string) ([]string, error) { return []string{"Client\n4"}, nil }
+	writeFinderTags = func(path string, tags []string) error {
+		writtenTags = tags
+		return nil
+	}
+
+	if err := ApplyCandidateFinderTags("repo", true, "Go"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !containsString(writtenTags, "New Repo\n7") {
+		t.Errorf("written tags %v do not contain New Repo", writtenTags)
+	}
+	if !containsString(writtenTags, "Ecosystem: Go\n0") {
+		t.Errorf("written tags %v do not contain Ecosystem: Go", writtenTags)
+	}
+
+	// Success with isNew false and empty ecosystem
+	if err := ApplyCandidateFinderTags("repo", false, ""); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func containsString(values []string, want string) bool {
 	for _, value := range values {
 		if value == want {

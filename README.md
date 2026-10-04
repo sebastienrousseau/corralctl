@@ -327,6 +327,7 @@ Finder tagging is enabled by default on macOS and can be disabled with
 | Yellow | `On Hold` | Archived on GitHub |
 | Red | `Needs Fix` | corralctl encountered a sync failure for the matching clone |
 | Purple | `Experiment` | Fork, template, or mirror repository |
+| Orange | `New Repo` | Discovered unmanaged repository pending creation or origin link on remote forge |
 
 Uncolored metadata tags include `Visibility: Public`, `Collection: Forks`,
 `Ecosystem: Rust`, `Owner: example`, `GitHub`, `Fork`, `Archived`, `Template`, and `Mirror`.
