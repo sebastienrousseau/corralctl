@@ -45,7 +45,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: '1.26.6'
+          go-version: '1.26.9'
 
       # The site is built by ssg through the Lucid theme vendored at
       # docs-site/_layouts. The version is pinned in a file rather than here

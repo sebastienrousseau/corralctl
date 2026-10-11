@@ -906,7 +906,7 @@ corralctl is opinionated, and the opinions do not suit everyone.
 
 | | |
 |---|---|
-| **Go** | The `go` directive in [`go.mod`](go.mod) — currently **1.26.6** |
+| **Go** | The `go` directive in [`go.mod`](go.mod) — currently **1.26.9** |
 | **git** | 2.30 or newer, on `PATH` |
 | **gh** | Optional; only for `--auth gh` |
 
