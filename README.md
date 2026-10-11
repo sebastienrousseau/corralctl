@@ -832,13 +832,17 @@ and `--log-level` flags, plus:
 
 ```bash
 corralctl status --base-dir ~/Code
+corralctl doctor ~/Code
+corralctl doctor ~/Code --refresh-tags
+corralctl doctor ~/Code --prune-worktrees
 corralctl plan sebastienrousseau --base-dir ~/Code
 corralctl prune sebastienrousseau --base-dir ~/Code --dry-run
 corralctl prune sebastienrousseau --base-dir ~/Code --yes
 corralctl adopt ~/Projects --forge github --owner sebastienrousseau
 ```
 
-`status` inventories local clones, `plan` emits a non-mutating reconciliation,
+`status` inventories local clones, `doctor` audits workspace hygiene, worktrees,
+disk budget, and Finder tags, `plan` emits a non-mutating reconciliation,
 `prune` removes only upstream-orphaned clones that pass the unpublished-work
 checks, and `adopt` discovers untracked local repositories to relocate and link
 to remote forges. JSON output is available on each command.
@@ -885,8 +889,8 @@ To inspect the package layout and programmatically run corralctl modules, see th
 ## Frequently Asked Questions
 
 - **Does it work with GitLab or other hosts?**  
-  No. corralctl is specifically built to integrate with the GitHub API and GitHub CLI (`gh`).
-- **What happens to repositories deleted on GitHub?**  
+  Yes. corralctl integrates with six major git forges: GitHub, GitLab, Gitea, Forgejo, Codeberg, and Bitbucket.
+- **What happens to repositories deleted on remote forges?**  
   Normal reconciliation never deletes them. `--orphans` reports them; the explicit `prune` command can remove verified-safe orphans after `--yes` confirmation.
 - **Can I run it inside Cron or systemd timers?**  
   Yes. The command runs non-interactively by default. All Git command credential prompts are bypassed to ensure automated jobs never hang.

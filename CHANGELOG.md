@@ -6,6 +6,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.50] - 2026-10-11
+
+### Documentation
+
+- **Documentation & Operational Manual Completeness.**
+  Documented `corralctl doctor` options (`--refresh-tags`, `--prune-worktrees`,
+  `--config`, `--output json`) across CLI reference tables, `README.md`, and
+  `docs-site/content/usage.md`. Corrected multi-forge FAQ entries to reflect
+  active support across GitHub, GitLab, Gitea, Forgejo, Codeberg, and Bitbucket.
+  Fixed source directory build instructions in `installation.md`.
+
 ## [0.0.49] - 2026-10-11
 
 ### Fixed
@@ -2714,7 +2725,8 @@ cron-safety overhaul.
   100 % doc coverage.
 - All tests green under `-race -count=1`.
 
-[Unreleased]: https://github.com/sebastienrousseau/corralctl/compare/v0.0.49...HEAD
+[Unreleased]: https://github.com/sebastienrousseau/corralctl/compare/v0.0.50...HEAD
+[0.0.50]: https://github.com/sebastienrousseau/corralctl/compare/v0.0.49...v0.0.50
 [0.0.49]: https://github.com/sebastienrousseau/corralctl/compare/v0.0.48...v0.0.49
 [0.0.48]: https://github.com/sebastienrousseau/corralctl/compare/v0.0.47...v0.0.48
 [0.0.47]: https://github.com/sebastienrousseau/corralctl/compare/v0.0.46...v0.0.47
