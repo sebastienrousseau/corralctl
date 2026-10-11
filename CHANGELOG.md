@@ -6,6 +6,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.47] - 2026-10-11
+
+### Refactored
+
+- **Architecture Decomposition & Modularization.**
+  Decomposed `internal/github`, `internal/mcp`, `internal/tui`, and `internal/search`
+  to bring all source files strictly within the repository's 500 lines of code
+  complexity ceiling while preserving 100% statement coverage.
+
 ## [0.0.46] - 2026-10-11
 
 ### Documentation
@@ -2678,7 +2687,8 @@ cron-safety overhaul.
   100 % doc coverage.
 - All tests green under `-race -count=1`.
 
-[Unreleased]: https://github.com/sebastienrousseau/corralctl/compare/v0.0.46...HEAD
+[Unreleased]: https://github.com/sebastienrousseau/corralctl/compare/v0.0.47...HEAD
+[0.0.47]: https://github.com/sebastienrousseau/corralctl/compare/v0.0.46...v0.0.47
 [0.0.46]: https://github.com/sebastienrousseau/corralctl/compare/v0.0.45...v0.0.46
 [0.0.45]: https://github.com/sebastienrousseau/corralctl/compare/v0.0.44...v0.0.45
 [0.0.44]: https://github.com/sebastienrousseau/corralctl/compare/v0.0.43...v0.0.44
