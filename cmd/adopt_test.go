@@ -49,6 +49,10 @@ func resetAdoptFlags(t *testing.T) {
 	origTargetDir := adoptTargetDir
 	origProtocol := adoptProtocol
 	origUntrackedOnly := adoptUntrackedOnly
+	origFinderTags := adoptFinderTags
+	origTagOnly := adoptTagOnly
+	origCollection := adoptCollection
+	origMaxDepth := adoptMaxDepth
 	origDryRun := dryRun
 
 	adoptInteractive = false
@@ -61,6 +65,10 @@ func resetAdoptFlags(t *testing.T) {
 	adoptTargetDir = ""
 	adoptProtocol = "https"
 	adoptUntrackedOnly = false
+	adoptFinderTags = false
+	adoptTagOnly = false
+	adoptCollection = ""
+	adoptMaxDepth = 0
 	dryRun = false
 
 	t.Cleanup(func() {
@@ -74,6 +82,10 @@ func resetAdoptFlags(t *testing.T) {
 		adoptTargetDir = origTargetDir
 		adoptProtocol = origProtocol
 		adoptUntrackedOnly = origUntrackedOnly
+		adoptFinderTags = origFinderTags
+		adoptTagOnly = origTagOnly
+		adoptCollection = origCollection
+		adoptMaxDepth = origMaxDepth
 		dryRun = origDryRun
 	})
 }
@@ -316,5 +328,155 @@ func TestAdoptRunEInteractiveWizard(t *testing.T) {
 	adoptOutput = "text"
 	if err := adoptCmd.RunE(adoptCmd, nil); err != nil {
 		t.Fatalf("unexpected wizard success error: %v", err)
+	}
+}
+
+func TestAdoptFinderTagsAndTagOnly(t *testing.T) {
+	resetAdoptFlags(t)
+	origDiscover := adoptDiscoverRun
+	origTag := adoptApplyCandidateTags
+	defer func() {
+		adoptDiscoverRun = origDiscover
+		adoptApplyCandidateTags = origTag
+	}()
+
+	candidates := []discover.Candidate{
+		{Name: "untracked", Path: "/tmp/untracked", HasRemote: false},
+		{Name: "foreign", Path: "/tmp/foreign", HasRemote: true, RemoteURL: "https://github.com/other/foreign.git"},
+		{Name: "mine", Path: "/tmp/mine", HasRemote: true, RemoteURL: "https://github.com/myuser/mine.git"},
+	}
+	adoptDiscoverRun = func(ctx context.Context, opts discover.Options) ([]discover.Candidate, error) {
+		return candidates, nil
+	}
+
+	tagged := make(map[string]bool)
+	adoptApplyCandidateTags = func(path string, isNew bool, ecosystem string) error {
+		tagged[path] = isNew
+		return nil
+	}
+
+	adoptOwner = "myuser"
+	adoptFinderTags = true
+	adoptTagOnly = true
+
+	if err := adoptCmd.RunE(adoptCmd, nil); err != nil {
+		t.Fatalf("unexpected error with tag-only: %v", err)
+	}
+
+	if !tagged["/tmp/untracked"] {
+		t.Errorf("expected /tmp/untracked to be flagged isNew=true")
+	}
+	if !tagged["/tmp/foreign"] {
+		t.Errorf("expected /tmp/foreign to be flagged isNew=true (foreign owner)")
+	}
+	if tagged["/tmp/mine"] {
+		t.Errorf("expected /tmp/mine to be flagged isNew=false (owned by myuser)")
+	}
+}
+
+func TestAdoptCollectionAndRelocate(t *testing.T) {
+	resetAdoptFlags(t)
+	origDiscover := adoptDiscoverRun
+	origExecute := adoptExecute
+	defer func() {
+		adoptDiscoverRun = origDiscover
+		adoptExecute = origExecute
+	}()
+
+	candidates := []discover.Candidate{
+		{Name: "my-service", Path: "/tmp/legacy/my-service", DetectedLang: "Go"},
+	}
+	adoptDiscoverRun = func(ctx context.Context, opts discover.Options) ([]discover.Candidate, error) {
+		return candidates, nil
+	}
+
+	var capturedOpts engine.AdoptOptions
+	adoptExecute = func(ctx context.Context, opts engine.AdoptOptions) (engine.AdoptResult, error) {
+		capturedOpts = opts
+		return engine.AdoptResult{Action: "ADOPTED", RepoName: opts.RepoName, FinalPath: opts.NewTargetDir}, nil
+	}
+
+	// 1. With explicit collection: Forks
+	adoptRelocate = true
+	adoptTargetDir = "/target"
+	adoptCollection = "Forks"
+	if err := adoptCmd.RunE(adoptCmd, nil); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	expected := engine.ResolveLayoutPath("/target", "Forks", "Go", "my-service")
+	if capturedOpts.NewTargetDir != expected {
+		t.Errorf("expected target dir %q, got %q", expected, capturedOpts.NewTargetDir)
+	}
+
+	// 2. Without collection, default public
+	adoptCollection = ""
+	adoptVisibility = "public"
+	if err := adoptCmd.RunE(adoptCmd, nil); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	expectedPublic := engine.ResolveLayoutPath("/target", "Public", "Go", "my-service")
+	if capturedOpts.NewTargetDir != expectedPublic {
+		t.Errorf("expected target dir %q, got %q", expectedPublic, capturedOpts.NewTargetDir)
+	}
+
+	// 3. Without collection, private visibility
+	adoptVisibility = "private"
+	if err := adoptCmd.RunE(adoptCmd, nil); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	expectedPrivate := engine.ResolveLayoutPath("/target", "Private", "Go", "my-service")
+	if capturedOpts.NewTargetDir != expectedPrivate {
+		t.Errorf("expected target dir %q, got %q", expectedPrivate, capturedOpts.NewTargetDir)
+	}
+
+	// 4. Test max-depth option passed to discover
+	var capturedDiscoverOpts discover.Options
+	adoptDiscoverRun = func(ctx context.Context, opts discover.Options) ([]discover.Candidate, error) {
+		capturedDiscoverOpts = opts
+		return candidates, nil
+	}
+	adoptMaxDepth = 3
+	if err := adoptCmd.RunE(adoptCmd, nil); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if capturedDiscoverOpts.MaxDepth != 3 {
+		t.Errorf("expected MaxDepth 3, got %d", capturedDiscoverOpts.MaxDepth)
+	}
+}
+
+func TestIsAdoptCandidateNew(t *testing.T) {
+	// 1. Untracked repo without remote
+	if !isAdoptCandidateNew(discover.Candidate{HasRemote: false}, "myuser", "", "") {
+		t.Errorf("expected candidate without remote to be new")
+	}
+
+	// 2. Repo with remote but empty remote URL
+	if !isAdoptCandidateNew(discover.Candidate{HasRemote: true, RemoteURL: ""}, "myuser", "", "") {
+		t.Errorf("expected candidate with empty remote URL to be new")
+	}
+
+	// 3. Repo with empty owner
+	if isAdoptCandidateNew(discover.Candidate{HasRemote: true, RemoteURL: "https://github.com/myuser/repo.git"}, "", "", "") {
+		t.Errorf("expected candidate with empty owner to not be new")
+	}
+
+	// 4. Repo with unparseable remote yielding empty identity
+	if !isAdoptCandidateNew(discover.Candidate{HasRemote: true, RemoteURL: ".git"}, "myuser", "", "") {
+		t.Errorf("expected .git remote URL to be new")
+	}
+
+	// 5. Explicit forge specified
+	candMine := discover.Candidate{HasRemote: true, RemoteURL: "https://gitlab.com/myuser/repo.git"}
+	if isAdoptCandidateNew(candMine, "myuser", "gitlab", "") {
+		t.Errorf("expected candidate matching explicit forge to not be new")
+	}
+	candOther := discover.Candidate{HasRemote: true, RemoteURL: "https://gitlab.com/other/repo.git"}
+	if !isAdoptCandidateNew(candOther, "myuser", "gitlab", "") {
+		t.Errorf("expected candidate on explicit forge with different owner to be new")
+	}
+
+	// 6. Default all forges
+	if isAdoptCandidateNew(candMine, "myuser", "", "") {
+		t.Errorf("expected gitlab candidate to match across all forges")
 	}
 }

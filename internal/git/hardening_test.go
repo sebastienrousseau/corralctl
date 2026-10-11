@@ -461,6 +461,17 @@ func TestWorktreeLifecycle(t *testing.T) {
 
 	wtPath := filepath.Join(t.TempDir(), "wt-test")
 
+	// Input validation tests
+	if err := CreateWorktree(context.Background(), workDir, wtPath, "-bad-branch"); err == nil {
+		t.Fatal("expected error for worktree branch starting with dash")
+	}
+	if err := CreateWorktree(context.Background(), workDir, "-bad-path", "branch"); err == nil {
+		t.Fatal("expected error for worktree path starting with dash")
+	}
+	if err := RemoveWorktree(context.Background(), workDir, "-bad-path", false); err == nil {
+		t.Fatal("expected error for remove worktree path starting with dash")
+	}
+
 	// 1. Create worktree on a new branch
 	if err := CreateWorktree(context.Background(), workDir, wtPath, "agent-branch"); err != nil {
 		t.Fatalf("CreateWorktree failed: %v", err)

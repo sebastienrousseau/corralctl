@@ -327,6 +327,7 @@ Finder tagging is enabled by default on macOS and can be disabled with
 | Yellow | `On Hold` | Archived on GitHub |
 | Red | `Needs Fix` | corralctl encountered a sync failure for the matching clone |
 | Purple | `Experiment` | Fork, template, or mirror repository |
+| Orange | `New Repo` | Discovered unmanaged repository pending creation or origin link on remote forge |
 
 Uncolored metadata tags include `Visibility: Public`, `Collection: Forks`,
 `Ecosystem: Rust`, `Owner: example`, `GitHub`, `Fork`, `Archived`, `Template`, and `Mirror`.
@@ -905,7 +906,7 @@ corralctl is opinionated, and the opinions do not suit everyone.
 
 | | |
 |---|---|
-| **Go** | The `go` directive in [`go.mod`](go.mod) — currently **1.26.6** |
+| **Go** | The `go` directive in [`go.mod`](go.mod) — currently **1.26.9** |
 | **git** | 2.30 or newer, on `PATH` |
 | **gh** | Optional; only for `--auth gh` |
 

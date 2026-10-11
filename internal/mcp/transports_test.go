@@ -454,6 +454,37 @@ func TestIsAllowedOrigin(t *testing.T) {
 	}
 }
 
+func TestHostValidation(t *testing.T) {
+	s := &Server{
+		opts: ServerOptions{
+			AllowedOrigins: []string{"https://app.example.com", "http://allowed.local:8080", "direct.host.internal"},
+		},
+	}
+	tests := []struct {
+		host string
+		want bool
+	}{
+		{"", true},
+		{"example.com", true},
+		{"localhost", true},
+		{"localhost:8080", true},
+		{"127.0.0.1", true},
+		{"127.0.0.1:9090", true},
+		{"[::1]:8080", true},
+		{"app.example.com", true},
+		{"app.example.com:443", true},
+		{"allowed.local:8080", true},
+		{"direct.host.internal", true},
+		{"rebind.attacker.com", false},
+		{"192.168.1.50:8080", false},
+	}
+	for _, tc := range tests {
+		if got := s.isAllowedHost(tc.host); got != tc.want {
+			t.Errorf("isAllowedHost(%q) = %v, want %v", tc.host, got, tc.want)
+		}
+	}
+}
+
 func TestHTTPTransportOriginProtection(t *testing.T) {
 	dir := t.TempDir()
 	srv, err := NewServer(ServerOptions{
@@ -474,6 +505,22 @@ func TestHTTPTransportOriginProtection(t *testing.T) {
 
 	url := ts.URL + StreamableEndpoint
 	bodyDiscover := `{"jsonrpc":"2.0","id":1,"method":"server/discover","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}}}}`
+
+	// 0. Rejected host header
+	reqBadHost, err := http.NewRequest(http.MethodPost, url, strings.NewReader(bodyDiscover))
+	if err != nil {
+		t.Fatal(err)
+	}
+	reqBadHost.Host = "rebind.attacker.com"
+	reqBadHost.Header.Set(protocolVersionHeader, statelessRevision)
+	respBadHost, err := ts.Client().Do(reqBadHost)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = respBadHost.Body.Close()
+	if respBadHost.StatusCode != http.StatusForbidden {
+		t.Errorf("expected 403 for rebind host, got %d", respBadHost.StatusCode)
+	}
 
 	// 1. Rejected origin
 	badOrigin := map[string]string{

@@ -951,6 +951,9 @@ func TestBranchOperations(t *testing.T) {
 	if err := CreateBranch(ctx, workDir, "-bad", ""); err == nil {
 		t.Error("expected error for branch name starting with dash")
 	}
+	if err := CreateBranch(ctx, workDir, "valid-branch", "-bad-start"); err == nil {
+		t.Error("expected error for startPoint starting with dash")
+	}
 	if err := SwitchBranch(ctx, workDir, ""); err == nil {
 		t.Error("expected error for empty switch branch name")
 	}

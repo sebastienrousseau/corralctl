@@ -270,10 +270,14 @@ corralctl adopt ~/Projects --dry-run
 | `--owner` | | Remote namespace or user |
 | `--visibility` | `private` | Visibility of created remote repo (`private`, `public`) |
 | `--relocate` | off | Relocate local repository into structured corral workspace layout |
+| `--collection` | | Target collection directory (`Public`, `Private`, `Forks`, `Work`) |
 | `--target-dir` | | Destination root directory for relocation |
+| `--max-depth` | `0` | Maximum traversal depth to discover repositories (0 for unlimited) |
 | `--protocol` | `https` | Git transfer protocol (`https`, `ssh`) |
 | `--interactive`, `-i` | off | Enable interactive Bubble Tea candidate selection wizard |
 | `--untracked-only` | `true` | Only inspect untracked repositories |
+| `--finder-tags` | on (macOS) | Apply managed macOS Finder Tags (e.g. Orange New Repo) |
+| `--tag-only` | off | Flag untracked repositories in macOS Finder without moving files |
 | `--dry-run` | off | Simulate operations without modifying local disk or remotes |
 | `--output` | `text` | Output format: `text`, `json`, or `ndjson` |
 

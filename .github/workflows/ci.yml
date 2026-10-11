@@ -18,7 +18,7 @@ jobs:
       contents: read
     uses: sebastienrousseau/pipelines/.github/workflows/go-ci.yml@7061363af0a1da9d60c5901bd2874ac83ff7e34e
     with:
-      go-version: '1.26.6'
+      go-version: '1.26.9'
       run-cross-platform: true
       run-coverage: true
     # Passed explicitly, not `secrets: inherit`.

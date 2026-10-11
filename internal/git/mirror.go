@@ -95,11 +95,15 @@ func PushBranch(ctx context.Context, targetDir, remote, branch, pushURL string, 
 	if err := validateRemoteName(remote); err != nil {
 		return err
 	}
+	branch = strings.TrimSpace(branch)
+	if branch == "" || strings.HasPrefix(branch, "-") {
+		return fmt.Errorf("invalid branch name %q", branch)
+	}
 	env, err := pushAuthEnv(pushURL, cred)
 	if err != nil {
 		return err
 	}
-	args := []string{"push", "-u", "--no-verify", remote, branch}
+	args := []string{"push", "-u", "--no-verify", "--", remote, branch}
 	return runMirror(ctx, targetDir, env, args...)
 }
 

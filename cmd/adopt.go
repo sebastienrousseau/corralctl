@@ -10,12 +10,14 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	"github.com/sebastienrousseau/corralctl/internal/diag"
 	"github.com/sebastienrousseau/corralctl/internal/discover"
 	"github.com/sebastienrousseau/corralctl/internal/engine"
 	"github.com/sebastienrousseau/corralctl/internal/forge"
+	gitutil "github.com/sebastienrousseau/corralctl/internal/git"
 	"github.com/sebastienrousseau/corralctl/internal/github"
 	"github.com/sebastienrousseau/corralctl/internal/tui"
 	"github.com/spf13/cobra"
@@ -32,15 +34,21 @@ var (
 	adoptOutput        string
 	adoptUntrackedOnly bool
 	adoptInteractive   bool
+	adoptFinderTags    bool
+	adoptTagOnly       bool
+	adoptCollection    string
+	adoptMaxDepth      int
 
 	// Seams for testing
-	adoptDiscoverRun  = discover.Discover
-	adoptExecute      = engine.ExecuteAdoption
-	adoptResolveForge = forge.Resolve
-	adoptAsTarget     = forge.AsTarget
-	adoptForgeToken   = engine.ForgeToken
-	adoptFilepathAbs  = filepath.Abs
-	adoptWizardRun    = tui.RunAdoptWizard
+	adoptDiscoverRun        = discover.Discover
+	adoptExecute            = engine.ExecuteAdoption
+	adoptResolveForge       = forge.Resolve
+	adoptAsTarget           = forge.AsTarget
+	adoptForgeToken         = engine.ForgeToken
+	adoptFilepathAbs        = filepath.Abs
+	adoptWizardRun          = tui.RunAdoptWizard
+	adoptApplyCandidateTags = engine.ApplyCandidateFinderTags
+	adoptResolveLayout      = engine.ResolveLayoutPath
 )
 
 // adoptCmd scans for untracked local repositories, relocates them,
@@ -84,6 +92,7 @@ links local repositories to their new remote origin.`,
 		candidates, err := adoptDiscoverRun(ctx, discover.Options{
 			BaseDir:       absRoot,
 			UntrackedOnly: adoptUntrackedOnly,
+			MaxDepth:      adoptMaxDepth,
 		})
 		if err != nil {
 			return fmt.Errorf("discovery failed: %w", err)
@@ -91,6 +100,26 @@ links local repositories to their new remote origin.`,
 
 		if len(candidates) == 0 {
 			diag.Infof("No unmanaged repositories discovered under %s", absRoot)
+			return nil
+		}
+
+		if adoptFinderTags {
+			for _, cand := range candidates {
+				isNew := isAdoptCandidateNew(cand, adoptOwner, adoptForge, adoptForgeURL)
+				_ = adoptApplyCandidateTags(cand.Path, isNew, cand.DetectedLang)
+			}
+		}
+
+		if adoptTagOnly {
+			taggedCount := 0
+			for _, cand := range candidates {
+				isNew := isAdoptCandidateNew(cand, adoptOwner, adoptForge, adoptForgeURL)
+				if isNew {
+					taggedCount++
+					diag.Infof("Tagged in macOS Finder [Orange / New Repo]: %s (%s)", cand.Name, cand.Path)
+				}
+			}
+			diag.Infof("Tagged %d repositories in macOS Finder", taggedCount)
 			return nil
 		}
 
@@ -141,7 +170,15 @@ func processAdoption(ctx context.Context, candidates []discover.Candidate) error
 	for _, cand := range candidates {
 		newPath := cand.Path
 		if adoptRelocate && adoptTargetDir != "" {
-			newPath = filepath.Join(adoptTargetDir, cand.Name)
+			col := adoptCollection
+			if col == "" {
+				if adoptVisibility == "private" {
+					col = "Private"
+				} else {
+					col = "Public"
+				}
+			}
+			newPath = adoptResolveLayout(adoptTargetDir, col, cand.DetectedLang, cand.Name)
 		}
 
 		opts := engine.AdoptOptions{
@@ -181,17 +218,45 @@ func processAdoption(ctx context.Context, candidates []discover.Candidate) error
 	return nil
 }
 
+func isAdoptCandidateNew(cand discover.Candidate, owner, forgeName, forgeURL string) bool {
+	if !cand.HasRemote || strings.TrimSpace(cand.RemoteURL) == "" {
+		return true
+	}
+	if strings.TrimSpace(owner) == "" {
+		return false
+	}
+	identity := gitutil.CanonicalRemote(cand.RemoteURL)
+	if identity == "" {
+		return true
+	}
+	var prefixes []string
+	if forgeName != "" {
+		f, _ := adoptResolveForge(forgeName, forgeURL)
+		prefixes = forge.OwnerPrefixes(f, owner, forgeURL, nil)
+	} else {
+		for _, name := range forge.Names() {
+			f, _ := forge.Get(name)
+			prefixes = append(prefixes, forge.OwnerPrefixes(f, owner, "", nil)...)
+		}
+	}
+	return !forge.MatchesOwner(identity, prefixes)
+}
+
 func init() {
 	adoptCmd.Flags().StringVar(&adoptForge, "forge", "", "Destination forge (github, gitlab, gitea, forgejo, codeberg, bitbucket)")
 	adoptCmd.Flags().StringVar(&adoptForgeURL, "forge-url", "", "Custom instance URL for self-hosted forges")
 	adoptCmd.Flags().StringVar(&adoptOwner, "owner", "", "Target user or organization on the remote forge")
 	adoptCmd.Flags().StringVar(&adoptVisibility, "visibility", "private", "Repository visibility (private or public)")
 	adoptCmd.Flags().BoolVar(&adoptRelocate, "relocate", false, "Relocate repository into target directory")
+	adoptCmd.Flags().StringVar(&adoptCollection, "collection", "", "Target collection directory: Public, Private, Forks, Work (default depends on visibility)")
 	adoptCmd.Flags().StringVar(&adoptTargetDir, "target-dir", "", "Target directory when relocating")
 	adoptCmd.Flags().StringVar(&adoptProtocol, "protocol", "https", "Transport protocol (https or ssh)")
 	adoptCmd.Flags().StringVar(&adoptOutput, "output", "text", "Output format (text, json, ndjson)")
 	adoptCmd.Flags().BoolVar(&adoptUntrackedOnly, "untracked-only", true, "Limit discovery to repositories without an origin remote")
+	adoptCmd.Flags().IntVar(&adoptMaxDepth, "max-depth", 0, "Maximum directory depth to search for repositories (0 for unlimited)")
 	adoptCmd.Flags().BoolVarP(&adoptInteractive, "interactive", "i", false, "display an interactive selector dashboard to pick repositories to adopt")
+	adoptCmd.Flags().BoolVar(&adoptFinderTags, "finder-tags", runtime.GOOS == "darwin", "Apply managed macOS Finder Tags to discovered repositories")
+	adoptCmd.Flags().BoolVar(&adoptTagOnly, "tag-only", false, "Apply macOS Finder Tags to discovered repositories without relocating or creating remotes")
 	adoptCmd.Flags().BoolVar(&dryRun, "dry-run", false, "Report intended actions without making changes")
 
 	rootCmd.AddCommand(adoptCmd)

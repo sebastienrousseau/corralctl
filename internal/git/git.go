@@ -784,11 +784,19 @@ func resolveGitDir(targetDir string) (string, error) {
 // CreateWorktree creates a new linked Git worktree for targetDir at worktreePath.
 // If branch is non-empty, a new branch with that name is created.
 func CreateWorktree(ctx context.Context, targetDir, worktreePath, branch string) error {
+	branch = strings.TrimSpace(branch)
+	if strings.HasPrefix(branch, "-") {
+		return fmt.Errorf("invalid branch name %q", branch)
+	}
+	worktreePath = filepath.Clean(worktreePath)
+	if strings.HasPrefix(worktreePath, "-") {
+		return fmt.Errorf("invalid worktree path %q", worktreePath)
+	}
 	args := []string{"worktree", "add"}
 	if branch != "" {
 		args = append(args, "-b", branch)
 	}
-	args = append(args, worktreePath)
+	args = append(args, "--", worktreePath)
 	_, err := runGitOutput(ctx, targetDir, args...)
 	return err
 }
@@ -796,6 +804,10 @@ func CreateWorktree(ctx context.Context, targetDir, worktreePath, branch string)
 // RemoveWorktree deletes a linked Git worktree. When force is false, it refuses
 // if the worktree contains uncommitted or untracked changes.
 func RemoveWorktree(ctx context.Context, targetDir, worktreePath string, force bool) error {
+	worktreePath = filepath.Clean(worktreePath)
+	if strings.HasPrefix(worktreePath, "-") {
+		return fmt.Errorf("invalid worktree path %q", worktreePath)
+	}
 	if !force {
 		if hasChanges, reason := HasLocalChanges(ctx, worktreePath); hasChanges {
 			return fmt.Errorf("refusing to remove worktree: %s", reason)
@@ -805,7 +817,7 @@ func RemoveWorktree(ctx context.Context, targetDir, worktreePath string, force b
 	if force {
 		args = append(args, "--force")
 	}
-	args = append(args, worktreePath)
+	args = append(args, "--", worktreePath)
 	_, err := runGitOutput(ctx, targetDir, args...)
 	return err
 }
@@ -929,9 +941,15 @@ func CreateBranch(ctx context.Context, targetDir, branch, startPoint string) err
 	if branch == "" || strings.HasPrefix(branch, "-") {
 		return fmt.Errorf("invalid branch name %q", branch)
 	}
-	args := []string{"branch", branch}
+	startPoint = strings.TrimSpace(startPoint)
+	if strings.HasPrefix(startPoint, "-") {
+		return fmt.Errorf("invalid start point %q", startPoint)
+	}
+	args := []string{"branch"}
 	if startPoint != "" {
-		args = append(args, startPoint)
+		args = append(args, "--", branch, startPoint)
+	} else {
+		args = append(args, "--", branch)
 	}
 	_, err := runGitOutput(ctx, targetDir, args...)
 	return err
@@ -943,6 +961,6 @@ func SwitchBranch(ctx context.Context, targetDir, branch string) error {
 	if branch == "" || strings.HasPrefix(branch, "-") {
 		return fmt.Errorf("invalid branch name %q", branch)
 	}
-	_, err := runGitOutput(ctx, targetDir, "switch", branch)
+	_, err := runGitOutput(ctx, targetDir, "switch", "--", branch)
 	return err
 }

@@ -7,9 +7,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 
 	"github.com/sebastienrousseau/corralctl/internal/forge"
 	"github.com/sebastienrousseau/corralctl/internal/git"
@@ -23,6 +25,9 @@ var (
 	adoptMkdirAll      = os.MkdirAll
 	adoptIsEmpty       = git.IsEmpty
 	adoptCurrentBranch = git.CurrentBranch
+	adoptCopyDir       = copyDirRecursive
+	adoptRemoveAll     = os.RemoveAll
+	adoptReadFile      = os.ReadFile
 )
 
 // AdoptOptions encapsulates options for discovering, relocating, and
@@ -94,7 +99,14 @@ func ExecuteAdoption(ctx context.Context, opts AdoptOptions) (AdoptResult, error
 				return res, fmt.Errorf("creating directory layout: %w", err)
 			}
 			if err := adoptRename(opts.LocalPath, cleanTarget); err != nil {
-				return res, fmt.Errorf("relocating repository: %w", err)
+				if errors.Is(err, syscall.EXDEV) {
+					if copyErr := adoptCopyDir(opts.LocalPath, cleanTarget); copyErr != nil {
+						return res, fmt.Errorf("relocating repository across devices: %w", copyErr)
+					}
+					_ = adoptRemoveAll(opts.LocalPath)
+				} else {
+					return res, fmt.Errorf("relocating repository: %w", err)
+				}
 			}
 			finalPath = cleanTarget
 			res.FinalPath = finalPath
@@ -153,4 +165,22 @@ func ExecuteAdoption(ctx context.Context, opts AdoptOptions) (AdoptResult, error
 	res.Action = "ADOPTED"
 	res.Message = fmt.Sprintf("remote repository linked to %s and pushed", chosenURL)
 	return res, nil
+}
+
+func copyDirRecursive(src, dst string) error {
+	return filepath.WalkDir(src, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, _ := filepath.Rel(src, path)
+		target := filepath.Join(dst, rel)
+		if d.IsDir() {
+			return os.MkdirAll(target, 0o750)
+		}
+		data, err := adoptReadFile(path)
+		if err != nil {
+			return err
+		}
+		return os.WriteFile(target, data, 0o600)
+	})
 }

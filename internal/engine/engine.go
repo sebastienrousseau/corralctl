@@ -18,6 +18,8 @@ import (
 	"sync"
 	"text/template"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -941,6 +943,32 @@ func repositoryCollection(repo github.Repo) string {
 		return "Private"
 	}
 	return "Public"
+}
+
+// ResolveLayoutPath constructs the canonical destination directory path for an adopted
+// or relocated repository according to the collection, language ecosystem, and repository name.
+func ResolveLayoutPath(baseDir, collection, language, repoName string) string {
+	col := canonicalCollectionName(collection)
+	if col == "" {
+		trimmed := strings.TrimSpace(collection)
+		if trimmed == "" {
+			col = "Public"
+		} else {
+			r, size := utf8.DecodeRuneInString(trimmed)
+			col = string(unicode.ToUpper(r)) + strings.ToLower(trimmed[size:])
+		}
+	}
+	cleanName := filepath.Base(filepath.Clean(repoName))
+	if cleanName == "." || cleanName == "/" || cleanName == ".." {
+		cleanName = "unnamed-repo"
+	}
+	bucket := canonicalLanguage(language)
+	target := filepath.Join(baseDir, col, bucket, cleanName)
+	rel, err := filepath.Rel(baseDir, target)
+	if err != nil || strings.HasPrefix(rel, "..") || rel == "." {
+		return filepath.Join(baseDir, "Public", bucket, cleanName)
+	}
+	return target
 }
 
 func migrateLegacy(baseDir string, repos []github.Repo) {
