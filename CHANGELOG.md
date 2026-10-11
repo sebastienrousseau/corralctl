@@ -6,6 +6,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.46] - 2026-10-11
+
+### Documentation
+
+- **macOS Finder Color Labeling & Taxonomy Guide.**
+  Documented the complete macOS Finder color taxonomy across `README.md` and the
+  documentation site (`docs-site/content/usage.md`). Clarified exact trigger signals
+  and operational meanings for all color labels: Green (`Active` for pushes within 7 days
+  or non-default active branches), Orange (`New Repo` for unmanaged local candidates in adopt),
+  Purple (`Experiment` for forks, templates, and mirrors), Red (`Needs Fix` for sync or pull
+  failures), and Yellow (`On Hold` for archived repositories).
+- **Searchable Metadata & Spotlight Integration.**
+  Added comprehensive documentation for searchable text tags (`Ecosystem: <Lang>`,
+  `Visibility: <Type>`, `Collection: <Root>`, `Owner: <User>`), Finder sidebar color
+  filtering, and spotlight search queries.
+
 ## [0.0.45] - 2026-10-11
 
 ### Added
@@ -2662,7 +2678,8 @@ cron-safety overhaul.
   100 % doc coverage.
 - All tests green under `-race -count=1`.
 
-[Unreleased]: https://github.com/sebastienrousseau/corralctl/compare/v0.0.45...HEAD
+[Unreleased]: https://github.com/sebastienrousseau/corralctl/compare/v0.0.46...HEAD
+[0.0.46]: https://github.com/sebastienrousseau/corralctl/compare/v0.0.45...v0.0.46
 [0.0.45]: https://github.com/sebastienrousseau/corralctl/compare/v0.0.44...v0.0.45
 [0.0.44]: https://github.com/sebastienrousseau/corralctl/compare/v0.0.43...v0.0.44
 [0.0.43]: https://github.com/sebastienrousseau/corralctl/compare/v0.0.42...v0.0.43

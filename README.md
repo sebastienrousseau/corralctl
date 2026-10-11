@@ -316,22 +316,51 @@ Supported placeholders:
 - `{{.Language}}` — Primary language normalized to lowercase.
 - `{{.Visibility}}` — Repository visibility normalized to lowercase.
 
-### Finder Tags on macOS
+---
+
+## macOS Finder Color Labeling & Tags
 
 Finder tagging is enabled by default on macOS and can be disabled with
-`--finder-tags=false`. corralctl manages the following lifecycle taxonomy:
+`--finder-tags=false`. corralctl automatically categorises every repository folder
+using native macOS extended attributes (`com.apple.metadata:_kMDItemUserTags`),
+applying visual color dots and searchable metadata labels:
 
-| Color | Tag | Automatic signal |
+### Color Lifecycle Taxonomy
+
+| Color | Tag Name | Meaning & Trigger Signal |
 | :--- | :--- | :--- |
-| Green | `Active` | Pushed within seven days or checked out on a non-default branch |
-| Yellow | `On Hold` | Archived on GitHub |
-| Red | `Needs Fix` | corralctl encountered a sync failure for the matching clone |
-| Purple | `Experiment` | Fork, template, or mirror repository |
-| Orange | `New Repo` | Discovered unmanaged repository pending creation or origin link on remote forge |
+| 🟢 **Green** | `Active` | **Actively developed repository**. Applied when the remote repository has received pushes within the last 7 days, OR when your local clone is currently checked out on a non-default working branch (e.g., `feat/...`, `fix/...`). |
+| 🟠 **Orange** | `New Repo` | **Untracked or unmanaged repository**. Applied by `corralctl adopt` when discovering local repositories that have no remote origin configured or are not yet linked to your target forge. Lets you immediately find local work pending upstream publication. |
+| 🟣 **Purple** | `Experiment` | **Forks, templates, and mirrors**. Applied to upstream open-source forks, template repositories, and mirrors, distinguishing experimental or derivative code from your primary source projects. |
+| 🔴 **Red** | `Needs Fix` | **Sync or pull failure**. Applied when corralctl encounters an error (e.g., pull rebase conflict, unpushed diverged commits, detached HEAD, or network failure) so you can immediately see which clones require manual attention. |
+| 🟡 **Yellow** | `On Hold` | **Archived repository**. Applied when the remote repository has been archived on GitHub, GitLab, or another forge and is read-only. |
 
-Uncolored metadata tags include `Visibility: Public`, `Collection: Forks`,
-`Ecosystem: Rust`, `Owner: example`, `GitHub`, `Fork`, `Archived`, `Template`, and `Mirror`.
-Finder can combine these tags in searches or saved Smart Folders.
+### Searchable Metadata Tags
+
+In addition to color dots, corralctl writes plain text tags that macOS Finder and Spotlight index automatically:
+
+* `Ecosystem: <Language>`: Searchable by language bucket (e.g., `Ecosystem: Go`, `Ecosystem: Rust`, `Ecosystem: Python`, `Ecosystem: Web`).
+* `Visibility: <Visibility>`: `Visibility: Public` or `Visibility: Private`.
+* `Collection: <Collection>`: `Collection: Public`, `Collection: Private`, `Collection: Forks`, or `Collection: Work`.
+* `Owner: <Owner>`: Repository owner or organization namespace (e.g., `Owner: sebastienrousseau`).
+* Forge identifier: `GitHub`, `GitLab`, `Gitea`, `Forgejo`, `Codeberg`, or `Bitbucket`.
+* Repository characteristics: `Fork`, `Template`, `Mirror`, `Archived`.
+
+### Finder Searches & Smart Folders
+
+You can combine these tags in macOS Finder to organize and navigate your code:
+
+* **Finder Sidebar**: Click any color in Finder's sidebar (e.g., click **Green** to see all active projects across every language, or click **Orange** to review new repositories pending adoption).
+* **Spotlight & Finder Search**: Press `Cmd+F` in Finder and search:
+  * `tag:Active` - view all active working repositories
+  * `tag:"New Repo"` - view all unmanaged local repositories
+  * `tag:"Needs Fix"` - find broken or conflicted repositories
+  * `tag:Go` or `tag:"Ecosystem: Go"` - filter across collections by language
+* **Smart Folders**: Save searches as persistent Smart Folders in your Finder sidebar.
+
+### Preservation of Personal Tags
+
+corralctl never deletes or overwrites user-defined tags (such as `Client`, `Urgent`, or `Review`). It reads existing file tags, updates only the managed taxonomy, and merges your custom tags cleanly without data loss.
 
 ---
 

@@ -281,3 +281,29 @@ corralctl adopt ~/Projects --dry-run
 | `--dry-run` | off | Simulate operations without modifying local disk or remotes |
 | `--output` | `text` | Output format: `text`, `json`, or `ndjson` |
 
+## macOS Finder color tags and taxonomy
+
+On macOS, corralctl automatically categorises repository folders using native Finder tags and color labels (`com.apple.metadata:_kMDItemUserTags`). This taxonomy visually signals repository state and makes Finder searches and Smart Folders intuitive across large collections:
+
+| Color | Tag Name | Meaning & Trigger Signal |
+| --- | --- | --- |
+| 🟢 Green | `Active` | **Actively developed repository**: Pushed within the last 7 days, or currently checked out on a non-default working branch (`feat/...`, `fix/...`). |
+| 🟠 Orange | `New Repo` | **Untracked or local repository**: Discovered by `corralctl adopt` without an origin remote or not yet published upstream. |
+| 🟣 Purple | `Experiment` | **Forks, templates, and mirrors**: Experimental, derivative, or upstream open-source fork repositories. |
+| 🔴 Red | `Needs Fix` | **Sync or pull failure**: Merge conflicts, unpushed diverged commits, detached HEAD, or network errors requiring manual intervention. |
+| 🟡 Yellow | `On Hold` | **Archived repository**: Upstream repository has been archived on the remote forge. |
+
+### Searchable text tags
+
+corralctl also writes plain text metadata tags to each repository folder:
+* `Ecosystem: <Language>` (e.g., `Ecosystem: Go`, `Ecosystem: Rust`, `Ecosystem: Python`)
+* `Visibility: Public` or `Visibility: Private`
+* `Collection: Public`, `Collection: Private`, `Collection: Forks`, or `Collection: Work`
+* `Owner: <username>`
+* Forge tag: `GitHub`, `GitLab`, `Gitea`, `Forgejo`, `Codeberg`, `Bitbucket`
+* State tags: `Fork`, `Template`, `Mirror`, `Archived`
+
+### Searching in Finder
+
+You can search by tag in macOS Finder or Spotlight using `tag:Active`, `tag:"New Repo"`, `tag:"Needs Fix"`, or `tag:Go`, or click on any tag color in the Finder sidebar. Existing user-defined tags are always preserved.
+
