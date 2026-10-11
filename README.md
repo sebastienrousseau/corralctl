@@ -339,24 +339,24 @@ applying visual color dots and searchable metadata labels:
 
 In addition to color dots, corralctl writes plain text tags that macOS Finder and Spotlight index automatically:
 
-* `Ecosystem: <Language>`: Searchable by language bucket (e.g., `Ecosystem: Go`, `Ecosystem: Rust`, `Ecosystem: Python`, `Ecosystem: Web`).
-* `Visibility: <Visibility>`: `Visibility: Public` or `Visibility: Private`.
-* `Collection: <Collection>`: `Collection: Public`, `Collection: Private`, `Collection: Forks`, or `Collection: Work`.
-* `Owner: <Owner>`: Repository owner or organization namespace (e.g., `Owner: sebastienrousseau`).
-* Forge identifier: `GitHub`, `GitLab`, `Gitea`, `Forgejo`, `Codeberg`, or `Bitbucket`.
-* Repository characteristics: `Fork`, `Template`, `Mirror`, `Archived`.
+- `Ecosystem: <Language>`: Searchable by language bucket (e.g., `Ecosystem: Go`, `Ecosystem: Rust`, `Ecosystem: Python`, `Ecosystem: Web`).
+- `Visibility: <Visibility>`: `Visibility: Public` or `Visibility: Private`.
+- `Collection: <Collection>`: `Collection: Public`, `Collection: Private`, `Collection: Forks`, or `Collection: Work`.
+- `Owner: <Owner>`: Repository owner or organization namespace (e.g., `Owner: sebastienrousseau`).
+- Forge identifier: `GitHub`, `GitLab`, `Gitea`, `Forgejo`, `Codeberg`, or `Bitbucket`.
+- Repository characteristics: `Fork`, `Template`, `Mirror`, `Archived`.
 
 ### Finder Searches & Smart Folders
 
 You can combine these tags in macOS Finder to organize and navigate your code:
 
-* **Finder Sidebar**: Click any color in Finder's sidebar (e.g., click **Green** to see all active projects across every language, or click **Orange** to review new repositories pending adoption).
-* **Spotlight & Finder Search**: Press `Cmd+F` in Finder and search:
-  * `tag:Active` - view all active working repositories
-  * `tag:"New Repo"` - view all unmanaged local repositories
-  * `tag:"Needs Fix"` - find broken or conflicted repositories
-  * `tag:Go` or `tag:"Ecosystem: Go"` - filter across collections by language
-* **Smart Folders**: Save searches as persistent Smart Folders in your Finder sidebar.
+- **Finder Sidebar**: Click any color in Finder's sidebar (e.g., click **Green** to see all active projects across every language, or click **Orange** to review new repositories pending adoption).
+- **Spotlight & Finder Search**: Press `Cmd+F` in Finder and search:
+  - `tag:Active` - view all active working repositories
+  - `tag:"New Repo"` - view all unmanaged local repositories
+  - `tag:"Needs Fix"` - find broken or conflicted repositories
+  - `tag:Go` or `tag:"Ecosystem: Go"` - filter across collections by language
+- **Smart Folders**: Save searches as persistent Smart Folders in your Finder sidebar.
 
 ### Preservation of Personal Tags
 
