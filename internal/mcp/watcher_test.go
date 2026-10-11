@@ -422,4 +422,14 @@ func TestWarmSymbolsAsyncDefaultExecution(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	warmSymbolsAsync(srv, ctx)
+	for i := 0; i < 100; i++ {
+		srv.scanMu.Lock()
+		cached := srv.scanIndex != nil
+		srv.scanMu.Unlock()
+		if cached {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 }
+

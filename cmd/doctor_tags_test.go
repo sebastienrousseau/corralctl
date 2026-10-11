@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 
 	corralmcp "github.com/sebastienrousseau/corralctl/internal/mcp"
@@ -24,12 +25,17 @@ func TestRefreshWorkspaceFinderTags(t *testing.T) {
 	oldRefresh := doctorRefreshFinderTags
 	defer func() { doctorRefreshFinderTags = oldRefresh }()
 
-	var refreshedPaths []string
+	var (
+		mu             sync.Mutex
+		refreshedPaths []string
+	)
 	doctorRefreshFinderTags = func(path string) error {
 		if strings.Contains(path, "fail") {
 			return errors.New("simulated failure")
 		}
+		mu.Lock()
 		refreshedPaths = append(refreshedPaths, path)
+		mu.Unlock()
 		return nil
 	}
 
