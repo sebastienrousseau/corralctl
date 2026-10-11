@@ -15,7 +15,7 @@ import (
 
 func TestPlatformFinderTagsRoundTrip(t *testing.T) {
 	path := t.TempDir()
-	want := []string{"Active\n2", "Ecosystem: Go\n0"}
+	want := []string{"In-Flight\n2", "Ecosystem: Go\n0"}
 	if err := platformWriteFinderTags(path, want); err != nil {
 		t.Fatal(err)
 	}
@@ -25,6 +25,12 @@ func TestPlatformFinderTagsRoundTrip(t *testing.T) {
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("tags = %v, want %v", got, want)
+	}
+
+	// Write again to test existing 32-byte FinderInfo preservation
+	want2 := []string{"Pristine\n4", "Ecosystem: Go\n0"}
+	if err := platformWriteFinderTags(path, want2); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -72,16 +78,50 @@ func TestPlatformReadFinderTagsErrors(t *testing.T) {
 }
 
 func TestPlatformWriteFinderTagsErrors(t *testing.T) {
-	oldMarshal, oldSet := marshalPlist, setFinderXattr
-	t.Cleanup(func() { marshalPlist, setFinderXattr = oldMarshal, oldSet })
+	oldMarshal, oldSet, oldGet := marshalPlist, setFinderXattr, getFinderXattr
+	t.Cleanup(func() { marshalPlist, setFinderXattr, getFinderXattr = oldMarshal, oldSet, oldGet })
+
 	wantErr := errors.New("write")
 	marshalPlist = func(interface{}, int) ([]byte, error) { return nil, wantErr }
 	if err := platformWriteFinderTags("repo", nil); !errors.Is(err, wantErr) {
 		t.Fatalf("marshal error = %v", err)
 	}
 	marshalPlist = oldMarshal
-	setFinderXattr = func(string, string, []byte, int) error { return wantErr }
+
+	// First setFinderXattr call errors (finderTagsAttribute)
+	setFinderXattr = func(_ string, attr string, _ []byte, _ int) error {
+		if attr == finderTagsAttribute {
+			return wantErr
+		}
+		return nil
+	}
 	if err := platformWriteFinderTags("repo", nil); !errors.Is(err, wantErr) {
-		t.Fatalf("setxattr error = %v", err)
+		t.Fatalf("setxattr tags error = %v", err)
+	}
+
+	// getFinderXattr for finderInfoAttribute errors with non-ENOATTR
+	setFinderXattr = func(string, string, []byte, int) error { return nil }
+	getFinderXattr = func(_ string, attr string, _ []byte) (int, error) {
+		if attr == finderInfoAttribute {
+			return 0, wantErr
+		}
+		return 0, nil
+	}
+	if err := platformWriteFinderTags("repo", []string{"Pristine\n4"}); !errors.Is(err, wantErr) {
+		t.Fatalf("getxattr finderInfo error = %v", err)
+	}
+
+	// setFinderXattr for finderInfoAttribute errors
+	getFinderXattr = func(_ string, attr string, _ []byte) (int, error) {
+		return 0, unix.ENOATTR
+	}
+	setFinderXattr = func(_ string, attr string, _ []byte, _ int) error {
+		if attr == finderInfoAttribute {
+			return wantErr
+		}
+		return nil
+	}
+	if err := platformWriteFinderTags("repo", []string{"Pristine\n4"}); !errors.Is(err, wantErr) {
+		t.Fatalf("setxattr finderInfo error = %v", err)
 	}
 }

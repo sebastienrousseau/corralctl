@@ -4,26 +4,33 @@
 package engine
 
 import (
+	"context"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/sebastienrousseau/corralctl/internal/git"
 	"github.com/sebastienrousseau/corralctl/internal/github"
 )
 
 const (
+	finderNone   = 0
+	finderGrey   = 1
 	finderGreen  = 2
 	finderPurple = 3
+	finderBlue   = 4
 	finderYellow = 5
 	finderRed    = 6
 	finderOrange = 7
 )
 
 var (
-	readFinderTags  = platformReadFinderTags
-	writeFinderTags = platformWriteFinderTags
-	finderNow       = time.Now
+	readFinderTags   = platformReadFinderTags
+	writeFinderTags  = platformWriteFinderTags
+	finderNow        = time.Now
+	inspectGitStatus = git.InspectRepoStatus
 )
 
 // ApplyCandidateFinderTags applies macOS Finder tags and color labels to a candidate
@@ -43,15 +50,31 @@ func ApplyCandidateFinderTags(path string, isNew bool, ecosystem string) error {
 	return writeFinderTags(path, mergeFinderTags(existing, managed))
 }
 
+// RefreshRepoFinderTags audits local git status and re-applies managed Finder tags
+// and folder colors for an existing repository on disk without running a network sync.
+func RefreshRepoFinderTags(path string) error {
+	repo := github.Repo{}
+	if st, err := readCloneState(path); err == nil && !st.LastSyncedPushedAt.IsZero() {
+		repo.PushedAt = st.LastSyncedPushedAt
+	}
+	parts := strings.Split(filepath.Clean(path), string(filepath.Separator))
+	if len(parts) >= 3 {
+		repo.Language = parts[len(parts)-2]
+		repo.Visibility = parts[len(parts)-3]
+	}
+	result := RepoResult{Action: "SYNC", Message: "refreshed"}
+	return applyFinderTags(path, repo, result)
+}
+
 func applyFinderTags(path string, repo github.Repo, result RepoResult) error {
 	existing, err := readFinderTags(path)
 	if err != nil {
 		return err
 	}
-	return writeFinderTags(path, mergeFinderTags(existing, managedFinderTags(repo, result, finderNow())))
+	return writeFinderTags(path, mergeFinderTags(existing, managedFinderTags(path, repo, result, finderNow())))
 }
 
-func managedFinderTags(repo github.Repo, result RepoResult, now time.Time) []string {
+func managedFinderTags(path string, repo github.Repo, result RepoResult, now time.Time) []string {
 	tags := []string{
 		finderTag("GitHub", 0),
 		finderTag("Visibility: "+canonicalVisibility(repo.Visibility), 0),
@@ -66,15 +89,12 @@ func managedFinderTags(repo github.Repo, result RepoResult, now time.Time) []str
 		tags = append(tags, finderTag("Owner: "+owner, 0))
 	}
 
-	switch {
-	case result.Action == "ERROR" || strings.HasPrefix(result.Action, "FAIL"):
-		tags = append(tags, finderTag("Needs Fix", finderRed))
-	case repo.Archived:
-		tags = append(tags, finderTag("On Hold", finderYellow), finderTag("Archived", 0))
-	case repo.Fork || repo.IsTemplate || repo.IsMirror:
-		tags = append(tags, finderTag("Experiment", finderPurple))
-	case strings.HasPrefix(result.Message, "on branch ") || (!repo.PushedAt.IsZero() && repo.PushedAt.After(now.AddDate(0, 0, -7))):
-		tags = append(tags, finderTag("Active", finderGreen))
+	status, _ := inspectGitStatus(context.Background(), path)
+	labelName, labelColor := determineOperationalTag(status, repo, result)
+	tags = append(tags, finderTag(labelName, labelColor))
+
+	if repo.Archived {
+		tags = append(tags, finderTag("Archived", 0))
 	}
 	if repo.Fork {
 		tags = append(tags, finderTag("Fork", 0))
@@ -86,6 +106,37 @@ func managedFinderTags(repo github.Repo, result RepoResult, now time.Time) []str
 		tags = append(tags, finderTag("Mirror", 0))
 	}
 	return tags
+}
+
+func determineOperationalTag(status git.RepoStatus, repo github.Repo, result RepoResult) (string, int) {
+	switch {
+	case result.Action == "ERROR" || strings.HasPrefix(result.Action, "FAIL") || status.HasConflict || status.IsDiverged:
+		return "Needs Fix", finderRed
+	case status.IsDirty || status.HasUnpushed || status.HasStash:
+		return "In-Flight", finderGreen
+	case status.HasWorktree:
+		return "Worktree", finderPurple
+	case repo.Archived:
+		return "On Hold", finderYellow
+	case repo.Fork || repo.IsTemplate || repo.IsMirror:
+		return "Experiment", finderPurple
+	case status.IsDormant:
+		return "Dormant", finderGrey
+	default:
+		return "Pristine", finderBlue
+	}
+}
+
+func extractFinderColor(tags []string) int {
+	for _, tag := range tags {
+		parts := strings.SplitN(tag, "\n", 2)
+		if len(parts) == 2 {
+			if c, err := strconv.Atoi(parts[1]); err == nil && c > 0 {
+				return c
+			}
+		}
+	}
+	return 0
 }
 
 func mergeFinderTags(existing, managed []string) []string {
@@ -113,7 +164,7 @@ func mergeFinderTags(existing, managed []string) []string {
 func isManagedFinderTag(tag string) bool {
 	name := strings.SplitN(tag, "\n", 2)[0]
 	switch name {
-	case "Active", "On Hold", "Needs Fix", "Experiment", "New Repo", "GitHub", "Fork", "Archived", "Template", "Mirror":
+	case "Active", "In-Flight", "Pristine", "Dormant", "Worktree", "On Hold", "Needs Fix", "Experiment", "New Repo", "GitHub", "Fork", "Archived", "Template", "Mirror":
 		return true
 	}
 	return strings.HasPrefix(name, "Visibility: ") || strings.HasPrefix(name, "Collection: ") || strings.HasPrefix(name, "Ecosystem: ") || strings.HasPrefix(name, "Owner: ")

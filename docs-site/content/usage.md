@@ -282,28 +282,21 @@ corralctl adopt ~/Projects --dry-run
 | `--output` | `text` | Output format: `text`, `json`, or `ndjson` |
 
 ## macOS Finder color tags and taxonomy
-
-On macOS, corralctl automatically categorises repository folders using native Finder tags and color labels (`com.apple.metadata:_kMDItemUserTags`). This taxonomy visually signals repository state and makes Finder searches and Smart Folders intuitive across large collections:
+ 
+On macOS, corralctl automatically categorises repository folders using native Finder tags and color labels (`com.apple.metadata:_kMDItemUserTags` and `com.apple.FinderInfo`). This taxonomy visually signals repository state and makes Finder searches and Smart Folders intuitive across large collections:
 
 | Color | Tag Name | Meaning & Trigger Signal |
 | --- | --- | --- |
-| 🟢 Green | `Active` | **Actively developed repository**: Pushed within the last 7 days, or currently checked out on a non-default working branch (`feat/...`, `fix/...`). |
-| 🟠 Orange | `New Repo` | **Untracked or local repository**: Discovered by `corralctl adopt` without an origin remote or not yet published upstream. |
-| 🟣 Purple | `Experiment` | **Forks, templates, and mirrors**: Experimental, derivative, or upstream open-source fork repositories. |
-| 🔴 Red | `Needs Fix` | **Sync or pull failure**: Merge conflicts, unpushed diverged commits, detached HEAD, or network errors requiring manual intervention. |
+| 🔴 Red | `Needs Fix` | **Sync error or merge conflict**: Merge conflicts, diverged tracking branches, or sync failures requiring manual intervention. |
+| 🟢 Green | `In-Flight` | **Active modifications in progress**: Uncommitted working tree changes, unpushed commits, or stashes. |
+| 🟣 Purple | `Worktree` / `Experiment` | **Linked worktrees & experimental clones**: Active linked worktrees, upstream forks, templates, and mirrors. |
+| 🔵 Blue | `Pristine` | **Clean, synced ground truth**: Clean repository, fully pushed, in sync with upstream. |
 | 🟡 Yellow | `On Hold` | **Archived repository**: Upstream repository has been archived on the remote forge. |
-
-### Searchable text tags
-
-corralctl also writes plain text metadata tags to each repository folder:
-* `Ecosystem: <Language>` (e.g., `Ecosystem: Go`, `Ecosystem: Rust`, `Ecosystem: Python`)
-* `Visibility: Public` or `Visibility: Private`
-* `Collection: Public`, `Collection: Private`, `Collection: Forks`, or `Collection: Work`
-* `Owner: <username>`
-* Forge tag: `GitHub`, `GitLab`, `Gitea`, `Forgejo`, `Codeberg`, `Bitbucket`
-* State tags: `Fork`, `Template`, `Mirror`, `Archived`
+| ⚪ Grey | `Dormant` | **Untouched reference repository**: Clean repository with no commits for over 60 days. |
+| 🟠 Orange | `New Repo` | **Untracked or local repository**: Discovered by `corralctl adopt` without an origin remote or not yet published upstream. |
 
 ### Searching in Finder
 
-You can search by tag in macOS Finder or Spotlight using `tag:Active`, `tag:"New Repo"`, `tag:"Needs Fix"`, or `tag:Go`, or click on any tag color in the Finder sidebar. Existing user-defined tags are always preserved.
+You can search by tag in macOS Finder or Spotlight using `tag:"In-Flight"`, `tag:Pristine`, `tag:"New Repo"`, `tag:"Needs Fix"`, or `tag:Go`, or click on any tag color in the Finder sidebar. Existing user-defined tags are always preserved.
+
 
