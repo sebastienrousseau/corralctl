@@ -443,3 +443,40 @@ func TestAdoptCollectionAndRelocate(t *testing.T) {
 		t.Errorf("expected MaxDepth 3, got %d", capturedDiscoverOpts.MaxDepth)
 	}
 }
+
+func TestIsAdoptCandidateNew(t *testing.T) {
+	// 1. Untracked repo without remote
+	if !isAdoptCandidateNew(discover.Candidate{HasRemote: false}, "myuser", "", "") {
+		t.Errorf("expected candidate without remote to be new")
+	}
+
+	// 2. Repo with remote but empty remote URL
+	if !isAdoptCandidateNew(discover.Candidate{HasRemote: true, RemoteURL: ""}, "myuser", "", "") {
+		t.Errorf("expected candidate with empty remote URL to be new")
+	}
+
+	// 3. Repo with empty owner
+	if isAdoptCandidateNew(discover.Candidate{HasRemote: true, RemoteURL: "https://github.com/myuser/repo.git"}, "", "", "") {
+		t.Errorf("expected candidate with empty owner to not be new")
+	}
+
+	// 4. Repo with unparseable remote yielding empty identity
+	if !isAdoptCandidateNew(discover.Candidate{HasRemote: true, RemoteURL: "   "}, "myuser", "", "") {
+		t.Errorf("expected whitespace remote URL to be new")
+	}
+
+	// 5. Explicit forge specified
+	candMine := discover.Candidate{HasRemote: true, RemoteURL: "https://gitlab.com/myuser/repo.git"}
+	if isAdoptCandidateNew(candMine, "myuser", "gitlab", "") {
+		t.Errorf("expected candidate matching explicit forge to not be new")
+	}
+	candOther := discover.Candidate{HasRemote: true, RemoteURL: "https://gitlab.com/other/repo.git"}
+	if !isAdoptCandidateNew(candOther, "myuser", "gitlab", "") {
+		t.Errorf("expected candidate on explicit forge with different owner to be new")
+	}
+
+	// 6. Default all forges
+	if isAdoptCandidateNew(candMine, "myuser", "", "") {
+		t.Errorf("expected gitlab candidate to match across all forges")
+	}
+}

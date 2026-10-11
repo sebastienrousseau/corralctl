@@ -492,6 +492,18 @@ func TestCanonicalLanguageAndCollection(t *testing.T) {
 	if got := ResolveLayoutPath("/base", "work", "rust", "service"); got != filepath.Join("/base", "Work", "Rust", "service") {
 		t.Errorf("ResolveLayoutPath() work = %q, want %q", got, filepath.Join("/base", "Work", "Rust", "service"))
 	}
+	// Custom collection capitalization
+	if got := ResolveLayoutPath("/base", "custom", "python", "service"); got != filepath.Join("/base", "Custom", "Python", "service") {
+		t.Errorf("ResolveLayoutPath() custom = %q, want %q", got, filepath.Join("/base", "Custom", "Python", "service"))
+	}
+	// Invalid / dot repo name fallback
+	if got := ResolveLayoutPath("/base", "public", "go", ".."); got != filepath.Join("/base", "Public", "Go", "unnamed-repo") {
+		t.Errorf("ResolveLayoutPath() dot name = %q, want %q", got, filepath.Join("/base", "Public", "Go", "unnamed-repo"))
+	}
+	// Traversal collection escaping baseDir
+	if got := ResolveLayoutPath("/base", "../../../../evil", "go", "repo"); got != filepath.Join("/base", "Public", "Go", "repo") {
+		t.Errorf("ResolveLayoutPath() traversal escaping baseDir = %q, want %q", got, filepath.Join("/base", "Public", "Go", "repo"))
+	}
 }
 
 func TestEnsureAppleCollections(t *testing.T) {

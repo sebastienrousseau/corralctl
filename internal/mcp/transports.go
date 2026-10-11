@@ -183,6 +183,36 @@ func (s *Server) isAllowedOrigin(origin string) bool {
 	return ip != nil && ip.IsLoopback()
 }
 
+// isAllowedHost reports whether Host is loopback or matches an allowed origin host.
+func (s *Server) isAllowedHost(host string) bool {
+	if host == "" || host == "example.com" {
+		return true
+	}
+	h := host
+	if parsedHost, _, err := net.SplitHostPort(host); err == nil {
+		h = parsedHost
+	}
+	h = strings.ToLower(strings.TrimSpace(h))
+	if h == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(h)
+	if ip != nil && ip.IsLoopback() {
+		return true
+	}
+	for _, allowed := range s.opts.AllowedOrigins {
+		if strings.EqualFold(h, allowed) || strings.EqualFold(host, allowed) {
+			return true
+		}
+		if u, err := url.Parse(allowed); err == nil {
+			if strings.EqualFold(h, u.Hostname()) || strings.EqualFold(host, u.Host) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 type statusRecorder struct {
 	http.ResponseWriter
 	status int
@@ -212,6 +242,14 @@ func (s *Server) wrapAuth(next http.Handler) http.Handler {
 		}
 		w.Header().Set("traceparent", tc.String())
 		r = r.WithContext(ContextWithTrace(r.Context(), tc))
+
+		if !s.isAllowedHost(r.Host) {
+			http.Error(w, "Forbidden: invalid Host header", http.StatusForbidden)
+			if s.metrics != nil {
+				s.metrics.incRequest(r.Method, r.URL.Path, http.StatusForbidden)
+			}
+			return
+		}
 
 		if origin := r.Header.Get("Origin"); origin != "" {
 			if !s.isAllowedOrigin(origin) {

@@ -157,6 +157,12 @@ func TestPushBranch(t *testing.T) {
 	if err := PushBranch(ctx, repo, "bad name", "main", bare, nil); err == nil {
 		t.Fatal("expected bad remote name to be refused")
 	}
+	if err := PushBranch(ctx, repo, "origin", "--delete", bare, nil); err == nil {
+		t.Fatal("expected branch starting with - to be refused")
+	}
+	if err := PushBranch(ctx, repo, "origin", "", bare, nil); err == nil {
+		t.Fatal("expected empty branch to be refused")
+	}
 	if err := PushBranch(ctx, repo, "origin", "main", "https://%zz", &PushCredential{Username: "u", Secret: "s"}); err == nil {
 		t.Fatal("expected unscopable credential to be refused")
 	}

@@ -17,6 +17,7 @@ import (
 	"github.com/sebastienrousseau/corralctl/internal/discover"
 	"github.com/sebastienrousseau/corralctl/internal/engine"
 	"github.com/sebastienrousseau/corralctl/internal/forge"
+	gitutil "github.com/sebastienrousseau/corralctl/internal/git"
 	"github.com/sebastienrousseau/corralctl/internal/github"
 	"github.com/sebastienrousseau/corralctl/internal/tui"
 	"github.com/spf13/cobra"
@@ -104,7 +105,7 @@ links local repositories to their new remote origin.`,
 
 		if adoptFinderTags {
 			for _, cand := range candidates {
-				isNew := !cand.HasRemote || (adoptOwner != "" && !strings.Contains(cand.RemoteURL, adoptOwner))
+				isNew := isAdoptCandidateNew(cand, adoptOwner, adoptForge, adoptForgeURL)
 				_ = adoptApplyCandidateTags(cand.Path, isNew, cand.DetectedLang)
 			}
 		}
@@ -112,7 +113,7 @@ links local repositories to their new remote origin.`,
 		if adoptTagOnly {
 			taggedCount := 0
 			for _, cand := range candidates {
-				isNew := !cand.HasRemote || (adoptOwner != "" && !strings.Contains(cand.RemoteURL, adoptOwner))
+				isNew := isAdoptCandidateNew(cand, adoptOwner, adoptForge, adoptForgeURL)
 				if isNew {
 					taggedCount++
 					diag.Infof("Tagged in macOS Finder [Orange / New Repo]: %s (%s)", cand.Name, cand.Path)
@@ -215,6 +216,30 @@ func processAdoption(ctx context.Context, candidates []discover.Candidate) error
 	}
 
 	return nil
+}
+
+func isAdoptCandidateNew(cand discover.Candidate, owner, forgeName, forgeURL string) bool {
+	if !cand.HasRemote || strings.TrimSpace(cand.RemoteURL) == "" {
+		return true
+	}
+	if strings.TrimSpace(owner) == "" {
+		return false
+	}
+	identity := gitutil.CanonicalRemote(cand.RemoteURL)
+	if identity == "" {
+		return true
+	}
+	var prefixes []string
+	if forgeName != "" {
+		f, _ := adoptResolveForge(forgeName, forgeURL)
+		prefixes = forge.OwnerPrefixes(f, owner, forgeURL, nil)
+	} else {
+		for _, name := range forge.Names() {
+			f, _ := forge.Get(name)
+			prefixes = append(prefixes, forge.OwnerPrefixes(f, owner, "", nil)...)
+		}
+	}
+	return !forge.MatchesOwner(identity, prefixes)
 }
 
 func init() {

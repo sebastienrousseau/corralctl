@@ -8,6 +8,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"syscall"
 	"testing"
 
 	"github.com/sebastienrousseau/corralctl/internal/forge"
@@ -114,6 +115,42 @@ func TestExecuteAdoptionRelocation(t *testing.T) {
 	})
 	if err != nil || res.Action != "RELOCATED" || res.FinalPath != filepath.Clean("/new/path") {
 		t.Fatalf("expected RELOCATED, got %+v, err: %v", res, err)
+	}
+
+	// EXDEV with copyDir failure
+	origCopyDir := adoptCopyDir
+	origRemoveAll := adoptRemoveAll
+	defer func() {
+		adoptCopyDir = origCopyDir
+		adoptRemoveAll = origRemoveAll
+	}()
+	adoptRename = func(oldpath, newpath string) error { return syscall.EXDEV }
+	adoptCopyDir = func(src, dst string) error { return errors.New("copy failed") }
+	_, err = ExecuteAdoption(ctx, AdoptOptions{
+		RepoName:      "testrepo",
+		LocalPath:     "/old/path",
+		NewTargetDir:  "/new/path",
+		RelocateLocal: true,
+	})
+	if err == nil {
+		t.Fatal("expected EXDEV copy error")
+	}
+
+	// EXDEV with copyDir success
+	removed := false
+	adoptCopyDir = func(src, dst string) error { return nil }
+	adoptRemoveAll = func(path string) error {
+		removed = true
+		return nil
+	}
+	res, err = ExecuteAdoption(ctx, AdoptOptions{
+		RepoName:      "testrepo",
+		LocalPath:     "/old/path",
+		NewTargetDir:  "/new/path",
+		RelocateLocal: true,
+	})
+	if err != nil || !removed || res.FinalPath != filepath.Clean("/new/path") {
+		t.Fatalf("expected EXDEV success, got %+v, removed=%v, err: %v", res, removed, err)
 	}
 }
 
@@ -248,5 +285,43 @@ func TestExecuteAdoptionPushFlow(t *testing.T) {
 	})
 	if err != nil || res.Action != "ADOPTED" || res.RemoteURL != "git@example.com:testuser/sshsuccess.git" {
 		t.Fatalf("expected ADOPTED with SSH URL, got %+v, err: %v", res, err)
+	}
+}
+
+func TestCopyDirRecursive(t *testing.T) {
+	src := t.TempDir()
+	dst := filepath.Join(t.TempDir(), "target")
+
+	subDir := filepath.Join(src, "sub")
+	if err := os.MkdirAll(subDir, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	testFile := filepath.Join(subDir, "hello.txt")
+	if err := os.WriteFile(testFile, []byte("world"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := copyDirRecursive(src, dst); err != nil {
+		t.Fatalf("copyDirRecursive failed: %v", err)
+	}
+
+	if err := copyDirRecursive("/nonexistent/source", dst); err == nil {
+		t.Fatal("expected error for nonexistent source")
+	}
+
+	// Read error
+	origReadFile := adoptReadFile
+	defer func() { adoptReadFile = origReadFile }()
+	adoptReadFile = func(name string) ([]byte, error) {
+		return nil, errors.New("read error")
+	}
+	if err := copyDirRecursive(src, filepath.Join(t.TempDir(), "target2")); err == nil {
+		t.Fatal("expected error on read failure")
+	}
+	adoptReadFile = origReadFile
+
+	copiedData, err := os.ReadFile(filepath.Join(dst, "sub", "hello.txt")) // #nosec G304 -- test file path constructed from TempDir
+	if err != nil || string(copiedData) != "world" {
+		t.Fatalf("copied content mismatch: %v, %s", err, string(copiedData))
 	}
 }
