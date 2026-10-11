@@ -12,7 +12,10 @@ import (
 	"howett.net/plist"
 )
 
-const finderTagsAttribute = "com.apple.metadata:_kMDItemUserTags"
+const (
+	finderTagsAttribute = "com.apple.metadata:_kMDItemUserTags"
+	finderInfoAttribute = "com.apple.FinderInfo"
+)
 
 var (
 	getFinderXattr = unix.Getxattr
@@ -45,5 +48,19 @@ func platformWriteFinderTags(path string, tags []string) error {
 	if err != nil {
 		return err
 	}
-	return setFinderXattr(path, finderTagsAttribute, data, 0)
+	if err := setFinderXattr(path, finderTagsAttribute, data, 0); err != nil {
+		return err
+	}
+
+	// Synchronize com.apple.FinderInfo byte 9 to reflect folder color label
+	color := extractFinderColor(tags)
+	var finfo [32]byte
+	if n, err := getFinderXattr(path, finderInfoAttribute, finfo[:]); err == nil && n == 32 {
+		// Existing FinderInfo present, preserve all non-color flags
+	} else if err != nil && !errors.Is(err, unix.ENOATTR) {
+		return err
+	}
+	// Bits 1-3 of byte 9 store the label color index (0-7)
+	finfo[9] = (finfo[9] & 0xF1) | byte((color&0x07)<<1)
+	return setFinderXattr(path, finderInfoAttribute, finfo[:], 0)
 }

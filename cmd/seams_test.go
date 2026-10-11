@@ -38,6 +38,7 @@ func TestCmdSeamsBindToRealImplementations(t *testing.T) {
 		{"syncRun", syncRun, mirror.Run},
 		{"syncToken", syncToken, engine.ForgeToken},
 		{"asTarget", asTarget, forge.AsTarget},
+		{"doctorRefreshFinderTags", doctorRefreshFinderTags, engine.RefreshRepoFinderTags},
 	}
 	for _, tc := range cases {
 		if tc.got == nil || tc.want == nil {

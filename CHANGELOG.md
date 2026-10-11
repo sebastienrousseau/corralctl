@@ -6,6 +6,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.48] - 2026-10-11
+
+### Added
+
+- **High-Signal Operational Lifecycle (HSOL) Finder & Workspace Taxonomy.**
+  Replaces low-entropy uniform green tags with a high-contrast 7-color operational
+  taxonomy (Red for errors/divergence, Green for in-flight/dirty work, Purple for
+  active worktrees, Blue for clean pristine baselines, Yellow for archived, Orange
+  for unadopted candidates, Grey for dormant).
+- **macOS FinderInfo Dual-Write Engine.**
+  Synchronizes `com.apple.FinderInfo` byte 9 color labels alongside
+  `com.apple.metadata:_kMDItemUserTags` so folder icons and Finder column/list
+  views immediately reflect exact dot colors across the filesystem.
+- **Fast Local Git Inspection & Tag Refresh.**
+  Introduces local git status detection (`IsDirty`, `HasUnpushed`, `HasWorktrees`,
+  `IsDormant`) and the `--refresh-tags` flag in `corralctl doctor` to re-tag
+  workspaces in place without requiring network fetches.
+
 ## [0.0.47] - 2026-10-11
 
 ### Refactored
@@ -2687,7 +2705,8 @@ cron-safety overhaul.
   100 % doc coverage.
 - All tests green under `-race -count=1`.
 
-[Unreleased]: https://github.com/sebastienrousseau/corralctl/compare/v0.0.47...HEAD
+[Unreleased]: https://github.com/sebastienrousseau/corralctl/compare/v0.0.48...HEAD
+[0.0.48]: https://github.com/sebastienrousseau/corralctl/compare/v0.0.47...v0.0.48
 [0.0.47]: https://github.com/sebastienrousseau/corralctl/compare/v0.0.46...v0.0.47
 [0.0.46]: https://github.com/sebastienrousseau/corralctl/compare/v0.0.45...v0.0.46
 [0.0.45]: https://github.com/sebastienrousseau/corralctl/compare/v0.0.44...v0.0.45

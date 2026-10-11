@@ -45,6 +45,7 @@ func TestSeamsBindToRealImplementations(t *testing.T) {
 		{"mkdirAll", mkdirAll, os.MkdirAll},
 		{"renamePath", renamePath, os.Rename},
 		{"applyTags", applyTags, applyFinderTags},
+		{"inspectGitStatus", inspectGitStatus, git.InspectRepoStatus},
 	}
 	for _, tc := range cases {
 		gotPtr := reflect.ValueOf(tc.got).Pointer()
