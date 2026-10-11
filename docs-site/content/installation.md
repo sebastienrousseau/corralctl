@@ -106,7 +106,7 @@ Requires Go 1.26 or newer, and Git:
 
 ```bash
 git clone https://github.com/sebastienrousseau/corralctl.git
-cd corral
+cd corralctl
 make install
 ```
 

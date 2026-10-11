@@ -232,18 +232,33 @@ corralctl branch switch feat/new-api --language go
 ## Workspace health audits
 
 `corralctl doctor` audits all clones in your workspace for uncommitted changes,
-unpushed commits, detached heads, and stale linked worktrees:
+unpushed commits, detached heads, disk budget, cache integrity, and stale linked worktrees:
 
 ```bash
-# Run doctor audit
+# Run workspace health audit
 corralctl doctor
 
+# Refresh macOS Finder tags and folder color labels across all clones
+corralctl doctor --refresh-tags
+
+# Automatically prune stale and ephemeral linked worktrees
+corralctl doctor --prune-worktrees
+
 # Output as JSON for automated pipelines
-corralctl doctor --json
+corralctl doctor --output json
 ```
 
 Custom rule thresholds can be declared in `.corral.json` at your workspace root
-to configure warnings and limits for unpushed work and stale worktrees.
+to configure warnings and limits for unpushed work, dirty working trees, disk usage,
+and stale worktrees.
+
+| Option | Default | Description |
+| --- | --- | --- |
+| `--refresh-tags` | off | Refresh macOS Finder tags and folder color labels for all workspace repositories |
+| `--prune-worktrees` | off | Automatically prune stale and temporary linked worktrees |
+| `--config` | | Path to custom `.corral.json` configuration file |
+| `--output` | `text` | Output format: `text` or `json` |
+
 
 ## Adopting local repositories
 
