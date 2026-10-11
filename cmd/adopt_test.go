@@ -461,8 +461,8 @@ func TestIsAdoptCandidateNew(t *testing.T) {
 	}
 
 	// 4. Repo with unparseable remote yielding empty identity
-	if !isAdoptCandidateNew(discover.Candidate{HasRemote: true, RemoteURL: "   "}, "myuser", "", "") {
-		t.Errorf("expected whitespace remote URL to be new")
+	if !isAdoptCandidateNew(discover.Candidate{HasRemote: true, RemoteURL: ".git"}, "myuser", "", "") {
+		t.Errorf("expected .git remote URL to be new")
 	}
 
 	// 5. Explicit forge specified

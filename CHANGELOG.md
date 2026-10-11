@@ -6,6 +6,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.45] - 2026-10-11
+
+### Added
+
+- **Adopt Command CLI Flags (`corralctl adopt`).**
+  Added `--collection`, `--max-depth`, `--finder-tags`, and `--tag-only` flags
+  to the `adopt` command for granular control over workspace hierarchy placement,
+  filesystem search depth, and macOS Finder color tagging.
+- **Finder Color Labeling & Tagging Engine.**
+  Added automated Finder color tagging (`ApplyCandidateFinderTags`) for local
+  repositories: untracked candidates without remotes or matching owner are labeled
+  Orange (New Repo), and ecosystem languages are color-coded (Cyan for Go, Purple
+  for Rust, Blue for Python/Shell, Yellow for JavaScript/TypeScript).
+
+### Fixed
+
+- **Adopt Remote Identity Resolution.**
+  Enforced `git.CanonicalRemote` and `forge.MatchesOwner` across discovery and
+  adoption candidates, eliminating substring-matching false positives.
+- **Layout Path Traversal Containment.**
+  Hardened `engine.ResolveLayoutPath` with rune-safe UTF-8 capitalization, basename
+  sanitization, and strict `filepath.Rel` containment checks.
+- **Git Argument Injection Protection.**
+  Added `"--"` end-of-options delimiters and leading-hyphen input guards across
+  `PushBranch`, `CreateWorktree`, `RemoveWorktree`, `CreateBranch`, and `SwitchBranch`.
+- **MCP HTTP Host Header Validation.**
+  Added `isAllowedHost` check in HTTP/SSE transports rejecting unauthorized Host
+  headers to prevent DNS rebinding attacks.
+- **Cross-Device Relocation Fallback.**
+  Implemented recursive directory copy (`copyDirRecursive`) when cross-device
+  filesystem moves return `EXDEV` during repository adoption.
+
+### Stats
+
+- 16 packages at 100.0% statement coverage, 100.0% doc coverage.
+- All tests green under `-race -shuffle=on`.
+
 ## [0.0.44] — 2026-10-04
 
 ### Added
@@ -2625,7 +2662,8 @@ cron-safety overhaul.
   100 % doc coverage.
 - All tests green under `-race -count=1`.
 
-[Unreleased]: https://github.com/sebastienrousseau/corralctl/compare/v0.0.44...HEAD
+[Unreleased]: https://github.com/sebastienrousseau/corralctl/compare/v0.0.45...HEAD
+[0.0.45]: https://github.com/sebastienrousseau/corralctl/compare/v0.0.44...v0.0.45
 [0.0.44]: https://github.com/sebastienrousseau/corralctl/compare/v0.0.43...v0.0.44
 [0.0.43]: https://github.com/sebastienrousseau/corralctl/compare/v0.0.42...v0.0.43
 [0.0.42]: https://github.com/sebastienrousseau/corralctl/compare/v0.0.41...v0.0.42

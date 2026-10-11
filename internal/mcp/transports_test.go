@@ -457,7 +457,7 @@ func TestIsAllowedOrigin(t *testing.T) {
 func TestHostValidation(t *testing.T) {
 	s := &Server{
 		opts: ServerOptions{
-			AllowedOrigins: []string{"https://app.example.com", "http://allowed.local:8080"},
+			AllowedOrigins: []string{"https://app.example.com", "http://allowed.local:8080", "direct.host.internal"},
 		},
 	}
 	tests := []struct {
@@ -474,6 +474,7 @@ func TestHostValidation(t *testing.T) {
 		{"app.example.com", true},
 		{"app.example.com:443", true},
 		{"allowed.local:8080", true},
+		{"direct.host.internal", true},
 		{"rebind.attacker.com", false},
 		{"192.168.1.50:8080", false},
 	}

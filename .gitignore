@@ -15,6 +15,7 @@
 # Build artifacts
 /corral
 /corralctl
+bin/
 coverage.*
 dist/
 
