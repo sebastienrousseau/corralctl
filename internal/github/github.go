@@ -8,147 +8,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
-	"math/rand"
-	"net"
 	"net/http"
-	"os"
-	"os/exec"
-	"sort"
-	"strconv"
 	"strings"
-	"sync"
-	"time"
 
 	gh "github.com/google/go-github/v90/github"
-)
-
-// Repo represents a simplified repository structure returned by the GitHub API.
-type Repo struct {
-	// ID is GitHub's immutable repository identifier.
-	ID int64
-	// Owner is the repository owner's login.
-	Owner string
-	// FullName is the canonical owner/name identity.
-	FullName string
-	// Name is the repository name (without the owner prefix).
-	Name string
-	// Language is the primary programming language, or "Other" when unknown.
-	Language string
-	// Visibility is the normalized visibility, either "Public" or "Private".
-	Visibility string
-	// DefaultBranch is the repository's default branch name.
-	DefaultBranch string
-	// CloneURL is the HTTPS clone URL for the repository.
-	CloneURL string
-	// SSHURL is the SSH clone URL for the repository.
-	SSHURL string
-	// Fork reports whether the repository is a fork.
-	Fork bool
-	// Archived reports whether the repository is archived.
-	Archived bool
-	// PushedAt is the timestamp of the last push to any branch. The engine
-	// compares this against the cached value in <repo>/.corral-state.json to
-	// skip a `git pull` when nothing has changed upstream.
-	PushedAt time.Time
-	// Stars reports the stargazers count for the repository.
-	Stars int
-	// IsTemplate reports whether the repository is a template.
-	IsTemplate bool
-	// IsMirror reports whether the repository is a mirror.
-	IsMirror bool
-	// CanBeSponsored reports whether the repository has sponsorships enabled.
-	CanBeSponsored bool
-}
-
-// AuthMode controls how GitHub API credentials are resolved.
-type AuthMode string
-
-const (
-	// AuthModeAuto resolves credentials from the environment first, then the gh CLI.
-	AuthModeAuto AuthMode = "auto"
-	// AuthModeToken resolves credentials only from environment variables.
-	AuthModeToken AuthMode = "token"
-	// AuthModeGH resolves credentials only via the gh CLI (`gh auth token`).
-	AuthModeGH AuthMode = "gh"
-)
-
-// FetchOptions configures repository fetch behavior.
-type FetchOptions struct {
-	// Limit caps the number of repositories returned; 0 means no limit.
-	Limit int
-	// Visibility filters repositories by visibility ("all", "public", or "private").
-	Visibility string
-	// IncludeForks includes forked repositories when true.
-	IncludeForks bool
-	// IncludeArchived includes archived repositories when true.
-	IncludeArchived bool
-	// IncludeLanguages, when non-empty, keeps only repositories matching these languages.
-	IncludeLanguages []string
-	// ExcludeLanguages removes repositories matching these languages.
-	ExcludeLanguages []string
-	// AuthMode selects how the GitHub token is resolved.
-	AuthMode AuthMode
-	// Type filters repositories by specific category (e.g. "sources", "forks", "archived", "mirrors", etc.).
-	Type string
-	// Sort specifies how the returned repositories list should be ordered.
-	Sort string
-	// RetryMax is the maximum number of retry attempts for transient failures.
-	RetryMax int
-	// RetryMinBackoff is the minimum delay between retry attempts.
-	RetryMinBackoff time.Duration
-	// RetryMaxBackoff is the maximum delay between retry attempts.
-	RetryMaxBackoff time.Duration
-	// RequestTimeout bounds a single HTTP request to the GitHub API,
-	// including its redirects and body read. It does not bound the
-	// operation as a whole: listing a large organisation is many requests.
-	RequestTimeout time.Duration
-	// TotalTimeout bounds the complete operation — every page, every retry
-	// and every backoff between them. It must be at least RequestTimeout,
-	// and wants to be far larger: an organisation with 5,000 repositories
-	// is 50 pages at 100 per page, and a rate-limited run spends most of
-	// its budget waiting rather than transferring.
-	TotalTimeout time.Duration
-	// Timeout is the pre-v0.0.29 single knob, which was applied as both of
-	// the above at once. Kept so an embedder compiled against the old
-	// field keeps working: when it is set and the two fields above are
-	// not, it supplies both.
-	//
-	// Deprecated: set RequestTimeout and TotalTimeout instead.
-	Timeout time.Duration
-}
-
-const (
-	// defaultRequestTimeout bounds one HTTP request. 30s is generous for a
-	// single GitHub API call and short enough that a hung connection is
-	// noticed rather than waited on.
-	defaultRequestTimeout = 30 * time.Second
-	// defaultTotalTimeout bounds the whole paginated operation.
-	//
-	// The previous single 30s budget covered every page *and* every
-	// backoff, so a large organisation could not be listed at all: 50
-	// pages plus retries do not fit, and the run died with a context
-	// error that named no cause. 10 minutes fits a listing of any
-	// plausible size with room for the retry schedule.
-	defaultTotalTimeout    = 10 * time.Minute
-	defaultRetryMax        = 4
-	defaultRetryMinBackoff = 500 * time.Millisecond
-	defaultRetryMaxBackoff = 8 * time.Second
-)
-
-var (
-	runGitHubCLIAuthToken = func(ctx context.Context) (string, error) {
-		cmd := exec.CommandContext(ctx, "gh", "auth", "token")
-		out, err := cmd.Output()
-		if err != nil {
-			return "", fmt.Errorf("gh auth token failed: %w", err)
-		}
-		token := strings.TrimSpace(string(out))
-		if token == "" {
-			return "", errors.New("gh auth token returned an empty token")
-		}
-		return token, nil
-	}
 )
 
 // FetchRepos retrieves repositories for a given owner up to the specified limit.
@@ -171,9 +34,6 @@ func FetchReposWithOptions(ctx context.Context, owner string, opts FetchOptions)
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	// The whole operation gets TotalTimeout; each request inside it gets
-	// RequestTimeout. Applying one value to both is what made the retry
-	// path below unreachable.
 	ctx, cancel := context.WithTimeout(ctx, opts.TotalTimeout)
 	defer cancel()
 
@@ -187,9 +47,6 @@ func FetchReposWithOptions(ctx context.Context, owner string, opts FetchOptions)
 		},
 	}
 
-	// go-github v57+ replaced NewClient(*http.Client) with a variadic
-	// options constructor that also returns an error, and WithAuthToken moved
-	// from a chained client method to a ClientOptionsFunc.
 	client, err := newGitHubClient(gh.WithHTTPClient(httpClient), gh.WithAuthToken(token))
 	if err != nil {
 		return nil, fmt.Errorf("construct GitHub client: %w", err)
@@ -198,9 +55,7 @@ func FetchReposWithOptions(ctx context.Context, owner string, opts FetchOptions)
 }
 
 // newGitHubClient constructs the go-github client. A seam rather than a
-// direct call so the construction-failure branch is reachable from a test:
-// gh.NewClient only fails on a malformed option, which production code
-// cannot produce, and an unreachable error path is an untested error path.
+// direct call so the construction-failure branch is reachable from a test.
 var newGitHubClient = gh.NewClient
 
 // FetchReposWithClient allows injecting a GitHub client for retrieving repositories.
@@ -213,18 +68,10 @@ func FetchReposWithClient(ctx context.Context, client *gh.Client, owner string, 
 // listing endpoint suits the requested owner.
 type pageFetcher func(page int) ([]*gh.Repository, *gh.Response, error)
 
-// listingKind records which listing endpoint an owner resolves to. The
-// choice is made once, before any page is fetched, because it depends on
-// two API lookups that must not be repeated per page.
+// listingKind records which listing endpoint an owner resolves to.
 type listingKind struct {
-	// search is true when owner is a `topic:` or `language:` search query
-	// rather than a user or organisation.
-	search bool
-	// org is true when owner is a GitHub organisation.
-	org bool
-	// authenticatedUser is true when owner is the token's own account, in
-	// which case the authenticated-user endpoint is used so private
-	// repositories are included.
+	search            bool
+	org               bool
 	authenticatedUser bool
 }
 
@@ -252,7 +99,6 @@ func FetchReposWithClientOptions(ctx context.Context, client *gh.Client, owner s
 	}
 	fetchPage := newPageFetcher(ctx, client, owner, opts, kind)
 
-	// Fetch the first page to learn the total page count.
 	repos, resp, err := fetchPage(1)
 	if err != nil {
 		return nil, fmt.Errorf("failed listing repositories for '%s': %w", owner, err)
@@ -265,8 +111,6 @@ func FetchReposWithClientOptions(ctx context.Context, client *gh.Client, owner s
 			return nil, err
 		}
 	case resp.NextPage > 0 && collector.wants():
-		// Fallback to a sequential fetch when LastPage isn't provided but
-		// NextPage is.
 		if err := collectSequentially(owner, fetchPage, resp.NextPage, collector); err != nil {
 			return nil, err
 		}
@@ -295,9 +139,6 @@ func resolveListingKind(ctx context.Context, client *gh.Client, owner string) (l
 		return kind, nil
 	}
 
-	// When the requested owner is the authenticated user, list via the
-	// authenticated-user endpoint, which returns private repositories that the
-	// public ListByUser endpoint omits.
 	if authedUser, _, authErr := client.Users.Get(ctx, ""); authErr == nil {
 		login := authedUser.GetLogin()
 		kind.authenticatedUser = login != "" && login == u.GetLogin()
@@ -343,463 +184,6 @@ func newPageFetcher(ctx context.Context, client *gh.Client, owner string, opts F
 	}
 }
 
-// repoCollector accumulates mapped repositories, applying the language and
-// visibility filters and stopping at the requested limit.
-type repoCollector struct {
-	repos       []Repo
-	limit       int
-	includeLang map[string]struct{}
-	excludeLang map[string]struct{}
-	opts        FetchOptions
-}
-
-// wants reports whether the collector can still take more repositories.
-func (c *repoCollector) wants() bool {
-	return c.limit == 0 || len(c.repos) < c.limit
-}
-
-// remaining reports how many more repositories the collector can accept,
-// or 0 when it is unlimited. Used to decide how many pages are worth
-// fetching at all.
-func (c *repoCollector) remaining() int {
-	if c.limit == 0 {
-		return 0
-	}
-	if n := c.limit - len(c.repos); n > 0 {
-		return n
-	}
-	return 0
-}
-
-// absorb maps and filters one page of API results into the collection.
-func (c *repoCollector) absorb(page []*gh.Repository) {
-	for _, r := range page {
-		if !c.wants() {
-			return
-		}
-		c.take(mapRepository(r))
-	}
-}
-
-// absorbMapped filters an already-mapped page into the collection. The
-// concurrent fetch maps inside its workers so it never holds a page of
-// go-github Repository values longer than it must.
-func (c *repoCollector) absorbMapped(page []Repo) {
-	for _, repo := range page {
-		if !c.wants() {
-			return
-		}
-		c.take(repo)
-	}
-}
-
-// take applies the filters and keeps the repository if it passes.
-func (c *repoCollector) take(repo Repo) {
-	if !matchesFilters(repo, c.includeLang, c.excludeLang, c.opts) {
-		return
-	}
-	c.repos = append(c.repos, repo)
-}
-
-// perPage is the listing page size. GitHub's maximum, so a large
-// organisation costs the fewest possible round-trips.
-const perPage = 100
-
-// maxConcurrentPageFetches bounds how many listing pages are requested at
-// once. Five keeps a large organisation responsive without tripping GitHub's
-// secondary rate limits.
-//
-// A var rather than a const so a test can shrink it to zero, which makes the
-// semaphore unacquirable and the cancellation branch in collectConcurrently
-// deterministic instead of a scheduling race.
-var maxConcurrentPageFetches = 5
-
-// collectConcurrently fetches pages 2..lastPage in parallel, bounded to five
-// in flight, and absorbs them in page order so the result stays
-// deterministic regardless of completion order.
-func collectConcurrently(ctx context.Context, owner string, fetchPage pageFetcher, lastPage int, collector *repoCollector) error {
-	// Only fetch as far as the limit can consume.
-	//
-	// Page 1 is already absorbed, so the collector needs at most
-	// ceil(remaining / perPage) more pages. Without this,
-	// `corralctl bigorg --limit 10` against a 5,000-repository
-	// organisation fetched all 50 pages to keep 10 repositories — 49
-	// wasted round-trips against a rate limit, on every run.
-	//
-	// The cap is deliberately generous: filters (forks, archived,
-	// language) are applied after mapping, so a page can contribute fewer
-	// repositories than it holds. Overshooting by a page costs one
-	// request; undershooting would silently truncate the result.
-	if collector.limit > 0 {
-		want := collector.remaining()
-		if want == 0 {
-			// Already full. The caller guards this with wants(), so this is
-			// belt-and-braces — but "fetch every page" is the wrong thing to
-			// do when the answer is "fetch none".
-			return nil
-		}
-		needed := (want+perPage-1)/perPage + 1
-		if capped := 1 + needed; capped < lastPage {
-			lastPage = capped
-		}
-	}
-
-	var (
-		mu         sync.Mutex
-		errs       []error
-		resultsMap = make(map[int][]Repo)
-		sem        = make(chan struct{}, maxConcurrentPageFetches)
-		wg         sync.WaitGroup
-	)
-
-	for p := 2; p <= lastPage; p++ {
-		wg.Add(1)
-		go func(pNum int) {
-			defer wg.Done()
-			if err := acquirePageSlot(ctx, sem); err != nil {
-				mu.Lock()
-				errs = append(errs, err)
-				mu.Unlock()
-				return
-			}
-			defer func() { <-sem }()
-
-			pRepos, _, pErr := fetchPage(pNum)
-
-			// Map to the trimmed Repo before storing. go-github's
-			// Repository carries ~100 fields, nearly all pointers, and
-			// holding every page of them live at once was the peak of the
-			// fetch: a 5,000-repository listing kept 50 pages of full API
-			// objects in memory simultaneously, to preserve an ordering
-			// that a []Repo preserves just as well.
-			var mapped []Repo
-			if pErr == nil {
-				mapped = make([]Repo, 0, len(pRepos))
-				for _, r := range pRepos {
-					mapped = append(mapped, mapRepository(r))
-				}
-			}
-
-			mu.Lock()
-			defer mu.Unlock()
-			if pErr != nil {
-				errs = append(errs, pErr)
-				return
-			}
-			resultsMap[pNum] = mapped
-		}(p)
-	}
-	wg.Wait()
-
-	if len(errs) > 0 {
-		return fmt.Errorf("failed listing repositories for '%s' (concurrent fetch failed): %w", owner, errs[0])
-	}
-
-	// Absorbed in page order, so the result is the same regardless of
-	// which worker finished first.
-	for p := 2; p <= lastPage; p++ {
-		collector.absorbMapped(resultsMap[p])
-	}
-	return nil
-}
-
-// collectSequentially walks the NextPage chain from firstPage until the
-// listing is exhausted or the collector is full.
-func collectSequentially(owner string, fetchPage pageFetcher, firstPage int, collector *repoCollector) error {
-	page := firstPage
-	for {
-		pRepos, pResp, pErr := fetchPage(page)
-		if pErr != nil {
-			return fmt.Errorf("failed listing repositories for '%s' (fallback fetch failed): %w", owner, pErr)
-		}
-		collector.absorb(pRepos)
-		if pResp.NextPage == 0 || !collector.wants() {
-			return nil
-		}
-		page = pResp.NextPage
-	}
-}
-
-// sortRepos applies the requested post-fetch ordering in place. An unknown
-// or empty sort key leaves the API's own ordering untouched.
-func sortRepos(repos []Repo, key string) {
-	switch strings.ToLower(key) {
-	case "name":
-		sort.Slice(repos, func(i, j int) bool {
-			return strings.ToLower(repos[i].Name) < strings.ToLower(repos[j].Name)
-		})
-	case "stars":
-		sort.Slice(repos, func(i, j int) bool {
-			return repos[i].Stars > repos[j].Stars
-		})
-	case "last updated", "updated":
-		sort.Slice(repos, func(i, j int) bool {
-			return repos[i].PushedAt.After(repos[j].PushedAt)
-		})
-	}
-}
-
-func acquirePageSlot(ctx context.Context, sem chan struct{}) error {
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	case sem <- struct{}{}:
-		return nil
-	}
-}
-
-type retryTransport struct {
-	base       http.RoundTripper
-	maxRetries int
-	minBackoff time.Duration
-	maxBackoff time.Duration
-}
-
-// RoundTrip implements http.RoundTripper, retrying transient failures and
-// rate-limit responses with backoff until the request succeeds, becomes
-// non-retryable, the retry budget is exhausted, or the context is cancelled.
-func (t *retryTransport) RoundTrip(req *http.Request) (*http.Response, error) {
-	base := t.base
-	if base == nil {
-		base = http.DefaultTransport
-	}
-
-	for attempt := 0; ; attempt++ {
-		clonedReq := req.Clone(req.Context())
-		resp, err := base.RoundTrip(clonedReq)
-
-		retry, wait := shouldRetry(resp, err, attempt, t.maxRetries)
-		if !retry {
-			return resp, err
-		}
-		if resp != nil && resp.Body != nil {
-			_, _ = io.Copy(io.Discard, resp.Body)
-			_ = resp.Body.Close()
-		}
-
-		if wait <= 0 {
-			wait = t.backoff(attempt)
-		}
-
-		// Sleeping past the operation's deadline helps nobody: the wait is
-		// guaranteed to lose the race below, and the caller then sees a bare
-		// "context deadline exceeded" that names neither the rate limit nor
-		// when it lifts. Report it now, while the reason is still known.
-		//
-		// This is the branch that could not previously be reached at all:
-		// with one 30s budget covering both the request and the whole
-		// operation, a reset further out than the remaining time always lost,
-		// so the rate-limit handling never completed a single wait.
-		if deadline, ok := req.Context().Deadline(); ok {
-			if remaining := time.Until(deadline); wait > remaining {
-				return nil, &RetryBudgetError{
-					Wait:      wait,
-					Remaining: remaining,
-					Status:    statusOf(resp),
-				}
-			}
-		}
-
-		timer := time.NewTimer(wait)
-		select {
-		case <-req.Context().Done():
-			timer.Stop()
-			return nil, req.Context().Err()
-		case <-timer.C:
-		}
-	}
-}
-
-// RetryBudgetError reports that a retry was required but could not be
-// waited out inside the operation's remaining time. It carries the numbers
-// so the message can tell the user what to raise, rather than leaving them
-// with a deadline error and no cause.
-type RetryBudgetError struct {
-	// Wait is how long the server asked us to wait.
-	Wait time.Duration
-	// Remaining is how much of --api-total-timeout was left.
-	Remaining time.Duration
-	// Status is the HTTP status that triggered the retry, or 0 for a
-	// transport error.
-	Status int
-}
-
-// Error implements the error interface.
-func (e *RetryBudgetError) Error() string {
-	reason := "the server asked us to back off"
-	if e.Status == http.StatusForbidden || e.Status == http.StatusTooManyRequests {
-		reason = "GitHub rate-limited this token"
-	}
-	return fmt.Sprintf(
-		"%s for %s, but only %s of the total budget remained; "+
-			"raise --api-total-timeout above %s to wait it out",
-		reason, e.Wait.Round(time.Second), e.Remaining.Round(time.Second),
-		e.Wait.Round(time.Second))
-}
-
-// statusOf returns resp's status code, or 0 when there is no response.
-func statusOf(resp *http.Response) int {
-	if resp == nil {
-		return 0
-	}
-	return resp.StatusCode
-}
-
-func (t *retryTransport) backoff(attempt int) time.Duration {
-	minBackoff := t.minBackoff
-	maxBackoff := t.maxBackoff
-	if minBackoff <= 0 {
-		minBackoff = defaultRetryMinBackoff
-	}
-	if maxBackoff <= 0 {
-		maxBackoff = defaultRetryMaxBackoff
-	}
-
-	backoff := minBackoff << attempt
-	if backoff > maxBackoff {
-		backoff = maxBackoff
-	}
-	// Non-cryptographic randomness is acceptable for retry backoff jitter.
-	jitter := time.Duration(rand.Int63n(int64(minBackoff) + 1)) //nolint:gosec // G404: jitter does not require crypto/rand
-	return backoff + jitter
-}
-
-func shouldRetry(resp *http.Response, err error, attempt, maxRetries int) (bool, time.Duration) {
-	if attempt >= maxRetries {
-		return false, 0
-	}
-
-	if err != nil {
-		if isRetryableNetworkError(err) {
-			return true, 0
-		}
-		return false, 0
-	}
-	if resp == nil {
-		return false, 0
-	}
-
-	if d, ok := retryAfterDuration(resp); ok {
-		return true, d
-	}
-
-	switch resp.StatusCode {
-	case http.StatusRequestTimeout, http.StatusTooManyRequests, http.StatusInternalServerError,
-		http.StatusBadGateway, http.StatusServiceUnavailable, http.StatusGatewayTimeout:
-		return true, 0
-	case http.StatusForbidden:
-		if strings.TrimSpace(resp.Header.Get("X-RateLimit-Remaining")) == "0" {
-			if d, ok := rateLimitResetDuration(resp); ok {
-				return true, d
-			}
-			return true, time.Minute
-		}
-	}
-
-	return false, 0
-}
-
-func isRetryableNetworkError(err error) bool {
-	var netErr net.Error
-	if errors.As(err, &netErr) {
-		return true
-	}
-	return errors.Is(err, io.EOF)
-}
-
-func retryAfterDuration(resp *http.Response) (time.Duration, bool) {
-	h := strings.TrimSpace(resp.Header.Get("Retry-After"))
-	if h == "" {
-		return 0, false
-	}
-	if seconds, err := strconv.Atoi(h); err == nil {
-		if seconds < 0 {
-			seconds = 0
-		}
-		return time.Duration(seconds) * time.Second, true
-	}
-	if t, err := http.ParseTime(h); err == nil {
-		d := time.Until(t)
-		if d < 0 {
-			d = 0
-		}
-		return d, true
-	}
-	return 0, false
-}
-
-func rateLimitResetDuration(resp *http.Response) (time.Duration, bool) {
-	h := strings.TrimSpace(resp.Header.Get("X-RateLimit-Reset"))
-	if h == "" {
-		return 0, false
-	}
-	sec, err := strconv.ParseInt(h, 10, 64)
-	if err != nil {
-		return 0, false
-	}
-	resetAt := time.Unix(sec, 0)
-	d := time.Until(resetAt)
-	if d < 0 {
-		d = 0
-	}
-	return d, true
-}
-
-func envToken() string {
-	if token := strings.TrimSpace(os.Getenv("GITHUB_TOKEN")); token != "" {
-		return token
-	}
-	if token := strings.TrimSpace(os.Getenv("GH_TOKEN")); token != "" {
-		return token
-	}
-	return ""
-}
-
-// Token resolves a GitHub token for the given auth mode, returning an empty
-// string when none can be obtained. It lets the git package authenticate HTTPS
-// clones and pulls of private repositories with the same credential as the API.
-func Token(ctx context.Context, authMode AuthMode) string {
-	tok, err := resolveToken(ctx, authMode)
-	if err != nil {
-		return ""
-	}
-	return tok
-}
-
-func resolveToken(ctx context.Context, authMode AuthMode) (string, error) {
-	switch normalizeAuthMode(authMode) {
-	case AuthModeToken:
-		token := envToken()
-		if token == "" {
-			return "", errors.New("GITHUB_TOKEN (or GH_TOKEN) environment variable not set")
-		}
-		return token, nil
-	case AuthModeGH:
-		return runGitHubCLIAuthToken(ctx)
-	default:
-		token := envToken()
-		if token != "" {
-			return token, nil
-		}
-		token, err := runGitHubCLIAuthToken(ctx)
-		if err != nil {
-			return "", fmt.Errorf("failed to resolve GitHub token (auto mode): %w", err)
-		}
-		return token, nil
-	}
-}
-
-func normalizeAuthMode(authMode AuthMode) AuthMode {
-	switch AuthMode(strings.ToLower(strings.TrimSpace(string(authMode)))) {
-	case AuthModeToken:
-		return AuthModeToken
-	case AuthModeGH:
-		return AuthModeGH
-	default:
-		return AuthModeAuto
-	}
-}
-
 func normalizeFetchOptions(opts FetchOptions) FetchOptions {
 	if opts.Limit < 0 {
 		opts.Limit = 0
@@ -826,9 +210,6 @@ func normalizeFetchOptions(opts FetchOptions) FetchOptions {
 	if opts.RetryMaxBackoff < opts.RetryMinBackoff {
 		opts.RetryMaxBackoff = opts.RetryMinBackoff
 	}
-	// The deprecated single knob supplies both halves when the caller set
-	// it and nothing else, so an embedder that has not migrated keeps the
-	// behaviour it had.
 	if opts.Timeout > 0 {
 		if opts.RequestTimeout <= 0 {
 			opts.RequestTimeout = opts.Timeout
@@ -843,9 +224,6 @@ func normalizeFetchOptions(opts FetchOptions) FetchOptions {
 	if opts.TotalTimeout <= 0 {
 		opts.TotalTimeout = defaultTotalTimeout
 	}
-	// A total smaller than a single request cannot be satisfied: the first
-	// request would outlive the operation. Raise it rather than fail, so a
-	// caller passing only RequestTimeout gets something coherent.
 	if opts.TotalTimeout < opts.RequestTimeout {
 		opts.TotalTimeout = opts.RequestTimeout
 	}
@@ -863,171 +241,8 @@ func orgTypeForVisibility(v string) string {
 	}
 }
 
-func toLookupSet(values []string) map[string]struct{} {
-	if len(values) == 0 {
-		return nil
-	}
-	out := make(map[string]struct{}, len(values))
-	for _, v := range values {
-		norm := strings.ToLower(strings.TrimSpace(v))
-		if norm == "" {
-			continue
-		}
-		out[norm] = struct{}{}
-	}
-	if len(out) == 0 {
-		return nil
-	}
-	return out
-}
-
-func matchesFilters(repo Repo, includeLang, excludeLang map[string]struct{}, opts FetchOptions) bool {
-	if !opts.IncludeForks && repo.Fork {
-		return false
-	}
-	if !opts.IncludeArchived && repo.Archived {
-		return false
-	}
-	if opts.Visibility == "public" && repo.Visibility != "Public" {
-		return false
-	}
-	if opts.Visibility == "private" && repo.Visibility != "Private" {
-		return false
-	}
-
-	// Apply post-fetch Type filtering
-	if opts.Type != "" {
-		switch strings.ToLower(opts.Type) {
-		case "public":
-			if repo.Visibility != "Public" {
-				return false
-			}
-		case "private":
-			if repo.Visibility != "Private" {
-				return false
-			}
-		case "sources":
-			if repo.Fork {
-				return false
-			}
-		case "forks":
-			if !repo.Fork {
-				return false
-			}
-		case "archived":
-			if !repo.Archived {
-				return false
-			}
-		case "can be sponsored", "sponsored":
-			// Unreachable: rejected by cmd.validateCommonFlags before a
-			// fetch is issued, because CanBeSponsored is not carried by
-			// the REST listing endpoints. Kept as a guard so a future
-			// caller bypassing the CLI still filters nothing in rather
-			// than filtering everything out.
-			return repo.CanBeSponsored
-		case "mirrors":
-			if !repo.IsMirror {
-				return false
-			}
-		case "templates":
-			if !repo.IsTemplate {
-				return false
-			}
-		}
-	}
-
-	lang := strings.ToLower(strings.TrimSpace(repo.Language))
-	if includeLang != nil {
-		if _, ok := includeLang[lang]; !ok {
-			return false
-		}
-	}
-	if excludeLang != nil {
-		if _, ok := excludeLang[lang]; ok {
-			return false
-		}
-	}
-
-	return true
-}
-
-func mapRepository(r *gh.Repository) Repo {
-	owner := r.GetOwner().GetLogin()
-	fullName := r.GetFullName()
-	if fullName == "" && owner != "" && r.GetName() != "" {
-		fullName = owner + "/" + r.GetName()
-	}
-	lang := "Other"
-	if r.Language != nil {
-		lang = *r.Language
-	}
-
-	// Private is authoritative and Visibility refines it. Reading only
-	// Visibility meant a nil pointer — which some endpoints and older API
-	// versions return — fell through to "Public", and visibility decides
-	// the on-disk Collection. A private repository was therefore filed
-	// under Public/ and reported as public by the MCP tools.
-	visibility := "Public"
-	if r.GetPrivate() {
-		visibility = "Private"
-	}
-	if r.Visibility != nil && (*r.Visibility == "private" || *r.Visibility == "internal") {
-		visibility = "Private"
-	}
-
-	defaultBranch := "main"
-	if r.DefaultBranch != nil {
-		defaultBranch = *r.DefaultBranch
-	}
-
-	cloneURL := ""
-	if r.CloneURL != nil {
-		cloneURL = *r.CloneURL
-	}
-	sshURL := ""
-	if r.SSHURL != nil {
-		sshURL = *r.SSHURL
-	}
-
-	return Repo{
-		ID:            r.GetID(),
-		Owner:         owner,
-		FullName:      fullName,
-		Name:          r.GetName(),
-		Language:      lang,
-		Visibility:    visibility,
-		DefaultBranch: defaultBranch,
-		CloneURL:      cloneURL,
-		SSHURL:        sshURL,
-		Fork:          r.GetFork(),
-		Archived:      r.GetArchived(),
-		PushedAt:      r.GetPushedAt().Time,
-		Stars:         r.GetStargazersCount(),
-		IsTemplate:    r.GetIsTemplate(),
-		IsMirror:      r.GetMirrorURL() != "",
-		// Not exposed by the REST listing endpoints; populating it needs a
-		// per-repository GraphQL query. Left false deliberately, and the
-		// --type value that depended on it is refused at flag validation
-		// rather than silently returning an empty result.
-		CanBeSponsored: false,
-	}
-}
-
 // describeOwnerLookupError turns a failed owner lookup into a message a person
 // can act on.
-//
-// The raw error from go-github reads:
-//
-//	failed to get user/org 'sebastienrouseau': GET https://api.github.com/users/sebastienrouseau: 404 Not Found []
-//
-// which leaks the transport, ends in an empty bracket pair, and says nothing
-// about what to do — while the overwhelmingly likely cause is a one-character
-// typo in a username. clig.dev: "catch errors and rewrite them for humans".
-//
-// On a 404 this reports that the owner does not exist and, when the mistyped
-// name is close to the authenticated user's own login, names the correction.
-// Other failures (rate limits, network, auth) keep their original text, which is
-// already the actionable part.
 func describeOwnerLookupError(ctx context.Context, client *gh.Client, owner string, err error) error {
 	var apiErr *gh.ErrorResponse
 	if !errors.As(err, &apiErr) || apiErr.Response == nil ||
@@ -1037,8 +252,6 @@ func describeOwnerLookupError(ctx context.Context, client *gh.Client, owner stri
 
 	msg := fmt.Sprintf("no GitHub user or organisation named %q", owner)
 
-	// A 404 for an owner that does exist means it is private and the current
-	// credentials cannot see it, so mention auth as well as spelling.
 	if login := authenticatedLogin(ctx, client); login != "" {
 		if login != owner && levenshtein(strings.ToLower(owner), strings.ToLower(login)) <= 2 {
 			return fmt.Errorf("%s\n\nDid you mean your own account?\n\tcorralctl %s", msg, login)
@@ -1048,9 +261,6 @@ func describeOwnerLookupError(ctx context.Context, client *gh.Client, owner stri
 		"confirm your credentials can see it with `gh auth status`", msg)
 }
 
-// authenticatedLogin returns the login of the credentialed user, or "" when
-// unauthenticated or the call fails. Never an error: this is only used to
-// improve a message that is already being returned.
 func authenticatedLogin(ctx context.Context, client *gh.Client) string {
 	u, _, err := client.Users.Get(ctx, "")
 	if err != nil {

@@ -11,26 +11,10 @@ import (
 	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-
 	"github.com/sebastienrousseau/corralctl/internal/diag"
-	"github.com/sebastienrousseau/corralctl/internal/discover"
 	"github.com/sebastienrousseau/corralctl/internal/git"
-	"github.com/sebastienrousseau/corralctl/internal/graph"
 	"github.com/sebastienrousseau/corralctl/internal/sanitize"
 )
-
-// Read-only tool set.
-//
-// Input schemas are derived from the Go structs below by the SDK, rather than
-// declared with chained builders and then re-read with GetString/GetBool at the
-// top of every handler. That removes the two places those could disagree: a
-// parameter present in the schema but never read, and a parameter read but
-// never declared. The `jsonschema` tags carry the descriptions the model sees.
-//
-// Annotations are set explicitly on every tool. They are not optional in
-// practice: an omitted destructiveHint serialises as true, so leaving them off
-// marked every read tool destructive and made corral_delete_repo's annotation
-// indistinguishable from a directory listing's.
 
 // listReposInput is the argument set for corral_list_repos.
 type listReposInput struct {
@@ -48,11 +32,6 @@ type queryInput struct {
 	Query string `json:"query" jsonschema:"Repository identifier: bare name ('corral'), relative path ('Public/go/corral'), or any path suffix that uniquely identifies a repo."`
 }
 
-// graphDependenciesInput is the argument set for corral_graph_dependencies.
-type graphDependenciesInput struct {
-	Repo string `json:"repo,omitempty" jsonschema:"Optional repository identifier to focus on. If provided, returns the direct dependencies and dependents for this repository."`
-}
-
 // pageInput is the argument set for corral_workspace_index.
 type pageInput struct {
 	Limit          int    `json:"limit,omitempty" jsonschema:"Maximum repositories to return. Default 50, maximum 200."`
@@ -60,43 +39,30 @@ type pageInput struct {
 	ResponseFormat string `json:"response_format,omitempty" jsonschema:"'concise' (default) or 'detailed'."`
 }
 
-// doctorInput is the argument set for corral_doctor.
-type doctorInput struct {
-	CheckCaches bool `json:"check_caches,omitempty" jsonschema:"When true, perform deeper inspection of cache and index states."`
-}
-
-// DoctorOutput describes the overall workspace health, uncommitted changes, and worktrees.
-type DoctorOutput struct {
-	BaseDir       string          `json:"base_dir"`
-	TotalRepos    int             `json:"total_repos"`
-	ByVisibility  []LanguageCount `json:"by_visibility"`
-	ByLanguage    []LanguageCount `json:"by_language"`
-	DirtyRepos    []string        `json:"dirty_repos"`
-	UnpushedRepos []string        `json:"unpushed_repos"`
-	Worktrees     []string        `json:"worktrees"`
-	Healthy       bool            `json:"healthy"`
-	IssuesCount   int             `json:"issues_count"`
-}
-
-// discoverReposInput is the argument set for corral_discover_repos.
-type discoverReposInput struct {
-	BaseDir       string `json:"base_dir,omitempty" jsonschema:"Directory where discovery begins. Defaults to workspace root."`
-	UntrackedOnly bool   `json:"untracked_only,omitempty" jsonschema:"When true, returns only repositories without an origin remote."`
-	MaxDepth      int    `json:"max_depth,omitempty" jsonschema:"Maximum directory traversal depth. 0 for unlimited."`
-}
-
-// DiscoverReposOutput describes the results returned by corral_discover_repos.
-type DiscoverReposOutput struct {
-	// BaseDir is the directory path where discovery was run.
-	BaseDir string `json:"base_dir"`
-	// Count is the number of candidate repositories discovered.
-	Count int `json:"count"`
-	// Candidates contains the list of discovered repository details.
-	Candidates []discover.Candidate `json:"candidates"`
-}
-
 // noInput is for tools that take no arguments.
 type noInput struct{}
+
+// cloneInput is the argument set for corral_clone_repo.
+type cloneInput struct {
+	URL      string `json:"url" jsonschema:"Git remote URL to clone."`
+	Target   string `json:"target" jsonschema:"Destination path, relative to the workspace root or absolute within it."`
+	Depth    int    `json:"depth,omitempty" jsonschema:"Shallow-clone depth. 0 (the default) clones full history."`
+	Blobless bool   `json:"blobless,omitempty" jsonschema:"Use a partial clone with filter=blob:none."`
+}
+
+// createWorktreeInput is the argument set for corral_create_worktree.
+type createWorktreeInput struct {
+	Repo   string `json:"repo" jsonschema:"Repository name or relative path in workspace (required)."`
+	Branch string `json:"branch" jsonschema:"New branch name for the isolated agent worktree (required)."`
+}
+
+// releaseWorktreeInput is the argument set for corral_release_worktree.
+type releaseWorktreeInput struct {
+	Repo   string `json:"repo" jsonschema:"Repository name or relative path in workspace (required)."`
+	Branch string `json:"branch,omitempty" jsonschema:"Branch name of the worktree to remove."`
+	Path   string `json:"path,omitempty" jsonschema:"Worktree path to remove if branch is not specified."`
+	Force  bool   `json:"force,omitempty" jsonschema:"Force remove the worktree even if uncommitted changes exist."`
+}
 
 // readOnlyAnnotations is the annotation set every read tool carries.
 func readOnlyAnnotations() *mcp.ToolAnnotations {
@@ -214,9 +180,6 @@ func (s *Server) handleRepoMetadata(ctx context.Context, _ *mcp.CallToolRequest,
 	if err != nil {
 		return nil, RepoMetadataOutput{}, err
 	}
-	// match.Path (not the redacted copy) is what git is run against; only
-	// the reported value is sanitised. The branch name is attacker-
-	// controlled too — a branch may be named anything a ref allows.
 	branch := sanitize.Untrusted(currentBranch(ctx, match.Path), maxEntryField)
 	out := RepoMetadataOutput{
 		Repo:          summarizeDetailed(*match),
@@ -234,8 +197,6 @@ func (s *Server) handleStatusSummary(ctx context.Context, _ *mcp.CallToolRequest
 	byLang := map[string]int{}
 	synced := 0
 	for _, r := range idx.Repos {
-		// Both are directory names under the workspace root, so both are
-		// chosen by whoever created the directory.
 		r = r.Redacted()
 		if r.Visibility != "" {
 			byVis[r.Visibility]++
@@ -274,16 +235,12 @@ func (s *Server) handleWorkspaceIndex(ctx context.Context, _ *mcp.CallToolReques
 		body.Note = "More results are available. Pass next_offset as 'offset', or use corral_list_repos with filters."
 	}
 	if idx.Truncated {
-		// Set when a workspace exceeds the scan cap. Previously never surfaced
-		// in any payload, so an over-cap workspace looked complete to callers.
 		body.WorkspaceTruncated = true
 		body.WorkspaceTruncatedNote = "The workspace exceeded the scan cap; some repositories are missing from this index."
 	}
 	return jsonResult(body), body, nil
 }
 
-// filterRepos applies the corral_list_repos filters. Split out so the handler
-// stays about protocol shape and this stays about selection.
 func filterRepos(repos []RepoEntry, in listReposInput) []RepoEntry {
 	visibility := lowerTrim(in.Visibility)
 	language := lowerTrim(in.Language)
@@ -308,30 +265,6 @@ func filterRepos(repos []RepoEntry, in listReposInput) []RepoEntry {
 	return out
 }
 
-var _ = fmt.Sprintf // retained for handlers that format errors
-
-// cloneInput is the argument set for corral_clone_repo.
-type cloneInput struct {
-	URL      string `json:"url" jsonschema:"Git remote URL to clone."`
-	Target   string `json:"target" jsonschema:"Destination path, relative to the workspace root or absolute within it."`
-	Depth    int    `json:"depth,omitempty" jsonschema:"Shallow-clone depth. 0 (the default) clones full history."`
-	Blobless bool   `json:"blobless,omitempty" jsonschema:"Use a partial clone with filter=blob:none."`
-}
-
-// createWorktreeInput is the argument set for corral_create_worktree.
-type createWorktreeInput struct {
-	Repo   string `json:"repo" jsonschema:"Repository name or relative path in workspace (required)."`
-	Branch string `json:"branch" jsonschema:"New branch name for the isolated agent worktree (required)."`
-}
-
-// releaseWorktreeInput is the argument set for corral_release_worktree.
-type releaseWorktreeInput struct {
-	Repo   string `json:"repo" jsonschema:"Repository name or relative path in workspace (required)."`
-	Branch string `json:"branch,omitempty" jsonschema:"Branch name of the worktree to remove."`
-	Path   string `json:"path,omitempty" jsonschema:"Worktree path to remove if branch is not specified."`
-	Force  bool   `json:"force,omitempty" jsonschema:"Force remove the worktree even if uncommitted changes exist."`
-}
-
 func sortedLangCounts(m map[string]int) []LanguageCount {
 	out := make([]LanguageCount, 0, len(m))
 	for k, v := range m {
@@ -346,170 +279,9 @@ func sortedLangCounts(m map[string]int) []LanguageCount {
 	return out
 }
 
-// GraphDependenciesOutput is the structured content returned by corral_graph_dependencies.
-type GraphDependenciesOutput struct {
-	Nodes            []graph.Node        `json:"nodes"`
-	Edges            []graph.Edge        `json:"edges"`
-	TopologicalOrder []string            `json:"topological_order,omitempty"`
-	Cycles           [][]string          `json:"cycles,omitempty"`
-	Dependents       map[string][]string `json:"dependents,omitempty"`
-	TargetRepo       string              `json:"target_repo,omitempty"`
-	Dependencies     []string            `json:"dependencies,omitempty"`
-}
-
-// currentBranch shells out to git rev-parse to resolve HEAD's branch.
-func (s *Server) handleGraphDependencies(ctx context.Context, _ *mcp.CallToolRequest, in graphDependenciesInput) (*mcp.CallToolResult, GraphDependenciesOutput, error) {
-	idx, err := s.scan()
-	if err != nil {
-		return nil, GraphDependenciesOutput{}, fmt.Errorf("scan workspace: %v", err)
-	}
-
-	repos := make([]graph.RepoInput, 0, len(idx.Repos))
-	for _, r := range idx.Repos {
-		repos = append(repos, graph.RepoInput{
-			Name:      r.Name,
-			Path:      r.Path,
-			Language:  r.Language,
-			RemoteURL: r.RemoteURL,
-		})
-	}
-
-	g := graph.BuildGraph(repos)
-
-	if in.Repo != "" {
-		match, err := idx.Find(in.Repo)
-		if err != nil {
-			return toolError("repo %q: %v", in.Repo, err), GraphDependenciesOutput{}, nil
-		}
-		repoName := match.Name
-		var node *graph.Node
-		for i := range g.Nodes {
-			if g.Nodes[i].Name == repoName {
-				node = &g.Nodes[i]
-				break
-			}
-		}
-		res := GraphDependenciesOutput{
-			Nodes:        []graph.Node{},
-			Edges:        []graph.Edge{},
-			TargetRepo:   repoName,
-			Dependencies: []string{},
-			Dependents:   g.Dependents,
-		}
-		if node != nil {
-			res.Dependencies = node.Dependencies
-		}
-		return jsonResult(res), res, nil
-	}
-
-	res := GraphDependenciesOutput{
-		Nodes:            g.Nodes,
-		Edges:            g.Edges,
-		TopologicalOrder: g.TopologicalOrder,
-		Cycles:           g.Cycles,
-		Dependents:       g.Dependents,
-	}
-	return jsonResult(res), res, nil
-}
-
-var (
-	doctorHasLocalChanges    = git.HasLocalChanges
-	doctorHasUnpublishedWork = git.HasUnpublishedWork
-	doctorListWorktrees      = git.ListWorktrees
-	discoverReposFunc        = discover.Discover
-)
-
-func (s *Server) handleDoctor(ctx context.Context, _ *mcp.CallToolRequest, in doctorInput) (*mcp.CallToolResult, DoctorOutput, error) {
-	idx, err := s.scan()
-	if err != nil {
-		return nil, DoctorOutput{}, fmt.Errorf("scan workspace: %v", err)
-	}
-
-	byVis := make(map[string]int)
-	byLang := make(map[string]int)
-	dirty := []string{}
-	unpushed := []string{}
-	worktrees := []string{}
-
-	for _, repo := range idx.Repos {
-		if repo.Visibility != "" {
-			byVis[repo.Visibility]++
-		}
-		if repo.Language != "" {
-			byLang[repo.Language]++
-		}
-		if hasLocal, _ := doctorHasLocalChanges(ctx, repo.Path); hasLocal {
-			dirty = append(dirty, repo.Name)
-		}
-		if unpublished, _ := doctorHasUnpublishedWork(ctx, repo.Path); unpublished {
-			unpushed = append(unpushed, repo.Name)
-		}
-		if wts, err := doctorListWorktrees(ctx, repo.Path); err == nil {
-			for _, wt := range wts {
-				if wt.Path != repo.Path && !wt.Bare {
-					worktrees = append(worktrees, fmt.Sprintf("%s:%s", repo.Name, wt.Path))
-				}
-			}
-		}
-	}
-
-	issues := len(dirty) + len(unpushed)
-	out := DoctorOutput{
-		BaseDir:       idx.Root,
-		TotalRepos:    len(idx.Repos),
-		ByVisibility:  sortedLangCounts(byVis),
-		ByLanguage:    sortedLangCounts(byLang),
-		DirtyRepos:    dirty,
-		UnpushedRepos: unpushed,
-		Worktrees:     worktrees,
-		Healthy:       issues == 0,
-		IssuesCount:   issues,
-	}
-	return jsonResult(out), out, nil
-}
-
-func (s *Server) handleDiscoverRepos(ctx context.Context, _ *mcp.CallToolRequest, input discoverReposInput) (*mcp.CallToolResult, DiscoverReposOutput, error) {
-	idx, err := s.scan()
-	if err != nil {
-		return nil, DiscoverReposOutput{}, fmt.Errorf("scan workspace: %v", err)
-	}
-	base := idx.Root
-	if input.BaseDir != "" {
-		resolved, err := idx.SafePath(input.BaseDir)
-		if err != nil {
-			return nil, DiscoverReposOutput{}, fmt.Errorf("invalid base_dir: %w", err)
-		}
-		base = resolved
-	}
-	candidates, err := discoverReposFunc(ctx, discover.Options{
-		BaseDir:       base,
-		UntrackedOnly: input.UntrackedOnly,
-		MaxDepth:      input.MaxDepth,
-	})
-	if err != nil {
-		return nil, DiscoverReposOutput{}, fmt.Errorf("discovery failed: %w", err)
-	}
-	body := DiscoverReposOutput{
-		BaseDir:    base,
-		Count:      len(candidates),
-		Candidates: candidates,
-	}
-	return jsonResult(body), body, nil
-}
-
-// Indirected through a package var so tests can stub without spawning
-// a real subprocess. On error the caller gets an empty string (the
-// tool result still succeeds with "current_branch": "") but the error
-// is logged to stderr so operators can debug detached-HEAD,
-// permission, and corrupt-git-tree cases that used to be silent.
-// stderr is the only safe channel — stdout carries the JSON-RPC
-// protocol stream and must not be polluted.
 var currentBranch = func(ctx context.Context, repoPath string) string {
 	branch, err := git.CurrentBranch(ctx, repoPath)
 	if err != nil {
-		// Include stderr from the failed process so operators can tell
-		// "not a git repo" apart from "detached HEAD" apart from
-		// "permission denied" apart from "corrupted refs".
 		var stderr string
 		if ee, ok := err.(*exec.ExitError); ok {
 			stderr = strings.TrimSpace(string(ee.Stderr))
@@ -524,16 +296,6 @@ var currentBranch = func(ctx context.Context, repoPath string) string {
 	return branch
 }
 
-// addTool registers a tool and records its name.
-//
-// A thin wrapper over mcp.AddTool so the server knows its own surface.
-// Without it, "which tools does this server expose" has no answer in code,
-// and the only place the list exists is prose — which is exactly how
-// `corralctl mcp --help` came to claim five tools while seven were
-// registered, and later to omit two more entirely.
-//
-// ToolNames is what the help-text gate in cmd compares against, so a tool
-// added here and not documented fails a test rather than shipping.
 func addTool[In, Out any](s *Server, t *mcp.Tool, h mcp.ToolHandlerFor[In, Out]) {
 	mcp.AddTool(s.mcp, t, h)
 	s.toolNames = append(s.toolNames, t.Name)
@@ -541,10 +303,6 @@ func addTool[In, Out any](s *Server, t *mcp.Tool, h mcp.ToolHandlerFor[In, Out])
 
 // ToolNames returns every tool this server registered, in registration
 // order.
-//
-// Which tools those are depends on the options the server was built with:
-// a read-only server reports the read set, and the write tools appear only
-// when they were unlocked.
 func (s *Server) ToolNames() []string {
 	out := make([]string, len(s.toolNames))
 	copy(out, s.toolNames)

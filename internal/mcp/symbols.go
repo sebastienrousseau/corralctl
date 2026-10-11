@@ -6,201 +6,18 @@ package mcp
 import (
 	"context"
 	"fmt"
-	"os"
-	"path/filepath"
 	"runtime"
 	"sort"
-	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
-	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-
 	"github.com/sebastienrousseau/corralctl/internal/sanitize"
 	"github.com/sebastienrousseau/corralctl/internal/symbols"
 )
 
-// Cross-repository symbol lookup.
-//
-// This is the tool the rest of the index exists to make possible. Every
-// competing code-context server answers "where is this symbol" for one
-// open repository; corral is the only one that can answer it across every
-// clone on the machine, because it is the only one that knows they are all
-// there.
-
-// symbolCacheTTL is how long an extracted repository stays fresh.
-//
-// Longer than the workspace scan's five seconds, because the inputs move at
-// different speeds: the set of repositories changes when someone clones,
-// while a repository's declarations change when someone edits. Parsing is
-// also far more expensive than stat-ing, so a short TTL would spend most of
-// an agent's session re-parsing files that had not changed.
-const symbolCacheTTL = 2 * time.Minute
-
-// The symbol cache is bounded by symbols held, not by repositories held, and
-// it declines to evict a fresh entry in order to admit another.
-//
-// It used to cap at 24 repositories and evict by earliest expiry. Both were
-// wrong for the access pattern that dominates — an unfiltered query, which
-// touches every repository in the workspace.
-//
-// A repository count bounds entries, not memory: measured on a 234-repository
-// workspace, one repository held 200,000 symbols and the median held 2,307.
-//
-// Equal TTLs make "evict the earliest expiry" into FIFO, and FIFO against a
-// sequential sweep of N items through a cache of M < N is the pessimal case:
-// it evicts precisely what the next call asks for first, so the hit rate is
-// zero however large M is, short of N. That is why the old cache did not merely
-// help less than it could — it could not help at all with the call that needed
-// it most, and each query left the cache no warmer than the last.
-//
-// A miss is expensive even when the on-disk cache holds the answer, because the
-// fingerprint keying that cache is computed by walking and stat-ing every source
-// file in the repository, so a miss pays the walk whether or not it avoids the
-// parse. That is what put corral_find_symbol at a 20.1s p95, and what made it
-// 60s on a busy machine.
-//
-// The budget is in symbols because that is what occupies memory. Measured on
-// the same workspace: 539,879 symbols retained 260.5MB, or 506 bytes each —
-// so the default below is about 126MB. It is deliberately not large enough to
-// hold every workspace; what stops a cache that cannot fit everything from
-// being useless is the admission policy, not the size.
-const defaultMaxCachedSymbols = 250_000
-
-// maxCachedSymbols is the budget in force. Overridable because the right
-// number depends on how much memory the machine can spare, and a server
-// indexing someone's whole workspace should not be the thing that decides.
-var maxCachedSymbols = envInt("CORRAL_SYMBOL_CACHE_SYMBOLS", defaultMaxCachedSymbols)
-
-// maxEntryShare caps how much of the budget a single repository may occupy.
-//
-// Without it one outlier evicts the workspace: the 200,000-symbol repository
-// above is 80% of the default budget on its own, so caching it would drop
-// almost everything else, and the next query would re-extract all of it. A
-// repository over this share is simply not cached — it pays its own cost
-// rather than charging it to the other 233.
-const maxEntryShare = 4
-
-// maxCachedRepos is a ceiling on entries regardless of how small each is, so a
-// workspace of thousands of tiny repositories cannot grow the map without
-// bound.
-const maxCachedRepos = 2048
-
-// symbolEntry is one repository's cached extraction.
-type symbolEntry struct {
-	result  *symbols.Result
-	expires time.Time
-}
-
-// symbolCache is a small TTL cache keyed by absolute repository path.
-//
-// Deliberately not an LRU: the eviction policy is "drop everything expired,
-// then drop the oldest", which is a few lines and behaves identically for
-// the access pattern that actually occurs — an agent working through a
-// handful of repositories in one session.
-type symbolCache struct {
-	mu      sync.Mutex
-	entries map[string]symbolEntry
-	// symbols tracks the total held, so the budget does not require walking
-	// every entry on each insert.
-	symbols int
-}
-
-func newSymbolCache() *symbolCache {
-	return &symbolCache{entries: map[string]symbolEntry{}}
-}
-
-// get returns a cached extraction if it is still fresh.
-func (c *symbolCache) get(path string) (*symbols.Result, bool) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	e, ok := c.entries[path]
-	if !ok {
-		return nil, false
-	}
-	if time.Now().After(e.expires) {
-		// Drop it here rather than leave it to the next insert, so the
-		// counter cannot drift above what is actually reachable.
-		c.symbols -= len(e.result.Symbols)
-		delete(c.entries, path)
-		return nil, false
-	}
-	return e.result, true
-}
-
-// put stores an extraction if it fits.
-//
-// Expired entries are dropped first — they are free to release. If the cache is
-// still at budget after that, the new entry is NOT admitted: everything left is
-// fresh, and evicting a fresh entry to make room is what turned a full-workspace
-// sweep into a cache that never held anything. Declining instead gives a stable
-// resident set, so a sweep that cannot fit still hits on the part that does.
-func (c *symbolCache) put(path string, res *symbols.Result) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	now := time.Now()
-	incoming := len(res.Symbols)
-
-	// One repository must not be able to evict the workspace.
-	if incoming > maxCachedSymbols/maxEntryShare {
-		return
-	}
-
-	// Replacing an entry must not double-count its symbols.
-	if old, ok := c.entries[path]; ok {
-		c.symbols -= len(old.result.Symbols)
-		delete(c.entries, path)
-	}
-
-	if c.overBudget(incoming) {
-		for k, e := range c.entries {
-			if now.After(e.expires) {
-				c.symbols -= len(e.result.Symbols)
-				delete(c.entries, k)
-			}
-		}
-	}
-	if c.overBudget(incoming) {
-		// Full of fresh entries. Keep them.
-		return
-	}
-
-	c.entries[path] = symbolEntry{result: res, expires: now.Add(symbolCacheTTL)}
-	c.symbols += incoming
-}
-
-// overBudget reports whether admitting n more symbols would exceed either
-// bound.
-func (c *symbolCache) overBudget(incoming int) bool {
-	return c.symbols+incoming > maxCachedSymbols || len(c.entries) >= maxCachedRepos
-}
-
-// envInt reads a positive integer from the environment, falling back to def.
-//
-// A zero, negative or unparseable value falls back rather than erroring: a
-// typo in an environment variable should not stop the server from starting,
-// and the cost of the fallback is a cache of the default size.
-func envInt(name string, def int) int {
-	raw := strings.TrimSpace(os.Getenv(name))
-	if raw == "" {
-		return def
-	}
-	n, err := strconv.Atoi(raw)
-	if err != nil || n <= 0 {
-		return def
-	}
-	return n
-}
-
 // symbolsFor extracts one repository's symbols through two caches.
-//
-// The in-memory one answers a repeated query within a session without
-// touching the disk at all. The on-disk one is what makes the *first*
-// query of a session fast, and is the reason the memory cache can stay
-// small: a client that launches this server per session used to pay the
-// full extraction every time.
 func (s *Server) symbolsFor(ctx context.Context, repo *RepoEntry) (*symbols.Result, error) {
 	if cached, ok := s.symbolCache.get(repo.Path); ok {
 		return cached, nil
@@ -214,11 +31,6 @@ func (s *Server) symbolsFor(ctx context.Context, repo *RepoEntry) (*symbols.Resu
 }
 
 // repoFanOut bounds how many repositories are extracted at once.
-//
-// Higher than GOMAXPROCS because the work is dominated by waiting on the
-// filesystem, and bounded because each repository's own extraction is
-// already parallel underneath — an unbounded fan-out turns a disk queue
-// into contention.
 var repoFanOut = func() int {
 	return clampFanOut(runtime.GOMAXPROCS(0) * 2)
 }
@@ -227,11 +39,6 @@ var repoFanOut = func() int {
 const maxRepoFanOut = 16
 
 // clampFanOut holds a worker count inside [1, maxRepoFanOut].
-//
-// Separated from repoFanOut so the bounds can be asserted against the pure
-// function rather than against whatever core count the test machine
-// happens to have — a clamp only tested on a 10-core laptop is a clamp
-// nobody has tested.
 func clampFanOut(n int) int {
 	if n < 1 {
 		return 1
@@ -297,8 +104,6 @@ func (s *Server) handleFindSymbol(ctx context.Context, _ *mcp.CallToolRequest, i
 	if in.Kind != "" {
 		kind, err := symbols.ParseKind(in.Kind)
 		if err != nil {
-			// A filter that cannot be honoured is an error, never an empty
-			// result: the two are indistinguishable to the caller.
 			return nil, FindSymbolOutput{}, err
 		}
 		query.Kind = kind
@@ -318,17 +123,6 @@ func (s *Server) handleFindSymbol(ctx context.Context, _ *mcp.CallToolRequest, i
 		targets = []RepoEntry{*match}
 	}
 
-	// Repositories are searched concurrently.
-	//
-	// Extraction is dominated by walking the filesystem, not by parsing —
-	// measured on a 187-repository workspace, the walk is roughly four
-	// times the parse — and a walk spends most of its time waiting on the
-	// kernel rather than using a core. Doing them one after another left
-	// almost all of that wait unoverlapped.
-	//
-	// The fan-out is bounded because each repository's own extraction is
-	// already parallel underneath: too many at once turns a disk queue
-	// into contention and makes the whole thing slower.
 	var (
 		mu        sync.Mutex
 		hits      []SymbolHit
@@ -354,14 +148,10 @@ func (s *Server) handleFindSymbol(ctx context.Context, _ *mcp.CallToolRequest, i
 				repo := &targets[i]
 				res, err := s.symbolsFor(ctx, repo)
 				if err != nil {
-					// One unreadable repository must not fail the whole
-					// lookup.
 					continue
 				}
 				red := repo.Redacted()
 
-				// Filtering happens outside the lock, so the shared state
-				// is held only for the append.
 				var local []SymbolHit
 				for _, sym := range res.Symbols {
 					if !query.Match(sym) {
@@ -392,11 +182,6 @@ func (s *Server) handleFindSymbol(ctx context.Context, _ *mcp.CallToolRequest, i
 	wg.Wait()
 
 	if err := ctx.Err(); err != nil {
-		// A cancelled scan is reported *in the tool result*, not as a
-		// transport error. MCP treats a returned Go error as the call
-		// having failed, which would lose the partial count the agent can
-		// still act on. This is the protocol's convention, not an
-		// oversight.
 		//nolint:nilerr // deliberate: cancellation is a tool result, not an error
 		return toolError("cancelled after %d repositories", scanned), FindSymbolOutput{
 			Query:              in.Name,
@@ -405,13 +190,8 @@ func (s *Server) handleFindSymbol(ctx context.Context, _ *mcp.CallToolRequest, i
 			Note:               "Cancelled before every repository was searched; the counts are partial.",
 		}, nil
 	}
-	// Workers finish in an arbitrary order, so this list is arbitrary
-	// until the sort below. The truncation list needs its own ordering for
-	// the same reason: two identical queries must not disagree.
 	sort.Strings(truncated)
 
-	// Exported before unexported, then by repository and location, so the
-	// first page holds the answers most likely to be wanted.
 	sort.SliceStable(hits, func(i, j int) bool {
 		if hits[i].Exported != hits[j].Exported {
 			return hits[i].Exported
@@ -437,8 +217,6 @@ func (s *Server) handleFindSymbol(ctx context.Context, _ *mcp.CallToolRequest, i
 		hits = hits[:limit]
 	}
 
-	// Empty, not null: the schema says `array`, and "no match" is the answer
-	// this tool gives most often.
 	if hits == nil {
 		hits = []SymbolHit{}
 	}
@@ -458,8 +236,6 @@ func (s *Server) handleFindSymbol(ctx context.Context, _ *mcp.CallToolRequest, i
 		body.Note = "More matches than the limit; narrow with kind, repo or exported_only."
 	}
 	if len(truncated) > 0 {
-		// A silently partial index is worse than a slow one: the caller
-		// cannot tell a missing symbol from an absent one.
 		body.IndexesTruncated = truncated
 		body.IndexesTruncatedNote = "These repositories exceeded the per-repository file or symbol cap; their results are incomplete."
 	}
@@ -536,44 +312,4 @@ func capList(xs []string, n int) []string {
 		return xs[:n]
 	}
 	return xs
-}
-
-// newSymbolDiskCache builds the on-disk symbol cache for a server.
-//
-// "off" disables it. An empty path takes the platform default. A
-// directory that cannot be created yields nil, and a nil cache is simply
-// the uncached path — a machine where the cache directory is unwritable
-// should be slower, not broken.
-func newSymbolDiskCache(dir string) symbols.Cache {
-	if dir == "off" {
-		return nil
-	}
-	if dir == "" {
-		dir = DefaultSymbolCacheDir()
-	}
-	c := symbols.NewDiskCache(dir)
-	if c == nil {
-		// Explicitly nil rather than a typed nil in an interface, which
-		// would be non-nil to every caller that checks.
-		return nil
-	}
-	return c
-}
-
-// DefaultSymbolCacheDir returns the platform-default location for the
-// persisted symbol index.
-//
-// $XDG_CACHE_HOME/corral/symbols, falling back to ~/.cache/corral/symbols.
-// The cache directory rather than the state directory the audit log uses:
-// this is derived data that can be rebuilt from the workspace at any time,
-// which is exactly the distinction XDG draws between the two.
-func DefaultSymbolCacheDir() string {
-	if cache := os.Getenv("XDG_CACHE_HOME"); cache != "" {
-		return filepath.Join(cache, "corral", "symbols")
-	}
-	home, err := auditUserHomeDir()
-	if err != nil {
-		return filepath.Join(os.TempDir(), "corral", "symbols")
-	}
-	return filepath.Join(home, ".cache", "corral", "symbols")
 }
