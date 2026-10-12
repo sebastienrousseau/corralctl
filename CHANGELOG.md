@@ -6,6 +6,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.51] - 2026-10-12
+
+### Changed
+
+- **Dependency and Toolchain Maintenance.**
+  Bumped `golang.org/x/sys` from 0.48.0 to 0.49.0. Synchronized `SBOM.md` dependency
+  manifests. Updated pinned GitHub Actions workflows across CI, release, and security pipelines.
+
 ## [0.0.50] - 2026-10-11
 
 ### Documentation
@@ -2725,7 +2733,8 @@ cron-safety overhaul.
   100 % doc coverage.
 - All tests green under `-race -count=1`.
 
-[Unreleased]: https://github.com/sebastienrousseau/corralctl/compare/v0.0.50...HEAD
+[Unreleased]: https://github.com/sebastienrousseau/corralctl/compare/v0.0.51...HEAD
+[0.0.51]: https://github.com/sebastienrousseau/corralctl/compare/v0.0.50...v0.0.51
 [0.0.50]: https://github.com/sebastienrousseau/corralctl/compare/v0.0.49...v0.0.50
 [0.0.49]: https://github.com/sebastienrousseau/corralctl/compare/v0.0.48...v0.0.49
 [0.0.48]: https://github.com/sebastienrousseau/corralctl/compare/v0.0.47...v0.0.48
