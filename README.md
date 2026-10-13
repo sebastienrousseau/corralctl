@@ -835,6 +835,7 @@ corralctl status --base-dir ~/Code
 corralctl doctor ~/Code
 corralctl doctor ~/Code --refresh-tags
 corralctl doctor ~/Code --prune-worktrees
+corralctl doctor ~/Code --exclude winget-pkgs --timeout 30s
 corralctl plan sebastienrousseau --base-dir ~/Code
 corralctl prune sebastienrousseau --base-dir ~/Code --dry-run
 corralctl prune sebastienrousseau --base-dir ~/Code --yes
@@ -842,7 +843,7 @@ corralctl adopt ~/Projects --forge github --owner sebastienrousseau
 ```
 
 `status` inventories local clones, `doctor` audits workspace hygiene, worktrees,
-disk budget, and Finder tags, `plan` emits a non-mutating reconciliation,
+disk budget, exclusions, and Finder tags, `plan` emits a non-mutating reconciliation,
 `prune` removes only upstream-orphaned clones that pass the unpublished-work
 checks, and `adopt` discovers untracked local repositories to relocate and link
 to remote forges. JSON output is available on each command.

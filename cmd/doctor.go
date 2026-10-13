@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	gitutil "github.com/sebastienrousseau/corralctl/internal/git"
 	corralmcp "github.com/sebastienrousseau/corralctl/internal/mcp"
@@ -24,6 +25,8 @@ var (
 	doctorConfigFile         string
 	doctorPruneWorktrees     bool
 	doctorRefreshTags        bool
+	doctorExclude            string
+	doctorTimeout            = 30 * time.Second
 	doctorScan               = corralmcp.Scan
 	doctorHasLocalChanges    = gitutil.HasLocalChanges
 	doctorHasUnpublishedWork = gitutil.HasUnpublishedWork
@@ -52,6 +55,7 @@ type DoctorReport struct {
 	PrunedWorktrees int                   `json:"pruned_worktrees,omitempty"`
 	RefreshedTags   int                   `json:"refreshed_tags,omitempty"`
 	CacheStatus     DoctorCacheStatus     `json:"cache_status"`
+	ExcludedRepos   int                   `json:"excluded_repos,omitempty"`
 	RulesApplied    bool                  `json:"rules_applied,omitempty"`
 	Violations      []string              `json:"violations,omitempty"`
 	Healthy         bool                  `json:"healthy"`
@@ -175,7 +179,14 @@ func collectDoctorReport(ctx context.Context, root string) (*DoctorReport, error
 		report.RefreshedTags = refreshWorkspaceFinderTags(idx.Repos)
 	}
 
+	excludePatterns := parseExcludePatterns(doctorExclude)
+
 	for _, repo := range idx.Repos {
+		if isRepoExcluded(repo, excludePatterns) {
+			report.ExcludedRepos++
+			continue
+		}
+
 		forge := inferForge(repo.RemoteURL)
 		report.ByForge[forge]++
 
@@ -193,59 +204,17 @@ func collectDoctorReport(ctx context.Context, root string) (*DoctorReport, error
 
 		report.TotalSizeBytes += doctorDirSize(repo.Path)
 
-		dirty, detail := doctorHasLocalChanges(ctx, repo.Path)
-		if dirty {
-			report.DirtyRepos = append(report.DirtyRepos, DoctorRepoIssue{
-				Name:   repo.Name,
-				Path:   repo.Path,
-				Detail: detail,
-			})
+		repoCtx := ctx
+		var cancel context.CancelFunc
+		if doctorTimeout > 0 {
+			repoCtx, cancel = context.WithTimeout(ctx, doctorTimeout)
 		}
 
-		unpushed, unpushedDetail := doctorHasUnpublishedWork(ctx, repo.Path)
-		if unpushed && !dirty {
-			report.UnpushedRepos = append(report.UnpushedRepos, DoctorRepoIssue{
-				Name:   repo.Name,
-				Path:   repo.Path,
-				Detail: unpushedDetail,
-			})
-		}
+		inspectRepoHygiene(repoCtx, repo, report)
+		inspectRepoWorktrees(repoCtx, repo, report, doctorPruneWorktrees)
 
-		if wtList, err := doctorListWorktrees(ctx, repo.Path); err == nil {
-			repoPruned := false
-			for _, wt := range wtList {
-				// The main worktree is the repository itself; report only linked worktrees.
-				if !wt.Bare && wt.Path != repo.Path {
-					entry := DoctorWorktreeEntry{
-						Repo:   repo.Name,
-						Path:   wt.Path,
-						Branch: wt.Branch,
-						Commit: wt.Commit,
-					}
-					_, statErr := doctorStat(wt.Path)
-					isMissing := statErr != nil
-					isTemp := isTemporaryPath(wt.Path)
-					if isMissing || isTemp {
-						entry.Stale = true
-						if isMissing {
-							entry.Reason = "path does not exist on disk"
-						} else {
-							entry.Reason = "ephemeral scratchpad location"
-						}
-						if doctorPruneWorktrees {
-							if isTemp && !isMissing {
-								_ = doctorRemoveWorktreeOp(ctx, repo.Path, wt.Path, true)
-							}
-							repoPruned = true
-							report.PrunedWorktrees++
-						}
-					}
-					report.Worktrees = append(report.Worktrees, entry)
-				}
-			}
-			if repoPruned && doctorPruneWorktrees {
-				_ = doctorPruneOp(ctx, repo.Path)
-			}
+		if cancel != nil {
+			cancel()
 		}
 	}
 
@@ -278,9 +247,12 @@ func printDoctorText(r *DoctorReport) {
 	}
 	fmt.Printf("\n")
 
-	cleanCount := r.TotalRepos - len(r.DirtyRepos) - len(r.UnpushedRepos)
+	cleanCount := r.TotalRepos - r.ExcludedRepos - len(r.DirtyRepos) - len(r.UnpushedRepos)
 	fmt.Printf("Git Hygiene:\n")
 	fmt.Printf("  Clean:    %d repos\n", cleanCount)
+	if r.ExcludedRepos > 0 {
+		fmt.Printf("  Excluded: %d repos\n", r.ExcludedRepos)
+	}
 	if len(r.DirtyRepos) > 0 {
 		fmt.Printf("  Dirty:    %d repos\n", len(r.DirtyRepos))
 		for _, d := range r.DirtyRepos {
@@ -369,6 +341,9 @@ var doctorCmd = &cobra.Command{
 		if doctorOutput != "text" && doctorOutput != "json" {
 			return errors.New("--output must be text or json")
 		}
+		if doctorTimeout < 0 {
+			return errors.New("--timeout must be >= 0")
+		}
 		return nil
 	},
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -390,6 +365,8 @@ func init() {
 	doctorCmd.Flags().StringVar(&doctorConfigFile, "config", "", "path to custom .corral.json configuration file")
 	doctorCmd.Flags().BoolVar(&doctorPruneWorktrees, "prune-worktrees", false, "automatically prune stale and temporary linked worktrees")
 	doctorCmd.Flags().BoolVar(&doctorRefreshTags, "refresh-tags", false, "refresh macOS Finder tags and folder color labels for all workspace repositories")
+	doctorCmd.Flags().StringVar(&doctorExclude, "exclude", "", "comma-separated repository names or path patterns to exclude from audit")
+	doctorCmd.Flags().DurationVar(&doctorTimeout, "timeout", 30*time.Second, "deadline per repository check (0 to disable)")
 	rootCmd.AddCommand(doctorCmd)
 }
 

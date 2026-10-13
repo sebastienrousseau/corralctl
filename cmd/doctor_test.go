@@ -34,7 +34,11 @@ func (f fakeFileInfo) Sys() any           { return nil }
 
 func TestDoctorFlagValidation(t *testing.T) {
 	oldOutput := doctorOutput
-	defer func() { doctorOutput = oldOutput }()
+	oldTimeout := doctorTimeout
+	defer func() {
+		doctorOutput = oldOutput
+		doctorTimeout = oldTimeout
+	}()
 
 	doctorOutput = "yaml"
 	err := doctorCmd.PreRunE(doctorCmd, nil)
@@ -43,6 +47,13 @@ func TestDoctorFlagValidation(t *testing.T) {
 	}
 
 	doctorOutput = "text"
+	doctorTimeout = -1 * time.Second
+	err = doctorCmd.PreRunE(doctorCmd, nil)
+	if err == nil || !strings.Contains(err.Error(), "--timeout must be >= 0") {
+		t.Fatalf("expected error on negative timeout flag, got %v", err)
+	}
+
+	doctorTimeout = 30 * time.Second
 	if err := doctorCmd.PreRunE(doctorCmd, nil); err != nil {
 		t.Fatalf("unexpected error on text: %v", err)
 	}

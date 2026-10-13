@@ -244,6 +244,12 @@ corralctl doctor --refresh-tags
 # Automatically prune stale and ephemeral linked worktrees
 corralctl doctor --prune-worktrees
 
+# Exclude large third-party trees or specific repositories
+corralctl doctor --exclude "winget-pkgs,vendor"
+
+# Set a per-repository audit deadline
+corralctl doctor --timeout 30s
+
 # Output as JSON for automated pipelines
 corralctl doctor --output json
 ```
@@ -256,6 +262,8 @@ and stale worktrees.
 | --- | --- | --- |
 | `--refresh-tags` | off | Refresh macOS Finder tags and folder color labels for all workspace repositories |
 | `--prune-worktrees` | off | Automatically prune stale and temporary linked worktrees |
+| `--exclude` | | Comma-separated repository names or path patterns to exclude from audit |
+| `--timeout` | `30s` | Deadline per repository check (0 to disable) |
 | `--config` | | Path to custom `.corral.json` configuration file |
 | `--output` | `text` | Output format: `text` or `json` |
 
