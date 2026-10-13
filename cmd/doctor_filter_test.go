@@ -73,6 +73,19 @@ func TestIsRepoExcluded(t *testing.T) {
 		t.Errorf("expected true for path directory substring match")
 	}
 
+	// Path segment match when RelPath does not match pattern
+	absRepo := corralmcp.RepoEntry{
+		Name:    "custom-repo",
+		Path:    "/Volumes/CustomMount/Code/custom-repo",
+		RelPath: "custom-repo",
+	}
+	if !isRepoExcluded(absRepo, []string{"CustomMount"}) {
+		t.Errorf("expected true for path segment match")
+	}
+	if !isRepoExcluded(absRepo, []string{"Code/custom-repo"}) {
+		t.Errorf("expected true for path suffix match")
+	}
+
 	// Glob pattern match
 	if !isRepoExcluded(repo, []string{"winget-*"}) {
 		t.Errorf("expected true for glob pattern match")
