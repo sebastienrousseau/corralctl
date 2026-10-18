@@ -16,7 +16,7 @@ jobs:
     name: Go CI
     permissions:
       contents: read
-    uses: sebastienrousseau/pipelines/.github/workflows/go-ci.yml@7061363af0a1da9d60c5901bd2874ac83ff7e34e
+    uses: sebastienrousseau/pipelines/.github/workflows/go-ci.yml@980375f1d96368885ff65cc4c7f1ff355a5a4095
     with:
       go-version: '1.26.9'
       run-cross-platform: true
@@ -241,7 +241,7 @@ jobs:
           persist-credentials: false
 
       - name: Validate .goreleaser.yaml
-        uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7.2.3
+        uses: goreleaser/goreleaser-action@a4f02ab5355a589de60d917a659ce617ed19b3de # v7.3.0
         with:
           distribution: goreleaser
           version: '~> v2'
@@ -361,7 +361,7 @@ jobs:
       # deploy workflow, because a change that breaks it was previously
       # invisible until after it had merged.
       - name: Install cargo-binstall
-        uses: cargo-bins/cargo-binstall@c06f6a0003f7c6165a00c89d1697731c9e8a5c72 # v1.25.2
+        uses: cargo-bins/cargo-binstall@3be4ad2b146f3302f92e5956c54fedbb6ae8cccc # v1.25.3
 
       - name: Install ssg
         run: |
