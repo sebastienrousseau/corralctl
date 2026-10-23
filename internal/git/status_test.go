@@ -226,4 +226,3 @@ func TestInspectRepoStatusNonRepo(t *testing.T) {
 		t.Errorf("expected error inspecting non-git directory, got nil")
 	}
 }
-

@@ -360,4 +360,3 @@ func legacyPositionalKeyword(s string) (string, bool) {
 // step with `--help` instead of drifting as hand-written files do. Callers must
 // treat the result as read-only; mutating it changes what the CLI does.
 func RootCommand() *cobra.Command { return rootCmd }
-

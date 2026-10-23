@@ -369,4 +369,3 @@ func init() {
 	doctorCmd.Flags().DurationVar(&doctorTimeout, "timeout", 30*time.Second, "deadline per repository check (0 to disable)")
 	rootCmd.AddCommand(doctorCmd)
 }
-

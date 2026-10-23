@@ -288,7 +288,6 @@ var profileCmd = &cobra.Command{
 	},
 }
 
-
 func operationalRunOptions(owner string, preview bool, format engine.OutputFormat) engine.RunOptions {
 	return engine.RunOptions{
 		Owner: owner, BaseDir: resolvedBaseDir(nil), Concurrency: concurrency,
