@@ -178,7 +178,10 @@ func TestPushBranch(t *testing.T) {
 func TestPushRefUnblocksAPruneOfTheRemoteDefault(t *testing.T) {
 	ctx := context.Background()
 	repo := mirrorRepo(t)
-	server := mirrorRepo(t)
+	// Empty, so the first push creates main rather than racing a commit of
+	// the server's own that only matches the client's within one second.
+	server := t.TempDir()
+	mirrorGit(t, server, "init", "-q", "-b", "main")
 	mirrorGit(t, server, "config", "receive.denyCurrentBranch", "ignore")
 	mirrorGit(t, repo, "remote", "add", "mirror", server)
 	mirrorGit(t, repo, "branch", "feat/old")
