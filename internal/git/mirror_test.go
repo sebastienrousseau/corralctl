@@ -168,6 +168,65 @@ func TestPushBranch(t *testing.T) {
 	}
 }
 
+// TestPushRefUnblocksAPruneOfTheRemoteDefault reproduces the failure sync
+// hit on Gitea: once upstream deletes the branch a destination uses as its
+// default, the mirror push would prune it and the destination refuses the
+// push. A non-bare remote stands in for the forge, since git refuses to
+// delete its current branch the same way. Pushing the local default with
+// PushRef and repointing the remote's HEAD — what SetDefaultBranch does
+// through the forge API — lets the same mirror push through.
+func TestPushRefUnblocksAPruneOfTheRemoteDefault(t *testing.T) {
+	ctx := context.Background()
+	repo := mirrorRepo(t)
+	server := mirrorRepo(t)
+	mirrorGit(t, server, "config", "receive.denyCurrentBranch", "ignore")
+	mirrorGit(t, repo, "remote", "add", "mirror", server)
+	mirrorGit(t, repo, "branch", "feat/old")
+	if err := PushMirror(ctx, repo, "mirror", server, nil); err != nil {
+		t.Fatal(err)
+	}
+	mirrorGit(t, server, "symbolic-ref", "HEAD", "refs/heads/feat/old")
+	mirrorGit(t, repo, "branch", "-D", "feat/old")
+	second := mirrorCommit(t, repo, "second")
+
+	if err := PushMirror(ctx, repo, "mirror", server, nil); err == nil || !strings.Contains(err.Error(), "feat/old") {
+		t.Fatalf("expected the prune of the remote default to be refused, got %v", err)
+	}
+
+	if err := PushRef(ctx, repo, "mirror", "main", server, nil); err != nil {
+		t.Fatal(err)
+	}
+	if got := bareRefs(t, server)["refs/heads/main"]; got != second {
+		t.Fatalf("PushRef left main at %s, want %s", got, second)
+	}
+	if got := mirrorGit(t, repo, "config", "--default", "", "--get", "branch.main.remote"); got != "" {
+		t.Fatalf("PushRef set upstream tracking to %q", got)
+	}
+	mirrorGit(t, server, "symbolic-ref", "HEAD", "refs/heads/main")
+	if err := PushMirror(ctx, repo, "mirror", server, nil); err != nil {
+		t.Fatalf("mirror push after repointing the default: %v", err)
+	}
+	if _, exists := bareRefs(t, server)["refs/heads/feat/old"]; exists {
+		t.Fatal("feat/old was not pruned")
+	}
+}
+
+func TestPushRefRefusesBadInput(t *testing.T) {
+	ctx := context.Background()
+	repo := mirrorRepo(t)
+	if err := PushRef(ctx, repo, "bad name", "main", "", nil); err == nil {
+		t.Fatal("expected a bad remote name to be refused")
+	}
+	for _, branch := range []string{"", "--delete"} {
+		if err := PushRef(ctx, repo, "mirror", branch, "", nil); err == nil {
+			t.Fatalf("expected branch %q to be refused", branch)
+		}
+	}
+	if err := PushRef(ctx, repo, "mirror", "main", "https://%zz", &PushCredential{Username: "u", Secret: "s"}); err == nil {
+		t.Fatal("expected an unscopable credential to be refused")
+	}
+}
+
 // TestPushMirrorScopesTheCredential asserts the header reaches git for the
 // push URL's origin only. The push itself goes to a local bare repository,
 // and the environment git received is checked through a wrapper that

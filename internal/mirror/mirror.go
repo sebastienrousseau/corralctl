@@ -49,6 +49,9 @@ var (
 	originURL    = git.RemoteOriginFromConfig
 	ensureRemote = git.EnsureRemote
 	pushMirror   = git.PushMirror
+	hasBranch    = git.HasBranch
+	localDefault = git.DefaultBranch
+	pushRef      = git.PushRef
 )
 
 // Repo is one local repository to mirror.
@@ -301,6 +304,10 @@ func mirrorOne(ctx context.Context, r Repo, d resolved) Result {
 	if err := ensureRemote(ctx, r.Path, d.Name, pushURL); err != nil {
 		return fail(err)
 	}
+	moved, err := alignDefault(ctx, r, d, remote, pushURL, cred)
+	if err != nil {
+		return fail(err)
+	}
 	if err := pushMirror(ctx, r.Path, d.Name, pushURL, cred); err != nil {
 		return fail(err)
 	}
@@ -308,7 +315,37 @@ func mirrorOne(ctx context.Context, r Repo, d resolved) Result {
 	if remote.Created {
 		msg = "created and mirrored"
 	}
+	if moved != "" {
+		msg += "; default branch " + remote.DefaultBranch + " -> " + moved
+	}
 	return Result{Repo: r.Name, Destination: d.Name, Action: ActionMirror, Message: msg, URL: pushURL, Created: remote.Created}
+}
+
+// alignDefault repoints the destination's default branch when the mirror
+// push is about to prune it, and returns the branch it now names ("" when
+// nothing changed). A forge refuses to delete its default branch and
+// rejects the whole push over it, so a default deleted upstream would
+// otherwise fail every run. While the current default still exists
+// locally, the destination's choice is left alone.
+func alignDefault(ctx context.Context, r Repo, d resolved, remote forge.Remote, pushURL string, cred *git.PushCredential) (string, error) {
+	setter, ok := d.Target.(forge.DefaultBranchSetter)
+	if !ok || remote.DefaultBranch == "" {
+		return "", nil
+	}
+	if kept, err := hasBranch(ctx, r.Path, remote.DefaultBranch); err != nil || kept {
+		return "", err
+	}
+	want, err := localDefault(ctx, r.Path)
+	if err != nil {
+		return "", fmt.Errorf("default branch %s is gone locally and would be pruned: %w", remote.DefaultBranch, err)
+	}
+	if err := pushRef(ctx, r.Path, d.Name, want, pushURL, cred); err != nil {
+		return "", err
+	}
+	if err := setter.SetDefaultBranch(ctx, d.Owner, r.Name, want, d.Options); err != nil {
+		return "", fmt.Errorf("default branch %s -> %s: %w", remote.DefaultBranch, want, err)
+	}
+	return want, nil
 }
 
 // pushTarget picks the URL for the configured protocol and, for HTTPS,

@@ -51,11 +51,18 @@ func (f *fakeTarget) calls() int {
 func withSeams(t *testing.T) {
 	t.Helper()
 	oldEmpty, oldOrigin, oldRemote, oldPush := isEmpty, originURL, ensureRemote, pushMirror
-	t.Cleanup(func() { isEmpty, originURL, ensureRemote, pushMirror = oldEmpty, oldOrigin, oldRemote, oldPush })
+	oldHas, oldDefault, oldRef := hasBranch, localDefault, pushRef
+	t.Cleanup(func() {
+		isEmpty, originURL, ensureRemote, pushMirror = oldEmpty, oldOrigin, oldRemote, oldPush
+		hasBranch, localDefault, pushRef = oldHas, oldDefault, oldRef
+	})
 	isEmpty = func(context.Context, string) bool { return false }
 	originURL = func(string) (string, error) { return "git@github.com:me/repo.git", nil }
 	ensureRemote = func(context.Context, string, string, string) error { return nil }
 	pushMirror = func(context.Context, string, string, string, *git.PushCredential) error { return nil }
+	hasBranch = func(context.Context, string, string) (bool, error) { return true, nil }
+	localDefault = func(context.Context, string) (string, error) { return "main", nil }
+	pushRef = func(context.Context, string, string, string, string, *git.PushCredential) error { return nil }
 }
 
 func okRemote() forge.Remote {
@@ -270,6 +277,127 @@ func TestRunReportsFailures(t *testing.T) {
 	pushMirror = func(context.Context, string, string, string, *git.PushCredential) error { return errors.New("push") }
 	if r := run(&fakeTarget{login: "me", remote: okRemote()}); r.Action != ActionError || r.Message != "push" {
 		t.Fatalf("push error = %+v", r)
+	}
+}
+
+// setterTarget is a fakeTarget that can also repoint a default branch.
+type setterTarget struct {
+	fakeTarget
+	setErr error
+	set    []string
+}
+
+func (s *setterTarget) SetDefaultBranch(_ context.Context, owner, name, branch string, _ forge.TargetOptions) error {
+	s.mu.Lock()
+	s.set = append(s.set, owner+"/"+name+"="+branch)
+	s.mu.Unlock()
+	return s.setErr
+}
+
+func TestRunAlignsAStaleDefaultBranchBeforePruning(t *testing.T) {
+	withSeams(t)
+	stale := okRemote()
+	stale.DefaultBranch = "feat/old"
+	var order []string
+	hasBranch = func(_ context.Context, _, branch string) (bool, error) { return branch != "feat/old", nil }
+	pushRef = func(_ context.Context, _, _, branch, _ string, _ *git.PushCredential) error {
+		order = append(order, "ref "+branch)
+		return nil
+	}
+	pushMirror = func(context.Context, string, string, string, *git.PushCredential) error {
+		order = append(order, "mirror")
+		return nil
+	}
+	tg := &setterTarget{fakeTarget: fakeTarget{login: "me", remote: stale}}
+	report, results := collect()
+	Run(context.Background(), Options{Repos: []Repo{{Name: "a", Path: "/a", Private: true}},
+		Destinations: []Destination{dest("gitea", "gitea.example.com", tg)}, Timeout: time.Second, Report: report})
+
+	r, _ := find(*results, "a", "gitea")
+	if r.Action != ActionMirror || r.Message != "mirrored; default branch feat/old -> main" {
+		t.Fatalf("result = %+v", r)
+	}
+	if len(tg.set) != 1 || tg.set[0] != "me/a=main" {
+		t.Fatalf("set = %v", tg.set)
+	}
+	// The new default has to exist before the forge will name it, and has
+	// to be named before the prune runs.
+	if len(order) != 2 || order[0] != "ref main" || order[1] != "mirror" {
+		t.Fatalf("order = %v", order)
+	}
+}
+
+func TestRunLeavesTheDefaultBranchAlone(t *testing.T) {
+	withSeams(t)
+	run := func(tg forge.Target) Result {
+		report, results := collect()
+		Run(context.Background(), Options{Repos: []Repo{{Name: "a", Path: "/a", Private: true}},
+			Destinations: []Destination{dest("gitea", "gitea.example.com", tg)}, Timeout: time.Second, Report: report})
+		r, _ := find(*results, "a", "gitea")
+		return r
+	}
+	pushRef = func(context.Context, string, string, string, string, *git.PushCredential) error {
+		t.Fatal("nothing should be pushed ahead of the mirror")
+		return nil
+	}
+	stale := okRemote()
+	stale.DefaultBranch = "feat/old"
+
+	// The current default still exists locally (withSeams' hasBranch).
+	kept := &setterTarget{fakeTarget: fakeTarget{login: "me", remote: stale}}
+	if r := run(kept); r.Message != "mirrored" || len(kept.set) != 0 {
+		t.Fatalf("kept = %+v, set %v", r, kept.set)
+	}
+	// The forge reports no default, as for an empty repository.
+	unknown := &setterTarget{fakeTarget: fakeTarget{login: "me", remote: okRemote()}}
+	if r := run(unknown); r.Message != "mirrored" || len(unknown.set) != 0 {
+		t.Fatalf("unknown = %+v, set %v", r, unknown.set)
+	}
+	// A forge that cannot set one is pushed as before.
+	hasBranch = func(context.Context, string, string) (bool, error) { return false, nil }
+	if r := run(&fakeTarget{login: "me", remote: stale}); r.Message != "mirrored" {
+		t.Fatalf("no setter = %+v", r)
+	}
+}
+
+func TestRunReportsAFailedAlignment(t *testing.T) {
+	withSeams(t)
+	stale := okRemote()
+	stale.DefaultBranch = "feat/old"
+	run := func(tg *setterTarget) Result {
+		report, results := collect()
+		Run(context.Background(), Options{Repos: []Repo{{Name: "a", Path: "/a", Private: true}},
+			Destinations: []Destination{dest("gitea", "gitea.example.com", tg)}, Timeout: time.Second, Report: report})
+		r, _ := find(*results, "a", "gitea")
+		return r
+	}
+	target := func() *setterTarget { return &setterTarget{fakeTarget: fakeTarget{login: "me", remote: stale}} }
+	pushMirror = func(context.Context, string, string, string, *git.PushCredential) error {
+		t.Fatal("the mirror push must not run after a failed alignment")
+		return nil
+	}
+
+	hasBranch = func(context.Context, string, string) (bool, error) { return false, errors.New("show-ref") }
+	if r := run(target()); r.Action != ActionError || r.Message != "show-ref" {
+		t.Fatalf("lookup error = %+v", r)
+	}
+	hasBranch = func(context.Context, string, string) (bool, error) { return false, nil }
+	localDefault = func(context.Context, string) (string, error) { return "", errors.New("detached") }
+	if r := run(target()); r.Action != ActionError || r.Message != "default branch feat/old is gone locally and would be pruned: detached" {
+		t.Fatalf("no local default = %+v", r)
+	}
+	localDefault = func(context.Context, string) (string, error) { return "main", nil }
+	pushRef = func(context.Context, string, string, string, string, *git.PushCredential) error {
+		return errors.New("ref push")
+	}
+	if r := run(target()); r.Action != ActionError || r.Message != "ref push" {
+		t.Fatalf("ref push error = %+v", r)
+	}
+	pushRef = func(context.Context, string, string, string, string, *git.PushCredential) error { return nil }
+	tg := target()
+	tg.setErr = errors.New("403")
+	if r := run(tg); r.Action != ActionError || r.Message != "default branch feat/old -> main: 403" {
+		t.Fatalf("set error = %+v", r)
 	}
 }
 

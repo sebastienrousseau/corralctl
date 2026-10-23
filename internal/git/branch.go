@@ -5,7 +5,9 @@ package git
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"os/exec"
 	"strings"
 )
 
@@ -81,6 +83,52 @@ func CreateBranch(ctx context.Context, targetDir, branch, startPoint string) err
 	}
 	_, err := runGitOutput(ctx, targetDir, args...)
 	return err
+}
+
+// HasBranch reports whether targetDir has a local branch with this name.
+func HasBranch(ctx context.Context, targetDir, branch string) (bool, error) {
+	if strings.TrimSpace(branch) == "" {
+		return false, fmt.Errorf("invalid branch name %q", branch)
+	}
+	// The refs/heads/ prefix keeps a name git could read as an option, or
+	// as a tag or remote ref, from meaning anything but a local branch.
+	_, err := runGitOutput(ctx, targetDir, "show-ref", "--verify", "--quiet", "refs/heads/"+branch)
+	if err == nil {
+		return true, nil
+	}
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) && exitErr.ExitCode() == 1 {
+		return false, nil
+	}
+	return false, err
+}
+
+// defaultBranchSources are where DefaultBranch looks, in order: the
+// default the clone recorded for origin, then the branch HEAD is on.
+var defaultBranchSources = []struct{ ref, prefix string }{
+	{"refs/remotes/origin/HEAD", "origin/"},
+	{"HEAD", ""},
+}
+
+// DefaultBranch returns the branch targetDir treats as its default: the
+// one origin/HEAD names, else the one HEAD is on. A candidate counts only
+// when it exists as a local branch, because that is what a mirror pushes.
+func DefaultBranch(ctx context.Context, targetDir string) (string, error) {
+	for _, src := range defaultBranchSources {
+		out, err := runGitOutput(ctx, targetDir, "symbolic-ref", "--quiet", "--short", src.ref)
+		name := strings.TrimPrefix(strings.TrimSpace(out), src.prefix)
+		if err != nil || name == "" {
+			continue
+		}
+		ok, err := HasBranch(ctx, targetDir, name)
+		if err != nil {
+			return "", err
+		}
+		if ok {
+			return name, nil
+		}
+	}
+	return "", errors.New("no local default branch: neither origin/HEAD nor HEAD names a local branch")
 }
 
 // SwitchBranch switches to an existing branch in targetDir.

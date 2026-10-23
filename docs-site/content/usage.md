@@ -174,6 +174,14 @@ lives on, so a clone taken *from* GitLab is not pruned against GitLab. And a
 destination that already holds a same-named repository with the other
 visibility is an error rather than a silent reuse.
 
+One destination setting is changed. When a Gitea, Forgejo or Codeberg
+repository's default branch no longer exists locally — deleted upstream, say —
+the push would prune it, and the forge would reject the whole push. sync first
+pushes the local default branch (origin's default, else the checked-out
+branch), makes it the destination's default, and reports
+`default branch <old> -> <new>`. A default that still exists locally is left
+alone.
+
 ## Worktree management
 
 `corralctl worktree` creates, lists, removes, and prunes linked Git worktrees
