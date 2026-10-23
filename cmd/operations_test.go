@@ -274,7 +274,9 @@ func TestConfigLoadFailuresAndFallbacks(t *testing.T) {
 	oldHome := userHomeDir
 	oldBase := baseDir
 	t.Cleanup(func() { userHomeDir, baseDir = oldHome, oldBase })
-	_ = os.Unsetenv("XDG_CONFIG_HOME")
+	// Empty rather than unset: t.Setenv restores it, so later tests keep
+	// TestMain's throwaway config dir instead of reading the real one.
+	t.Setenv("XDG_CONFIG_HOME", "")
 	homeDir := filepath.Join(string(filepath.Separator), "home", "test")
 	userHomeDir = func() (string, error) { return homeDir, nil }
 	if got := defaultConfigPath(); got != filepath.Join(homeDir, ".config", "corral", "config.json") {
