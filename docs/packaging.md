@@ -28,7 +28,7 @@ list with versions is in [SBOM.md](../SBOM.md), which CI checks against
 
 ## Minimum toolchain policy
 
-The floor is the `go` directive in `go.mod` — currently **Go 1.26.9**. It
+The floor is the `go` directive in `go.mod` — currently **Go 1.26.10**. It
 is deliberately not restated anywhere else, so it cannot disagree with
 itself; CI sets `GOTOOLCHAIN=auto` and lets `go.mod` decide.
 
