@@ -17,8 +17,8 @@ import (
 
 // The push side, for `corralctl sync`.
 //
-// Everything else in this package pulls. These two functions push, and
-// they are the only ones that do, so the security model's claim that
+// Everything else in this package pulls. The functions in this file push,
+// and they are the only ones that do, so the security model's claim that
 // corral never forces a branch can be checked by reading one file.
 
 // mirrorRefspecs is the whole of what a mirror pushes, in one round trip.
@@ -96,8 +96,8 @@ func PushBranch(ctx context.Context, targetDir, remote, branch, pushURL string, 
 		return err
 	}
 	branch = strings.TrimSpace(branch)
-	if branch == "" || strings.HasPrefix(branch, "-") {
-		return fmt.Errorf("invalid branch name %q", branch)
+	if err := validatePushBranch(branch); err != nil {
+		return err
 	}
 	env, err := pushAuthEnv(pushURL, cred)
 	if err != nil {
@@ -105,6 +105,33 @@ func PushBranch(ctx context.Context, targetDir, remote, branch, pushURL string, 
 	}
 	args := []string{"push", "-u", "--no-verify", "--", remote, branch}
 	return runMirror(ctx, targetDir, env, args...)
+}
+
+// PushRef pushes one local branch to the branch of the same name on
+// remote. Like PushMirror it never forces, and unlike PushBranch it leaves
+// upstream tracking alone: sync uses it to put a branch on a destination
+// before naming it the default there, and a mirror's clone tracks origin.
+func PushRef(ctx context.Context, targetDir, remote, branch, pushURL string, cred *PushCredential) error {
+	if err := validateRemoteName(remote); err != nil {
+		return err
+	}
+	if err := validatePushBranch(branch); err != nil {
+		return err
+	}
+	env, err := pushAuthEnv(pushURL, cred)
+	if err != nil {
+		return err
+	}
+	ref := "refs/heads/" + branch
+	return runMirror(ctx, targetDir, env, "push", "--no-verify", "--", remote, ref+":"+ref)
+}
+
+// validatePushBranch refuses a branch name git would read as an option.
+func validatePushBranch(branch string) error {
+	if branch == "" || strings.HasPrefix(branch, "-") {
+		return fmt.Errorf("invalid branch name %q", branch)
+	}
+	return nil
 }
 
 // pushAuthEnv renders a credential as the GIT_CONFIG_* environment that

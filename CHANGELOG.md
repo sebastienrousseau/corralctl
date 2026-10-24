@@ -6,6 +6,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **`corralctl sync` no longer fails on a stale Gitea default branch.**
+  When a Gitea, Forgejo or Codeberg destination's default branch had been
+  deleted upstream, the pruning mirror push tried to delete it and the forge's
+  pre-receive hook rejected the whole push, on every run. sync now pushes the
+  local default branch first and makes it the destination's default, reporting
+  `default branch <old> -> <new>`; a default that still exists locally is left
+  alone.
+
+- **CI builds with Go 1.26.10**, which fixes GO-2026-6809 (crypto/x509
+  trusting compromised intermediate certificates) flagged by `govulncheck`.
+
 ## [0.0.52] - 2026-10-13
 
 ### Added

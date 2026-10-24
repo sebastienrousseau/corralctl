@@ -193,8 +193,13 @@ attempted on that repo.
 
 ### C6. `corralctl sync` never rewrites a branch, and never pushes a clone onto its own forge
 
-**Argument.** The only two functions that push are `git.EnsureRemote` and
-`git.PushMirror` in `internal/git/mirror.go`. The push is a single
+**Argument.** Every function that pushes lives in `internal/git/mirror.go`:
+`git.PushMirror`, `git.PushRef` and `git.PushBranch`, none of which passes a
+force flag; `git.EnsureRemote` beside them only configures the remote.
+`git.PushRef` pushes one branch ahead of the mirror push, when a destination's
+default branch is about to be pruned and must first be repointed at the local
+default (a forge rejects a push that deletes its default branch). The mirror
+push is a single
 `git push --prune --no-verify <remote> refs/heads/*:refs/heads/*
 +refs/tags/*:refs/tags/*`: branches carry no force marker, so a
 non-fast-forward is refused by git and surfaced as an error, while tags are

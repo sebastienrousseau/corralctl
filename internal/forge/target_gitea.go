@@ -71,6 +71,17 @@ func (g gitea) EnsureRepo(ctx context.Context, owner string, spec RepoSpec, opts
 	}
 }
 
+// SetDefaultBranch implements DefaultBranchSetter.
+func (g gitea) SetDefaultBranch(ctx context.Context, owner, name, branch string, opts TargetOptions) error {
+	c, err := g.targetClient(opts)
+	if err != nil {
+		return err
+	}
+	path := "/api/v1/repos/" + url.PathEscape(owner) + "/" + url.PathEscape(name)
+	_, err = c.call(ctx, http.MethodPatch, path, map[string]any{"default_branch": branch}, nil)
+	return err
+}
+
 // PushAuth implements Target. Gitea, Forgejo and Codeberg take the token
 // as the password for the account's own login.
 func (gitea) PushAuth(opts TargetOptions) (string, string) { return opts.Login, opts.Token }
@@ -87,10 +98,16 @@ func (g gitea) targetClient(opts TargetOptions) (*restClient, error) {
 }
 
 func (gitea) remote(r giteaRepo, created bool) Remote {
-	return Remote{
+	out := Remote{
 		HTTPSURL: r.CloneURL,
 		SSHURL:   r.SSHURL,
 		Private:  r.Private || r.Internal,
 		Created:  created,
 	}
+	// An empty repository still reports the instance's default name for
+	// the branch it will create, which is not a branch a push can delete.
+	if !r.Empty {
+		out.DefaultBranch = r.DefaultBranch
+	}
+	return out
 }

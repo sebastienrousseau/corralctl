@@ -25,6 +25,11 @@ import (
 // is git's job and is done identically for every forge. It does not delete,
 // rename or change visibility, because a mirror that reconciles remote
 // settings is a different tool with a different blast radius.
+//
+// The one setting a mirror does touch is the default branch, and only
+// through the optional DefaultBranchSetter, only when the push is about to
+// prune it: forges refuse to delete a default branch and reject the whole
+// push for it, so a branch deleted upstream would fail every later run.
 
 // Target is a forge that can hold a mirror of a local repository.
 type Target interface {
@@ -64,6 +69,16 @@ type Remote struct {
 	Private bool
 	// Created reports that this call created the repository.
 	Created bool
+	// DefaultBranch is the repository's default branch, or "" when the
+	// forge does not report one or the repository has no branches yet.
+	DefaultBranch string
+}
+
+// DefaultBranchSetter is a Target that can repoint a repository's default
+// branch. It is separate from Target so a forge gains it without every
+// other forge having to; the branch must already exist on the forge.
+type DefaultBranchSetter interface {
+	SetDefaultBranch(ctx context.Context, owner, name, branch string, opts TargetOptions) error
 }
 
 // TargetOptions carries the credential and instance for a Target call.

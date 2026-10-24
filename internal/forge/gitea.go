@@ -66,6 +66,7 @@ type giteaRepo struct {
 	StarsCount    int        `json:"stars_count"`
 	Template      bool       `json:"template"`
 	Mirror        bool       `json:"mirror"`
+	Empty         bool       `json:"empty"`
 }
 
 // List implements Forge.
