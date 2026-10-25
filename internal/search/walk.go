@@ -202,6 +202,12 @@ func discover(ctx context.Context, root string, includeTests bool, pathGlob stri
 			}
 			return nil
 		}
+		// A symlink is never searched: a clone can commit one pointing
+		// anywhere on disk, or at a refused file under an allowed name.
+		// searchFile refuses links too, for a path swapped after this walk.
+		if d.Type()&fs.ModeSymlink != 0 {
+			return nil
+		}
 		if len(paths) >= maxFilesPerRepo {
 			hitFileCap = true
 			return fs.SkipAll

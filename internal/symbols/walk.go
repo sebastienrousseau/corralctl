@@ -6,13 +6,14 @@ package symbols
 import (
 	"context"
 	"io/fs"
-	"os"
 	"path/filepath"
 	"runtime"
 	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
+
+	"github.com/sebastienrousseau/corralctl/internal/safefs"
 )
 
 // Bounds on what a single repository may contribute.
@@ -257,6 +258,12 @@ func discover(ctx context.Context, root string) ([]string, bool, Fingerprint, er
 			}
 			return nil
 		}
+		// A symlink is never indexed: a clone can commit one pointing
+		// anywhere on disk. parseOne refuses links too, for a path swapped
+		// after this walk.
+		if d.Type()&fs.ModeSymlink != 0 {
+			return nil
+		}
 		if len(paths) >= maxFilesPerRepoVar {
 			truncated = true
 			return fs.SkipAll
@@ -297,12 +304,9 @@ func discover(ctx context.Context, root string) ([]string, bool, Fingerprint, er
 // design: an unreadable or oversized file contributes nothing, and one bad
 // file must not blank an otherwise good index.
 func parseOne(root, rel string) []Symbol {
-	full := filepath.Join(root, filepath.FromSlash(rel))
-	info, err := os.Stat(full)
-	if err != nil || info.Size() > maxFileBytes {
-		return nil
-	}
-	src, err := os.ReadFile(full) // #nosec G304 -- rel is discovered under root by the walk above
+	// safefs refuses a symlink anywhere below root and a file over the
+	// limit, so a link swapped in after the walk is not followed either.
+	src, err := safefs.ReadFile(root, rel, maxFileBytes)
 	if err != nil {
 		return nil
 	}
