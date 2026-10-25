@@ -86,12 +86,24 @@ func ReadFile(root, rel string, limit int64) ([]byte, error) {
 	return io.ReadAll(io.LimitReader(f, limit))
 }
 
+// escapesRoot reports whether a cleaned relative path names the root
+// itself or anything not below it. On Windows a path can be rooted
+// without being absolute (`\etc`, `/etc`) or carry a drive (`C:x`); both
+// are refused rather than joined under the root.
+func escapesRoot(clean string) bool {
+	sep := string(filepath.Separator)
+	return clean == "." || clean == ".." ||
+		strings.HasPrefix(clean, ".."+sep) ||
+		filepath.IsAbs(clean) ||
+		filepath.VolumeName(clean) != "" ||
+		strings.HasPrefix(clean, sep)
+}
+
 // checkPath walks rel below root with lstat and returns the full path and
 // the info of its last component.
 func checkPath(root, rel string) (string, fs.FileInfo, error) {
 	clean := filepath.Clean(filepath.FromSlash(rel))
-	if clean == "." || filepath.IsAbs(clean) || clean == ".." ||
-		strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
+	if escapesRoot(clean) {
 		return "", nil, fmt.Errorf("%s: %w", rel, ErrOutsideRoot)
 	}
 	cur := root
