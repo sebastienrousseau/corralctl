@@ -85,8 +85,13 @@ userinfo and query strings are redacted before audit logging.
 
 **Argument.** Engine layout results reject absolute paths and traversal.
 MCP paths are canonicalised against the workspace, while file resources are
-additionally confined to the selected repository. Mutation targets are checked
-with the same root sandbox before any filesystem operation.
+additionally confined to the selected repository. Every read of a repository
+file (the file resource, `corral_search_code`, the symbol index) goes through
+`internal/safefs`, which refuses a symlink at any component of the path and
+checks that the file opened is the file checked, so neither a link out of the
+workspace nor a link to a refused name (`readme.md -> .env`) is followed.
+Mutation targets are checked with the same root sandbox before any filesystem
+operation.
 
 **Evidence.**
 
@@ -101,6 +106,11 @@ with the same root sandbox before any filesystem operation.
   resolves inside the configured root, comparing whole path segments rather
   than string prefixes. Run continuously in CI (`.github/workflows/fuzz.yml`)
   with the largest budget of the four fuzz targets.
+- `internal/safefs/safefs_test.go` asserts the symlink, non-regular-file,
+  traversal and check-then-swap refusals; `symlink_test.go` in
+  `internal/search`, `internal/symbols` and `internal/mcp` asserts that a
+  committed link is never followed by search, symbols or the file resource
+  (GHSA-7pgr-hvf8-xxfg, GHSA-2mm5-xrpm-cv2p).
 
 ### C3. The release artefacts you download are the artefacts we built
 
@@ -204,14 +214,18 @@ push is a single
 +refs/tags/*:refs/tags/*`: branches carry no force marker, so a
 non-fast-forward is refused by git and surfaced as an error, while tags are
 forced because the local tag namespace is authoritative for a mirror. Before
-any push, `internal/mirror` compares the repository's `origin` host with the
-destination's host and skips the pair when they match, so a clone taken
-*from* a forge is never pruned against that forge. A destination repository
+any push, `internal/mirror` compares the destination's host with every host
+`origin` may reach: as written, as git rewrites it (`insteadOf`), as ssh
+resolves it (`ssh -G`), and with a forge's port-443 SSH host folded to the
+forge. It skips the pair when any matches, so a clone taken *from* a forge is
+never pruned against that forge. A destination repository
 that already exists with the other visibility is refused rather than reused.
 
 **Evidence.** `internal/git/mirror_test.go` pushes to a real bare repository
 and asserts all three properties; `internal/mirror/mirror_test.go` covers the
-origin guard in real and dry runs and the visibility refusal.
+origin guard in real and dry runs and the visibility refusal;
+`internal/mirror/origin_guard_test.go` covers `insteadOf`, ssh aliases and
+`ssh.github.com` (GHSA-mmpx-r9vh-gjxv).
 
 ### C7. `corralctl sync` presents each credential to exactly one forge
 
