@@ -15,6 +15,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/sebastienrousseau/corralctl/internal/safefs"
 	"github.com/sebastienrousseau/corralctl/internal/sanitize"
 )
 
@@ -40,9 +41,19 @@ var maxTreeEntries = 2_000
 var (
 	marshalResource = json.MarshalIndent
 	walkResource    = filepath.WalkDir
-	openResource    = os.Open
+	openResource    = openRegularResource
 	readResourceAll = io.ReadAll
 )
+
+// openRegularResource opens rel inside a clone through safefs: no symlink
+// anywhere below the clone, and a regular file at the end. The content
+// policy in handleRepoFileResource is checked on the requested name, so
+// following a link would let readme.md stand in for .env, or for a file
+// outside the workspace.
+func openRegularResource(root, rel string) (*os.File, error) {
+	f, _, err := safefs.OpenRegular(root, rel)
+	return f, err
+}
 
 // registerResources attaches the v0 resource set (one static index +
 // three URI templates) to the underlying MCP server. URI scheme is
@@ -223,7 +234,7 @@ func (s *Server) handleRepoFileResource(ctx context.Context, req *mcp.ReadResour
 	if err != nil {
 		return nil, err
 	}
-	f, err := openResource(safe) // #nosec G304 -- SafePath enforces the workspace sandbox
+	f, err := openResource(repo.Path, path)
 	if err != nil {
 		return nil, fmt.Errorf("open file: %w", err)
 	}

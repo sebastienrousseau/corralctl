@@ -7,8 +7,9 @@ import (
 	"bytes"
 	"io"
 	"os"
-	"path/filepath"
 	"strings"
+
+	"github.com/sebastienrousseau/corralctl/internal/safefs"
 )
 
 // fileBuffers is the per-file scratch a search needs.
@@ -21,9 +22,17 @@ func newFileBuffer() *fileBuffers {
 	return &fileBuffers{data: make([]byte, 0, 64*1024)}
 }
 
-// searchFile reads one file and returns the lines matching m.
+// openSearchFile opens a file to search without following a symlink. A
+// seam, so a read failure after a clean open is testable.
+var openSearchFile = func(root, rel string) (*os.File, error) {
+	f, _, err := safefs.OpenRegular(root, rel)
+	return f, err
+}
+
+// searchFile reads one file and returns the lines matching m. It reads
+// through safefs, so a symlink is never followed.
 func searchFile(root, rel string, m *Matcher, buf *fileBuffers) (hits []Hit, more bool) {
-	f, err := os.Open(filepath.Join(root, rel)) // #nosec G304 -- rel is walk-derived and policy-filtered
+	f, err := openSearchFile(root, rel)
 	if err != nil {
 		return nil, false
 	}
@@ -101,9 +110,10 @@ func searchFile(root, rel string, m *Matcher, buf *fileBuffers) (hits []Hit, mor
 // the same reads and the same matcher with and without the whole-file test.
 var prefilterEnabled = true
 
-// readFileBounded opens root/rel and reads it, bounded.
+// readFileBounded opens root/rel without following symlinks and reads it,
+// bounded.
 func readFileBounded(root, rel string, dst []byte) ([]byte, error) {
-	f, err := os.Open(filepath.Join(root, rel)) // #nosec G304 -- rel is walk-derived and policy-filtered
+	f, err := openSearchFile(root, rel)
 	if err != nil {
 		return nil, err
 	}

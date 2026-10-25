@@ -13,13 +13,25 @@ import (
 
 	"github.com/sebastienrousseau/corralctl/internal/diag"
 	"github.com/sebastienrousseau/corralctl/internal/git"
+	"github.com/sebastienrousseau/corralctl/internal/safefs"
 )
 
 var (
-	readStateFile    = os.ReadFile
+	readStateFile    = readStateSidecar
 	renameSyncFile   = os.Rename
 	marshalSyncState = json.MarshalIndent
 )
+
+// maxStateFileBytes bounds a state sidecar. A real one is a few hundred
+// bytes.
+const maxStateFileBytes = 1 << 20
+
+// readStateSidecar reads a state file without following a symlink. The
+// legacy sidecar sits in the working tree, so a clone can commit one that
+// links anywhere on disk; it is read as a regular file or not at all.
+func readStateSidecar(path string) ([]byte, error) {
+	return safefs.ReadFile(filepath.Dir(path), filepath.Base(path), maxStateFileBytes)
+}
 
 type syncTempFile interface {
 	Write([]byte) (int, error)

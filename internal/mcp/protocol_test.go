@@ -837,7 +837,7 @@ func TestFileResourceReportsUnreadableFile(t *testing.T) {
 	mustWrite(t, secret, "content")
 
 	t.Run("open refused", func(t *testing.T) {
-		stubSeam(t, &openResource, func(string) (*os.File, error) {
+		stubSeam(t, &openResource, func(string, string) (*os.File, error) {
 			return nil, fs.ErrPermission
 		})
 		h := newHarness(t, ServerOptions{Root: base})

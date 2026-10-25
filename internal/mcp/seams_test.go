@@ -33,7 +33,8 @@ func TestMCPSeamsBindToRealImplementations(t *testing.T) {
 		{"mkdirMutation", mkdirMutation, os.MkdirAll},
 		{"removeMutation", removeMutation, os.RemoveAll},
 		{"markSynced", markSynced, markStateSynced},
-		{"openResource", openResource, os.Open},
+		{"openResource", openResource, openRegularResource},
+		{"readStateFile", readStateFile, readStateSidecar},
 	}
 	for _, tc := range cases {
 		if reflect.ValueOf(tc.got).Pointer() != reflect.ValueOf(tc.want).Pointer() {
