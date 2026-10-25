@@ -52,10 +52,14 @@ func withSeams(t *testing.T) {
 	t.Helper()
 	oldEmpty, oldOrigin, oldRemote, oldPush := isEmpty, originURL, ensureRemote, pushMirror
 	oldHas, oldDefault, oldRef := hasBranch, localDefault, pushRef
+	oldResolve, oldSSH := resolveOrigin, sshHostname
 	t.Cleanup(func() {
 		isEmpty, originURL, ensureRemote, pushMirror = oldEmpty, oldOrigin, oldRemote, oldPush
 		hasBranch, localDefault, pushRef = oldHas, oldDefault, oldRef
+		resolveOrigin, sshHostname = oldResolve, oldSSH
 	})
+	resolveOrigin = func(context.Context, string) (string, error) { return "", errors.New("no git") }
+	sshHostname = func(_ context.Context, host string) string { return host }
 	isEmpty = func(context.Context, string) bool { return false }
 	originURL = func(string) (string, error) { return "git@github.com:me/repo.git", nil }
 	ensureRemote = func(context.Context, string, string, string) error { return nil }

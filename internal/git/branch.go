@@ -140,3 +140,15 @@ func SwitchBranch(ctx context.Context, targetDir, branch string) error {
 	_, err := runGitOutput(ctx, targetDir, "switch", "--", branch)
 	return err
 }
+
+// ResolvedRemoteURL is the URL git actually uses for the named remote,
+// after its url.<base>.insteadOf rewrites: where .git/config says
+// "work:me/repo", this is what git expands it to. It reads configuration
+// only and makes no network request.
+func ResolvedRemoteURL(ctx context.Context, targetDir, remote string) (string, error) {
+	out, err := runGitOutput(ctx, targetDir, "ls-remote", "--get-url", remote)
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(out), nil
+}

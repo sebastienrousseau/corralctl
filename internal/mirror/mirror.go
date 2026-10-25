@@ -262,13 +262,12 @@ func processOne(ctx context.Context, r Repo, dests []resolved, opts Options, c *
 	// An unreadable origin is treated as no origin: the guard cannot
 	// fire, and a repository that broken fails at the push with git's own
 	// message rather than silently here.
-	origin, _ := originURL(r.Path)
-	originHost := hostOf(origin)
+	hosts := originHosts(ctx, r.Path)
 
 	for _, d := range dests {
-		if originHost != "" && strings.EqualFold(originHost, d.Host) {
+		if originOn(hosts, d.Host) {
 			c.emit(Result{Repo: r.Name, Destination: d.Name, Action: ActionSkip,
-				Message: "origin is on " + originHost + "; a repository is not mirrored onto its own forge"})
+				Message: "origin is on " + canonicalHost(d.Host) + "; a repository is not mirrored onto its own forge"})
 			continue
 		}
 		if opts.DryRun {
