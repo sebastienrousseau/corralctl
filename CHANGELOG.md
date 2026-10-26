@@ -8,6 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`corralctl sync` aligns a stale GitHub default branch too.** The
+  0.0.53 fix for a destination whose default branch was deleted upstream
+  covered only the Gitea family. A GitHub destination refuses the pruning
+  push the same way, so it now reports its default branch and has it
+  repointed through the API before the push. GitLab and Bitbucket are
+  unchanged; see the usage guide for why.
+
 - **Private HTTPS clones work on every forge, not only GitHub.** git was
   given only the GitHub token, scoped to `https://github.com/`, so a
   private repository on GitLab, Gitea, Forgejo, Codeberg, Bitbucket or a

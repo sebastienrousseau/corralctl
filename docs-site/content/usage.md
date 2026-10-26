@@ -174,13 +174,16 @@ lives on, so a clone taken *from* GitLab is not pruned against GitLab. And a
 destination that already holds a same-named repository with the other
 visibility is an error rather than a silent reuse.
 
-One destination setting is changed. When a Gitea, Forgejo or Codeberg
+One destination setting is changed. When a GitHub, Gitea, Forgejo or Codeberg
 repository's default branch no longer exists locally — deleted upstream, say —
 the push would prune it, and the forge would reject the whole push. sync first
 pushes the local default branch (origin's default, else the checked-out
 branch), makes it the destination's default, and reports
 `default branch <old> -> <new>`. A default that still exists locally is left
-alone.
+alone. GitLab and Bitbucket destinations are pushed as before: Bitbucket
+Cloud's API cannot change a repository's main branch, and GitLab protects
+its default branch, so repointing it would not let the prune through.
+Change the default in the forge's settings when sync reports the rejection.
 
 ## Worktree management
 
