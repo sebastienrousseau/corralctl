@@ -164,24 +164,17 @@ func (s *Server) streamableHandler() http.Handler {
 }
 
 // isAllowedOrigin reports whether an Origin header is permitted to access the
-// server. Origins from loopback are permitted by default; non-loopback origins
-// must match an entry in ServerOptions.AllowedOrigins.
+// server: only an origin listed in ServerOptions.AllowedOrigins is.
+//
+// A loopback origin is not let in by default. Every local dev server is
+// one, so trusting loopback would let any page a developer happens to have
+// open on localhost drive this server, mutations included. A client that
+// is not a browser sends no Origin and is not affected; a browser client
+// is listed with --allowed-origins.
 func (s *Server) isAllowedOrigin(origin string) bool {
-	for _, allowed := range s.opts.AllowedOrigins {
-		if strings.EqualFold(origin, allowed) {
-			return true
-		}
-	}
-	u, err := url.Parse(origin)
-	if err != nil {
-		return false
-	}
-	host := u.Hostname()
-	if host == "localhost" {
-		return true
-	}
-	ip := net.ParseIP(host)
-	return ip != nil && ip.IsLoopback()
+	return slices.ContainsFunc(s.opts.AllowedOrigins, func(allowed string) bool {
+		return strings.EqualFold(origin, allowed)
+	})
 }
 
 // isAllowedHost reports whether Host is loopback or matches an allowed origin host.
@@ -266,6 +259,9 @@ func withTraceContext(w http.ResponseWriter, r *http.Request) *http.Request {
 		tc = NewTraceContext()
 	}
 	w.Header().Set("traceparent", tc.String())
+	// Whether the CORS headers are sent, and whether the request is
+	// refused, depends on Origin; a shared cache has to key on it.
+	w.Header().Add("Vary", "Origin")
 	return r.WithContext(ContextWithTrace(r.Context(), tc))
 }
 

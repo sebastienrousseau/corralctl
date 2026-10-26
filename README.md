@@ -579,6 +579,13 @@ is refused because this server exposes every repository under its root.
 Pass `--allow-remote` if you have put your own authentication in front of
 it.
 
+A browser sends an `Origin` header with every request, and the server
+refuses one that is not listed in `--allowed-origins`. Loopback origins are
+not trusted by default, because every local dev server is one; list the
+page a browser client runs on, for example `--allowed-origins
+http://localhost:6274`. A client that is not a browser sends no `Origin`
+and is unaffected.
+
 ### Safety
 
 - **Read-only by default.** `--enable-mutations` unlocks clone and sync. Deletion additionally requires `--enable-destructive-mutations`; every mutation writes intent and completion records to the audit log.

@@ -176,3 +176,10 @@ change them — so binding it to a routable interface publishes all of that.
 thinking about the port and not the host, binds every interface and is
 refused with an explanation. `--allow-remote` overrides the refusal, and is
 for the case where you have put your own authentication in front of it.
+
+A browser sends an `Origin` header with every request, and the server
+refuses one that is not listed in `--allowed-origins`. Loopback origins are
+not trusted by default, because every local dev server is one; list the
+page a browser client runs on, for example `--allowed-origins
+http://localhost:6274`. A client that is not a browser sends no `Origin`
+and is unaffected.

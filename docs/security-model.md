@@ -52,9 +52,12 @@ Boundary 4 is a pipe by default: the client launches the server as a
 subprocess and nothing else can reach it. `--transport streamable-http` or
 `--transport sse` (and the older `--http`) turns it into a socket.
 The server supports `--token` (or `CORRAL_MCP_TOKEN`) to enforce Bearer
-token authentication, and validates `Origin` headers (restricting requests
-to loopback origins by default, with `--allowed-origins` for external/web
-origins) to protect against CSRF and DNS rebinding attacks. A routable bind
+token authentication, and validates `Host` and `Origin` headers to protect
+against CSRF and DNS rebinding attacks. `Host` must name loopback or an
+`--allowed-origins` entry. A request that carries an `Origin` (which every
+browser request does) is refused unless that origin is listed in
+`--allowed-origins`; a loopback origin is not trusted by default, because
+any local dev server is one. Every response carries `Vary: Origin`. A routable bind
 is refused unless the operator also passes `--allow-remote`, which asserts
 that they have configured authentication. Anyone who can reach the socket
 has the server's capability according to configured flags.

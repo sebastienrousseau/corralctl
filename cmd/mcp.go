@@ -367,7 +367,7 @@ func init() {
 	mcpCmd.Flags().StringVar(&mcpToken, "token", "",
 		"bearer token required for HTTP and SSE requests (or CORRAL_MCP_TOKEN env var)")
 	mcpCmd.Flags().StringVar(&mcpAllowedOrigins, "allowed-origins", "",
-		"comma-separated list of origins allowed for HTTP and SSE requests")
+		"comma-separated origins a browser client may connect from over HTTP and SSE (e.g. http://localhost:6274). No origin is allowed by default, loopback included")
 	mcpCmd.Flags().BoolVar(&mcpWatch, "watch", true,
 		"watch the workspace for filesystem changes and invalidate the cache in real time")
 	mcpCmd.Flags().StringVar(&mcpMetricsAddr, "metrics-addr", "",

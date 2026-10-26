@@ -438,11 +438,13 @@ func TestIsAllowedOrigin(t *testing.T) {
 		{"https://app.example.com", true},
 		{"HTTPS://APP.EXAMPLE.COM", true},
 		{"http://allowed.local:8080", true},
-		{"http://localhost", true},
-		{"http://localhost:3000", true},
-		{"http://127.0.0.1:8080", true},
-		{"http://[::1]:8080", true},
-		{"http://127.0.0.2:9000", true},
+		// Loopback is not a credential: any local dev server is a
+		// loopback origin, so only a listed one is let in.
+		{"http://localhost", false},
+		{"http://localhost:3000", false},
+		{"http://127.0.0.1:8080", false},
+		{"http://[::1]:8080", false},
+		{"http://127.0.0.2:9000", false},
 		{"http://192.168.1.100:8000", false},
 		{"https://malicious.attacker.com", false},
 		{"://invalid-url", false},
@@ -490,7 +492,7 @@ func TestHTTPTransportOriginProtection(t *testing.T) {
 	srv, err := NewServer(ServerOptions{
 		Root:           dir,
 		Version:        "test",
-		AllowedOrigins: []string{"https://app.custom.io"},
+		AllowedOrigins: []string{"https://app.custom.io", "http://localhost:3000"},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -545,7 +547,30 @@ func TestHTTPTransportOriginProtection(t *testing.T) {
 		t.Errorf("expected Access-Control-Allow-Origin %q, got %q", "https://app.custom.io", got)
 	}
 
-	// 3. Preflight OPTIONS request for loopback origin
+	// 2b. A loopback origin that was not listed is refused like any other.
+	unlisted := map[string]string{
+		protocolVersionHeader: statelessRevision,
+		"Origin":              "http://localhost:5173",
+	}
+	status, hdr, body = do(t, http.MethodPost, url, bodyDiscover, unlisted)
+	if status != http.StatusForbidden {
+		t.Errorf("expected 403 for an unlisted loopback origin, got %d: %s", status, body)
+	}
+	if got := hdr.Get("Vary"); got != "Origin" {
+		t.Errorf("a refused cross-origin response must carry Vary: Origin, got %q", got)
+	}
+
+	// 2c. The answer depends on Origin even when none was sent, so a
+	// shared cache must not reuse it for a request that carries one.
+	status, hdr, body = do(t, http.MethodPost, url, bodyDiscover, map[string]string{protocolVersionHeader: statelessRevision})
+	if status != http.StatusOK {
+		t.Errorf("expected 200 without an Origin, got %d: %s", status, body)
+	}
+	if got := hdr.Get("Vary"); got != "Origin" {
+		t.Errorf("Vary = %q, want Origin", got)
+	}
+
+	// 3. Preflight OPTIONS request for a listed loopback origin
 	req, err := http.NewRequest(http.MethodOptions, url, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -565,6 +590,9 @@ func TestHTTPTransportOriginProtection(t *testing.T) {
 	}
 	if got := res.Header.Get("Access-Control-Allow-Methods"); !strings.Contains(got, "POST") {
 		t.Errorf("expected Access-Control-Allow-Methods with POST, got %q", got)
+	}
+	if got := res.Header.Get("Vary"); got != "Origin" {
+		t.Errorf("preflight Vary = %q, want Origin", got)
 	}
 }
 

@@ -23,6 +23,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   default host of Go's `httptest.NewRequest`. It was reachable only by
   whoever controls that domain's DNS, but test behaviour should not ship.
 
+- **A loopback `Origin` is no longer trusted by default, and responses
+  carry `Vary: Origin`.** The HTTP transports let in, and echoed back in
+  `Access-Control-Allow-Origin`, any `localhost` or loopback origin on any
+  port, so any page served by a local dev server could drive the server,
+  mutations included when they were enabled and no token was set. Only
+  origins listed in `--allowed-origins` now pass. **Breaking:** a browser
+  client connecting directly from a loopback page must be listed, for
+  example `--allowed-origins http://localhost:6274`. Clients that are not
+  browsers send no `Origin` and are unaffected.
+
 ## [0.0.53] - 2026-10-25
 
 ### Security
