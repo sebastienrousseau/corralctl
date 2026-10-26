@@ -14,6 +14,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   process group on Unix), reported as timed out and counted as failed,
   while the other repositories carry on.
 
+- **`exec --output json|ndjson`**, in the same shapes as `sync`: one
+  `{"results", "summary"}` document, or one record per repository as it
+  finishes. Each record carries `repo`, `exit_code`, `duration_ms`,
+  `stdout` and `stderr` (kept apart, each capped at 1 MiB like the text
+  output), `timed_out` and `error`. `--dry-run` with a JSON format is
+  refused rather than mixing text into the stream.
+
 ### Changed
 
 - **`exec` runs the command through `/bin/sh -c`, not `$SHELL -c`**

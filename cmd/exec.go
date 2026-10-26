@@ -16,6 +16,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/sebastienrousseau/corralctl/internal/diag"
+	"github.com/sebastienrousseau/corralctl/internal/engine"
 	gitutil "github.com/sebastienrousseau/corralctl/internal/git"
 	"github.com/spf13/cobra"
 )
@@ -26,6 +28,7 @@ var (
 	execExcludeLangs string
 	execVisibility   string
 	execTimeout      time.Duration
+	execOutput       string
 	findRepos        = findLocalRepos
 	execBatch        = runExecCommands
 	walkLocalRepos   = filepath.WalkDir
@@ -45,7 +48,14 @@ the command: corralctl exec "fish -c 'string upper (basename $PWD)'".
 --timeout sets a deadline for each repository on its own (0, the
 default, means none). A command that overruns is killed together with
 the processes it started, reported as timed out, and counted as failed;
-the other repositories carry on.`,
+the other repositories carry on.
+
+--output json writes one {"results": [...], "summary": {...}} document
+when the run ends, and --output ndjson one record per repository as it
+finishes, the same shapes sync writes. Each record carries repo (the
+path under the base directory), exit_code (-1 when killed or not
+started), duration_ms, stdout, stderr (each capped at 1 MiB), timed_out,
+and error when the command failed. Diagnostics go to stderr.`,
 	Args: cobra.MinimumNArgs(1),
 	PreRunE: func(cmd *cobra.Command, args []string) error {
 		if execConcurrency < 1 {
@@ -53,6 +63,13 @@ the other repositories carry on.`,
 		}
 		if execTimeout < 0 {
 			return fmt.Errorf("--timeout must be >= 0")
+		}
+		execOutput = strings.ToLower(strings.TrimSpace(execOutput))
+		if !validOperationalOutput(execOutput) {
+			return errors.New("--output must be text, json, or ndjson")
+		}
+		if dryRun && execOutput != string(engine.OutputText) {
+			return errors.New("--dry-run lists repositories as text; drop --output or --dry-run")
 		}
 		execVisibility = strings.ToLower(strings.TrimSpace(execVisibility))
 		if execVisibility != "all" && execVisibility != "public" && execVisibility != "private" {
@@ -78,7 +95,7 @@ the other repositories carry on.`,
 		// Filter repos
 		filtered := filterLocalRepos(repos)
 		if len(filtered) == 0 {
-			fmt.Println("No matching repositories found.")
+			reportNoExecRepos()
 			return
 		}
 
@@ -91,11 +108,24 @@ the other repositories carry on.`,
 		}
 
 		// Run commands concurrently
-		summary := execBatch(cmdContext(cmd), filtered, execOptions{Root: bDir, Command: commandStr, Concurrency: execConcurrency, Timeout: execTimeout})
-		if summary.Failed > 0 || summary.Canceled {
+		summary := execBatch(cmdContext(cmd), filtered, execOptions{
+			Root: bDir, Command: commandStr, Concurrency: execConcurrency,
+			Timeout: execTimeout, Output: execOutput,
+		})
+		if summary.Failed > 0 || summary.Canceled || summary.OutputFailed {
 			osExit(1)
 		}
 	},
+}
+
+// reportNoExecRepos says that no repository matched: on stdout in the
+// text format, and on stderr when stdout carries JSON.
+func reportNoExecRepos() {
+	if execSeparateStreams(execOutput) {
+		diag.Warnf("corralctl exec: no matching repositories found")
+		return
+	}
+	fmt.Println("No matching repositories found.")
 }
 
 type localRepoInfo struct {
@@ -106,9 +136,11 @@ type localRepoInfo struct {
 
 // ExecSummary is the aggregate outcome of a batch command.
 type ExecSummary struct {
-	Total    int
-	Failed   int
-	Canceled bool
+	Total    int  `json:"total"`
+	Failed   int  `json:"failed"`
+	Canceled bool `json:"canceled"`
+	// OutputFailed reports that the JSON document could not be written.
+	OutputFailed bool `json:"-"`
 }
 
 const maxExecOutputBytes = 1 << 20
@@ -247,18 +279,30 @@ type execOptions struct {
 	Concurrency int
 	// Timeout is the deadline for one repository; 0 means none.
 	Timeout time.Duration
+	// Output is the output format: text (or empty), json or ndjson.
+	Output string
 }
 
-// execResult is the outcome of the command in one repository.
+// execResult is the outcome of the command in one repository, and the
+// record --output json and ndjson write for it.
 type execResult struct {
-	// Repo labels the repository in the output.
-	Repo string
-	// Output is the command's combined stdout and stderr, capped.
-	Output string
-	// Err is why the command failed; nil on success.
-	Err error
+	// Repo is the repository's slash-separated path under the base.
+	Repo string `json:"repo"`
+	// ExitCode is the command's exit status; -1 when it was killed or
+	// could not start.
+	ExitCode int `json:"exit_code"`
+	// DurationMs is the command's wall-clock time in milliseconds.
+	DurationMs int64 `json:"duration_ms"`
+	// Stdout is the command's standard output, capped at 1 MiB. In the
+	// text format it also carries standard error, interleaved.
+	Stdout string `json:"stdout"`
+	// Stderr is the command's standard error, capped at 1 MiB; empty in
+	// the text format.
+	Stderr string `json:"stderr"`
 	// TimedOut reports that the per-repository deadline killed it.
-	TimedOut bool
+	TimedOut bool `json:"timed_out"`
+	// Error says why the command failed; empty on success.
+	Error string `json:"error,omitempty"`
 }
 
 func runExecCommands(ctx context.Context, repoPaths []string, opts execOptions) ExecSummary {
@@ -271,12 +315,15 @@ func runExecCommands(ctx context.Context, repoPaths []string, opts execOptions) 
 	var wg sync.WaitGroup
 	var mu sync.Mutex
 	summary := ExecSummary{Total: len(repoPaths)}
-	report := func(r execResult) {
-		mu.Lock()
-		defer mu.Unlock()
+	printer := newResultPrinter[execResult, ExecSummary](opts.Output, func(r execResult) {
 		printExecText(r, opts.Timeout)
-		if r.Err != nil {
+	})
+	report := func(r execResult) {
+		printer.report(r)
+		if r.Error != "" {
+			mu.Lock()
 			summary.Failed++
+			mu.Unlock()
 		}
 	}
 	for i := 0; i < opts.Concurrency; i++ {
@@ -288,6 +335,10 @@ func runExecCommands(ctx context.Context, repoPaths []string, opts execOptions) 
 	}
 	wg.Wait()
 	summary.Canceled = ctx.Err() != nil
+	if err := printer.finish(summary); err != nil {
+		fmt.Fprintf(os.Stderr, "ERROR: writing output: %v\n", err)
+		summary.OutputFailed = true
+	}
 	return summary
 }
 
@@ -330,12 +381,46 @@ func runExecOne(ctx context.Context, path string, opts execOptions) execResult {
 		cmd.WaitDelay = execWaitDelay
 	}
 
-	out := &cappedBuffer{limit: maxExecOutputBytes}
-	cmd.Stdout = out
-	cmd.Stderr = out
+	stdout := &cappedBuffer{limit: maxExecOutputBytes}
+	stderr := stdout
+	if execSeparateStreams(opts.Output) {
+		stderr = &cappedBuffer{limit: maxExecOutputBytes}
+	}
+	cmd.Stdout = stdout
+	cmd.Stderr = stderr
+	start := time.Now()
 	err := cmd.Run()
-	timedOut := err != nil && ctx.Err() == nil && errors.Is(repoCtx.Err(), context.DeadlineExceeded)
-	return execResult{Repo: execRepoLabel(opts.Root, path), Output: out.String(), Err: err, TimedOut: timedOut}
+	r := execResult{
+		Repo:       execRepoLabel(opts.Root, path),
+		DurationMs: time.Since(start).Milliseconds(),
+		Stdout:     stdout.String(),
+		TimedOut:   err != nil && ctx.Err() == nil && errors.Is(repoCtx.Err(), context.DeadlineExceeded),
+	}
+	if stderr != stdout {
+		r.Stderr = stderr.String()
+	}
+	r.ExitCode, r.Error = execExitStatus(err)
+	return r
+}
+
+// execSeparateStreams reports whether the format keeps stdout and stderr
+// apart. The text format interleaves them, as a terminal would.
+func execSeparateStreams(format string) bool {
+	return format == string(engine.OutputJSON) || format == string(engine.OutputNDJSON)
+}
+
+// execExitStatus turns the error from running a command into its exit
+// code and a failure message: 0 and "" on success, the process's status
+// when it exited non-zero, and -1 when it was killed or never started.
+func execExitStatus(err error) (int, string) {
+	if err == nil {
+		return 0, ""
+	}
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) {
+		return exitErr.ExitCode(), err.Error()
+	}
+	return -1, err.Error()
 }
 
 // execRepoLabel names a repository in the output by its slash-separated
@@ -356,14 +441,14 @@ func execRepoLabel(root, path string) string {
 // the repository, the captured output, and the failure if there was one.
 func printExecText(r execResult, timeout time.Duration) {
 	fmt.Printf("\n--- [%s] ---\n", r.Repo)
-	if r.Output != "" {
-		fmt.Print(r.Output)
+	if r.Stdout != "" {
+		fmt.Print(r.Stdout)
 	}
 	switch {
 	case r.TimedOut:
 		fmt.Printf("Command timed out after %s\n", timeout)
-	case r.Err != nil:
-		fmt.Printf("Command failed: %v\n", r.Err)
+	case r.Error != "":
+		fmt.Printf("Command failed: %s\n", r.Error)
 	}
 }
 
@@ -371,6 +456,7 @@ func init() {
 	execCmd.Flags().IntVarP(&execConcurrency, "concurrency", "c", 4, "number of concurrent operations")
 	execCmd.Flags().StringVar(&execLanguages, "languages", "", "comma-separated language filter")
 	execCmd.Flags().StringVar(&execExcludeLangs, "exclude-languages", "", "comma-separated language exclude filter")
+	execCmd.Flags().StringVar(&execOutput, "output", string(engine.OutputText), "output format: text, json, ndjson")
 	execCmd.Flags().DurationVar(&execTimeout, "timeout", 0, "deadline per repository (0 to disable)")
 	execCmd.Flags().StringVar(&execVisibility, "visibility", "all", "filter repositories by visibility: all, public, private")
 	rootCmd.AddCommand(execCmd)
