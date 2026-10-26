@@ -114,6 +114,25 @@ func (s *Server) registerMutationTools() {
 	}, s.handleCloneRepo)
 
 	addTool(s, &mcp.Tool{
+		Name:  "corral_adopt_repo",
+		Title: "Adopt an untracked repository into the workspace",
+		Annotations: &mcp.ToolAnnotations{
+			ReadOnlyHint:    false,
+			DestructiveHint: &f,
+			IdempotentHint:  false,
+			OpenWorldHint:   &t,
+		},
+		Description: "Adopt a local repository into the Corral workspace, optionally relocating it into layout taxonomy, provisioning a matching remote repository on a forge (GitHub, GitLab, Gitea, Bitbucket), and linking the remote origin. Requires --enable-mutations.",
+	}, s.handleAdoptRepo)
+	s.registerWorktreeTools()
+}
+
+// registerWorktreeTools attaches the agent-worktree tools. They are
+// registered with the other non-destructive mutations and split out only
+// to keep each registration function short.
+func (s *Server) registerWorktreeTools() {
+	f := false
+	addTool(s, &mcp.Tool{
 		Name:  "corral_create_worktree",
 		Title: "Create an isolated agent worktree",
 		Annotations: &mcp.ToolAnnotations{
@@ -148,18 +167,6 @@ func (s *Server) registerMutationTools() {
 		},
 		Description: "Prune stale, detached, or temporary agent worktrees across workspace repositories. Requires --enable-mutations. Skips main repository worktrees and refuses removal of modified worktrees unless force=true is passed.",
 	}, s.handlePruneWorktrees)
-
-	addTool(s, &mcp.Tool{
-		Name:  "corral_adopt_repo",
-		Title: "Adopt an untracked repository into the workspace",
-		Annotations: &mcp.ToolAnnotations{
-			ReadOnlyHint:    false,
-			DestructiveHint: &f,
-			IdempotentHint:  false,
-			OpenWorldHint:   &t,
-		},
-		Description: "Adopt a local repository into the Corral workspace, optionally relocating it into layout taxonomy, provisioning a matching remote repository on a forge (GitHub, GitLab, Gitea, Bitbucket), and linking the remote origin. Requires --enable-mutations.",
-	}, s.handleAdoptRepo)
 }
 
 // registerDestructiveTools attaches corral_delete_repo. Kept in its
