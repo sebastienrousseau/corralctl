@@ -89,6 +89,11 @@ type ServerOptions struct {
 	// TraceLogPath is where structured JSONL interaction events are appended.
 	// When empty, tracing is disabled.
 	TraceLogPath string
+	// ForgeURLs are the self-hosted forge instances corral_adopt_repo may
+	// name in forge_url. The token sent to a forge is the operator's, so
+	// the instance it goes to is the operator's choice, not the caller's:
+	// empty means only each forge's public instance.
+	ForgeURLs []string
 }
 
 // Server wraps an mcp-go MCPServer with the corral-specific configuration.

@@ -111,7 +111,14 @@ Passing `--enable-mutations` adds tools that modify repository state or execute
 | `corral_create_worktree` | Creates an isolated linked Git worktree under `.git/corral-worktrees` | `--enable-mutations` |
 | `corral_release_worktree` | Removes a linked Git worktree after branch work is finished | `--enable-mutations` |
 | `corral_prune_worktrees` | Prunes stale or temporary scratchpad worktrees across repositories | `--enable-mutations` |
+| `corral_adopt_repo` | Adopts a local repository, optionally relocating it and creating its remote on a forge | `--enable-mutations` |
 | `corral_delete_repo` | Removes a clone; refuses on uncommitted or unpushed changes, and asks a person to approve each deletion | `--enable-destructive-mutations` |
+
+`corral_adopt_repo` presents the operator's forge token, so the caller does
+not choose where it goes. Without `forge_url` it targets the forge's public
+instance. A self-hosted instance is accepted only when the operator named it
+at startup with `--forge-url <url>` (repeatable); any other `forge_url` is
+refused and audited before a token is read or a request is made.
 
 Deletion sits behind a second, separate flag on purpose, and it refuses
 outright when a clone holds uncommitted or unpushed work rather than asking an
