@@ -127,7 +127,6 @@ cyclomatic	11	internal/mcp/confirm.go	(elicitConfirmer).Confirm
 cyclomatic	13	internal/mcp/filepolicy.go	isTransportToken
 cyclomatic	14	internal/mcp/index.go	(*Index).Find
 cyclomatic	11	internal/mcp/jsonrpchttp.go	jsonrpcHTTP
-cyclomatic	13	internal/mcp/mutations_adopt.go	(*Server).handleAdoptRepo
 cyclomatic	23	internal/mcp/mutations_delete.go	(*Server).handleDeleteRepo
 cyclomatic	15	internal/mcp/mutations_worktree.go	(*Server).handleCreateWorktree
 cyclomatic	20	internal/mcp/mutations_worktree.go	(*Server).handlePruneWorktrees
@@ -191,7 +190,6 @@ func-lines	103	cmd/search.go	runSearch
 func-lines	86	cmd/worktree.go	runWorktreePrune
 func-lines	63	internal/discover/discover.go	Discover
 func-lines	68	internal/graph/graph.go	BuildGraph
-func-lines	75	internal/mcp/mutations_adopt.go	(*Server).handleAdoptRepo
 func-lines	93	internal/mcp/mutations_delete.go	(*Server).handleDeleteRepo
 func-lines	86	internal/mcp/mutations_worktree.go	(*Server).handlePruneWorktrees
 func-lines	70	internal/mcp/mutations_worktree.go	(*Server).handleReleaseWorktree
