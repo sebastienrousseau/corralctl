@@ -84,6 +84,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   in its `_meta`, as protocol `2026-07-28` specifies (SEP-414), is recorded
   under that trace in `--trace-file`, on stdio as well as HTTP. Over HTTP a
   valid `_meta` value takes precedence over the `traceparent` header.
+### Fixed
+
+- **Quitting the progress view stops the run.** Pressing `q` or `ctrl+c`
+  in the clone progress view closed the view and left the workers cloning
+  with no output, then exited 0. In raw mode `ctrl+c` reaches the view as
+  a key, not as SIGINT, so the signal handler never fired. Quitting the
+  view now cancels the run's context, which interrupts in-flight git
+  processes, and the run exits 130 as a cancelled run.
+
+### Changed
+
+- **Streamed runs no longer keep every result in memory.** The engine
+  appended each result to a slice for every output format, although only
+  `--output json` writes the aggregate. Text and NDJSON runs now keep the
+  summary counts only.
 
 ## [0.0.53] - 2026-10-25
 

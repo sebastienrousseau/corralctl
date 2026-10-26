@@ -90,7 +90,9 @@ prepare workspace          (classic layout only, never on --dry-run)
 execute jobs
   ├─ discover existing clones, keyed by canonical remote identity
   ├─ N workers, each: relocate → sync-or-clone → Finder tags
-  └─ one consumer drains results into the chosen output format
+  ├─ one consumer drains results into the chosen output format
+  └─ q or ctrl+c in the progress view cancels the run's ctx, which
+     stops the workers and the git processes they started
 
 report
   ├─ orphan detection (skipped when cancelled: the tree is mid-clone)
@@ -103,6 +105,9 @@ Two invariants hold throughout:
 - **Every send and receive is guarded by `ctx`.** A cancelled run unwinds
   rather than blocking on a full channel, and `summary.Canceled` tells a
   scripted consumer the result set is partial.
+- **Only `--output json` keeps the results.** It is the one format that
+  writes an aggregate at the end; text and NDJSON stream each result as it
+  arrives, so a streamed run does not hold one record per repository.
 - **No error escapes `processRepo`.** Every outcome is a `RepoResult`, so
   one repository failing never aborts the run.
 

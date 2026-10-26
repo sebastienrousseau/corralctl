@@ -246,23 +246,11 @@ func RunE(ctx context.Context, opts RunOptions) error {
 	if err := opts.normalize(); err != nil {
 		return err
 	}
-	// Validated here rather than at the fetch, so `--forge gitub` fails
-	// immediately instead of after a workspace scan.
-	f, err := forge.Resolve(opts.Forge, opts.ForgeURL)
+	forgeName, err := resolveRunForge(opts)
 	if err != nil {
 		return err
 	}
-	// Search selectors are a GitHub API feature. Passed to any other forge
-	// they are read as an owner name, and the 404 that follows blames the
-	// owner — sending somebody to look for a typo that is not there.
-	if isSearchOwner(opts.Owner) && f.Name() != "github" {
-		return fmt.Errorf(
-			"%s does not support %q: topic: and language: are GitHub search queries, "+
-				"and %s lists repositories by owner\n"+
-				"Name an owner instead, or drop --forge to search GitHub",
-			f.Name(), opts.Owner, f.Name())
-	}
-	fetchForgeName, fetchForgeURL = f.Name(), opts.ForgeURL
+	fetchForgeName, fetchForgeURL = forgeName, opts.ForgeURL
 	installTokenProvider(ctx, opts)
 
 	isTTY := isTerminal(os.Stdout.Fd())
@@ -290,13 +278,47 @@ func RunE(ctx context.Context, opts RunOptions) error {
 	encoder.SetEscapeHTML(false)
 
 	outcome := executeJobs(ctx, opts, repos, layoutTemplate, isTTY, encoder)
+	return finishRun(ctx, opts, repos, isTTY, encoder, &outcome)
+}
 
-	// Detect cancellation after workers + consumer drain. ctx.Err() at this
-	// point is the authoritative signal: it's set if and only if a SIGINT/
-	// SIGTERM (or a parent's cancel()) fired during the run. The result set
-	// in that case is partial and we must signal that to downstream consumers
-	// so they don't mistake an aborted run for a clean one.
-	if err := ctx.Err(); err != nil {
+// resolveRunForge validates the forge selection and returns its name.
+// Validated here rather than at the fetch, so `--forge gitub` fails
+// immediately instead of after a workspace scan.
+func resolveRunForge(opts RunOptions) (string, error) {
+	f, err := forge.Resolve(opts.Forge, opts.ForgeURL)
+	if err != nil {
+		return "", err
+	}
+	// Search selectors are a GitHub API feature. Passed to any other forge
+	// they are read as an owner name, and the 404 that follows blames the
+	// owner — sending somebody to look for a typo that is not there.
+	if isSearchOwner(opts.Owner) && f.Name() != "github" {
+		return "", fmt.Errorf(
+			"%s does not support %q: topic: and language: are GitHub search queries, "+
+				"and %s lists repositories by owner\n"+
+				"Name an owner instead, or drop --forge to search GitHub",
+			f.Name(), opts.Owner, f.Name())
+	}
+	return f.Name(), nil
+}
+
+// finishRun reports a completed worker phase: it marks and announces a
+// cancelled run, tidies the classic layout, reports orphans, writes the
+// json aggregate, and maps the outcome to the error RunE returns.
+func finishRun(
+	ctx context.Context,
+	opts RunOptions,
+	repos []github.Repo,
+	isTTY bool,
+	encoder *json.Encoder,
+	outcome *runOutcome,
+) error {
+	// Detect cancellation after workers + consumer drain. runCancellation is
+	// the authoritative signal: it is set if and only if a SIGINT/SIGTERM, a
+	// parent's cancel() or quitting the progress view stopped the run. The
+	// result set in that case is partial and we must signal that to
+	// downstream consumers so they don't mistake it for a clean run.
+	if err := runCancellation(ctx, outcome); err != nil {
 		outcome.summary.Canceled = true
 		emitCancellation(opts.Output, isTTY, encoder, err)
 	}
@@ -305,12 +327,12 @@ func RunE(ctx context.Context, opts RunOptions) error {
 		cleanupEmptyFolders(opts.BaseDir, repos)
 	}
 
-	orphanPaths := emitOrphanReport(opts, repos, &outcome, encoder)
+	orphanPaths := emitOrphanReport(opts, repos, outcome, encoder)
 
-	if err := emitAggregate(opts, &outcome, orphanPaths); err != nil {
+	if err := emitAggregate(opts, outcome, orphanPaths); err != nil {
 		return err
 	}
-	return runOutcomeError(&outcome)
+	return runOutcomeError(outcome)
 }
 
 // normalize validates the option set and fills in documented defaults. It is
