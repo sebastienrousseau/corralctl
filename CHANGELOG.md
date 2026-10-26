@@ -6,7 +6,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.54] - 2026-10-26
+
 ### Security
+
+- **`corral_adopt_repo` no longer sends a forge token to a host the MCP
+  caller chose** (GHSA-qc3v-fj4r-j4j9, affects 0.0.44 to 0.0.53). With
+  `--enable-mutations`, the tool resolved the operator's token for the named
+  forge and sent it to whatever `forge_url` the caller passed, so an agent
+  steered by planted instructions could collect it. A `forge_url` is now
+  accepted only when the operator named that instance with the new
+  `corralctl mcp --forge-url` flag; any other value is refused and audited
+  before a token is read.
 
 - **Dependabot no longer auto-merges Go module updates.** Patch and minor
   bumps of Go modules used to merge on green CI with no one reading them,
@@ -3106,7 +3117,8 @@ cron-safety overhaul.
   100 % doc coverage.
 - All tests green under `-race -count=1`.
 
-[Unreleased]: https://github.com/sebastienrousseau/corralctl/compare/v0.0.53...HEAD
+[Unreleased]: https://github.com/sebastienrousseau/corralctl/compare/v0.0.54...HEAD
+[0.0.54]: https://github.com/sebastienrousseau/corralctl/compare/v0.0.53...v0.0.54
 [0.0.53]: https://github.com/sebastienrousseau/corralctl/compare/v0.0.52...v0.0.53
 [0.0.52]: https://github.com/sebastienrousseau/corralctl/compare/v0.0.51...v0.0.52
 [0.0.51]: https://github.com/sebastienrousseau/corralctl/compare/v0.0.50...v0.0.51
