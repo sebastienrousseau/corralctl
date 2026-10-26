@@ -73,6 +73,7 @@ func auditRecords(t *testing.T, path string) []AuditRecord {
 func TestSyncRepoPullsAndAudits(t *testing.T) {
 	base := t.TempDir()
 	makeFakeRepo(t, base, "Public", "go", "alpha", "https://github.com/o/alpha.git", "")
+	safeSyncGuards(t)
 	pulled := 0
 	stubSeam(t, &gitPull, func(context.Context, string, git.PullOptions) error { pulled++; return nil })
 	stubSeam(t, &markSynced, func(string) error { return nil })
@@ -103,7 +104,8 @@ func TestSyncRepoPullsAndAudits(t *testing.T) {
 
 func TestSyncRepoSurfacesPullFailure(t *testing.T) {
 	base := t.TempDir()
-	makeFakeRepo(t, base, "Public", "go", "alpha", "", "")
+	makeFakeRepo(t, base, "Public", "go", "alpha", "https://github.com/o/alpha.git", "")
+	safeSyncGuards(t)
 	stubSeam(t, &gitPull, func(context.Context, string, git.PullOptions) error {
 		return errors.New("network unreachable")
 	})
@@ -328,7 +330,8 @@ func TestDeleteRepoRefusesTargetThatStoppedBeingARepository(t *testing.T) {
 // defeats the mechanism entirely.
 func TestMutationRefusedWhenAuditFails(t *testing.T) {
 	base := t.TempDir()
-	makeFakeRepo(t, base, "Public", "go", "alpha", "", "")
+	makeFakeRepo(t, base, "Public", "go", "alpha", "https://github.com/o/alpha.git", "")
+	safeSyncGuards(t)
 	// Record rather than t.Fatal: this runs on the server's goroutine, and
 	// t.Fatal there calls runtime.Goexit on the wrong goroutine — the handler
 	// never returns and the client blocks until the test times out.
@@ -395,6 +398,7 @@ func TestMutationFailurePathsReportCause(t *testing.T) {
 			name: "pull fails",
 			tool: "corral_sync_repo", args: map[string]any{"query": "alpha"},
 			stub: func(t *testing.T) {
+				safeSyncGuards(t)
 				stubSeam(t, &gitPull, func(context.Context, string, git.PullOptions) error { return pullBoom })
 			},
 			wants: []string{"git pull failed", "boom"},
@@ -404,6 +408,7 @@ func TestMutationFailurePathsReportCause(t *testing.T) {
 			tool: "corral_sync_repo", args: map[string]any{"query": "alpha"},
 			auditFails: true,
 			stub: func(t *testing.T) {
+				safeSyncGuards(t)
 				stubSeam(t, &gitPull, func(context.Context, string, git.PullOptions) error { return pullBoom })
 			},
 			wants: []string{"git pull failed", "audit completion failed"},
@@ -412,6 +417,7 @@ func TestMutationFailurePathsReportCause(t *testing.T) {
 			name: "state update fails",
 			tool: "corral_sync_repo", args: map[string]any{"query": "alpha"},
 			stub: func(t *testing.T) {
+				safeSyncGuards(t)
 				stubSeam(t, &gitPull, func(context.Context, string, git.PullOptions) error { return nil })
 				stubSeam(t, &markSynced, func(string) error { return boom })
 			},
@@ -422,6 +428,7 @@ func TestMutationFailurePathsReportCause(t *testing.T) {
 			tool: "corral_sync_repo", args: map[string]any{"query": "alpha"},
 			auditFails: true,
 			stub: func(t *testing.T) {
+				safeSyncGuards(t)
 				stubSeam(t, &gitPull, func(context.Context, string, git.PullOptions) error { return nil })
 				stubSeam(t, &markSynced, func(string) error { return nil })
 			},

@@ -131,6 +131,20 @@ func DefaultBranch(ctx context.Context, targetDir string) (string, error) {
 	return "", errors.New("no local default branch: neither origin/HEAD nor HEAD names a local branch")
 }
 
+// OriginDefaultBranch returns the branch origin/HEAD names: the default
+// the clone recorded for origin. Unlike DefaultBranch it never falls back
+// to the branch HEAD is on, because a caller asking whether a clone is on
+// its default branch must not be handed HEAD's own answer. A clone with
+// no origin/HEAD is an error.
+func OriginDefaultBranch(ctx context.Context, targetDir string) (string, error) {
+	out, err := runGitOutput(ctx, targetDir, "symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD")
+	name := strings.TrimPrefix(strings.TrimSpace(out), "origin/")
+	if err != nil || name == "" {
+		return "", errors.New("origin/HEAD is not set; run `git remote set-head origin --auto`")
+	}
+	return name, nil
+}
+
 // SwitchBranch switches to an existing branch in targetDir.
 func SwitchBranch(ctx context.Context, targetDir, branch string) error {
 	branch = strings.TrimSpace(branch)

@@ -419,8 +419,7 @@ corralctl sync --to gitlab --to gitea@https://git.example.com
 ```
 
 For every repository under the base directory, on every destination, `sync`
-creates the destination repository if it does not exist — with the
-visibility the local layout says, `Public/` or `Private/` — points a remote
+creates the destination repository if it does not exist, points a remote
 named after the forge at it, and pushes in one round trip:
 
 ```text
@@ -430,6 +429,25 @@ git push --prune --no-verify <forge> refs/heads/*:refs/heads/* +refs/tags/*:refs
 Every local branch and tag exists on the destination afterwards, and nothing
 else does. Branches are never forced: a destination that has moved on is
 refused and reported, not overwritten. Tags follow the local namespace.
+
+"Local" means the clone's own branches (`refs/heads/*`), so a destination
+mirrors your clone, not its origin. A clone made by `corralctl clone` or
+`git clone` holds only the default branch locally; every other upstream
+branch exists only as a remote-tracking ref (`origin/<name>`) and is not
+pushed. Because the push prunes, such a branch is also deleted from a
+destination that already has it, as is any branch created directly on the
+destination. To carry a branch, check it out locally (`git switch <name>`)
+before running `sync`.
+
+A new destination is created public only when two things agree: the source
+forge reported the repository as public the last time `corralctl clone`
+listed it (the answer is recorded in the clone's state sidecar), and the
+clone sits under a `Public/` directory. Anything else is created private,
+including a clone corral did not make and one cloned before 0.0.54. The
+directory name alone is a guess, and a repository made private upstream can
+still sit under `Public/`. Run `corralctl clone` for the owner before `sync`
+so the record is current; `--dry-run` shows the visibility each destination
+would get.
 
 A destination is `<forge>[:<owner>][@<url>]`:
 
@@ -483,7 +501,7 @@ Where GitHub's own MCP server covers the remote API surface (issues, PRs, search
 
 **Write tools (v0.0.12, opt-in via `--enable-mutations`):**
 
-- `corral_sync_repo` — Runs `git pull --rebase --autostash` against one clone. Refuses, as `sync` does, when a rebase, merge, cherry-pick, revert or bisect is in progress, when the branch has commits its upstream lacks, or when it has no upstream
+- `corral_sync_repo` — Runs `git pull --rebase --autostash` against one clone, with the checks `corralctl clone` makes before a pull: it refuses a clone with no origin or whose origin changed since the index was read, one with no commits, and one that is not on the default branch `origin/HEAD` names, so an agent cannot rebase a feature branch. It holds the same per-clone lock as `corral_delete_repo`. Like `sync`, it also refuses when a rebase, merge, cherry-pick, revert or bisect is in progress, when the branch has commits its upstream lacks, or when it has no upstream.
 - `corral_clone_repo` — Clones a URL into a sandboxed target path
 - `corral_adopt_repo` — Adopts a local repository with optional relocation and remote creation
 - `corral_delete_repo` — Removes a clone. Requires `--enable-destructive-mutations`. Refuses on uncommitted/unpushed changes, and asks a person to approve each deletion

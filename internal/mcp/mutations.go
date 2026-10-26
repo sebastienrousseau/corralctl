@@ -98,7 +98,7 @@ func (s *Server) registerMutationTools() {
 			IdempotentHint:  true,
 			OpenWorldHint:   &t,
 		},
-		Description: "Run `git pull --rebase --autostash` against one clone in the Corral workspace. Requires --enable-mutations. Reuses corral's non-interactive git environment (no credential prompts, no signing pinentry) and honours smart-sync via the sync sidecar. Refuses when the repo isn't in the index or resolves outside the configured sandbox root.",
+		Description: "Run `git pull --rebase --autostash` against one clone in the Corral workspace. Requires --enable-mutations. Reuses corral's non-interactive git environment (no credential prompts, no signing pinentry) and honours smart-sync via the sync sidecar. Refuses when the repo isn't in the index or resolves outside the configured sandbox root, when its origin is unset or has changed since the index was read, when it has no commits, and when it is not on the default branch origin/HEAD names (a rebase pull would rewrite a feature branch).",
 	}, s.handleSyncRepo)
 
 	addTool(s, &mcp.Tool{
@@ -113,6 +113,25 @@ func (s *Server) registerMutationTools() {
 		Description: "Clone a repository into the Corral workspace. Requires --enable-mutations. Refuses when the target already exists (never overwrites) or would escape the sandbox root.",
 	}, s.handleCloneRepo)
 
+	addTool(s, &mcp.Tool{
+		Name:  "corral_adopt_repo",
+		Title: "Adopt an untracked repository into the workspace",
+		Annotations: &mcp.ToolAnnotations{
+			ReadOnlyHint:    false,
+			DestructiveHint: &f,
+			IdempotentHint:  false,
+			OpenWorldHint:   &t,
+		},
+		Description: "Adopt a local repository into the Corral workspace, optionally relocating it into layout taxonomy, provisioning a matching remote repository on a forge (GitHub, GitLab, Gitea, Bitbucket), and linking the remote origin. Requires --enable-mutations.",
+	}, s.handleAdoptRepo)
+	s.registerWorktreeTools()
+}
+
+// registerWorktreeTools attaches the agent-worktree tools. They are
+// registered with the other non-destructive mutations and split out only
+// to keep each registration function short.
+func (s *Server) registerWorktreeTools() {
+	f := false
 	addTool(s, &mcp.Tool{
 		Name:  "corral_create_worktree",
 		Title: "Create an isolated agent worktree",
@@ -148,18 +167,6 @@ func (s *Server) registerMutationTools() {
 		},
 		Description: "Prune stale, detached, or temporary agent worktrees across workspace repositories. Requires --enable-mutations. Skips main repository worktrees and refuses removal of modified worktrees unless force=true is passed.",
 	}, s.handlePruneWorktrees)
-
-	addTool(s, &mcp.Tool{
-		Name:  "corral_adopt_repo",
-		Title: "Adopt an untracked repository into the workspace",
-		Annotations: &mcp.ToolAnnotations{
-			ReadOnlyHint:    false,
-			DestructiveHint: &f,
-			IdempotentHint:  false,
-			OpenWorldHint:   &t,
-		},
-		Description: "Adopt a local repository into the Corral workspace, optionally relocating it into layout taxonomy, provisioning a matching remote repository on a forge (GitHub, GitLab, Gitea, Bitbucket), and linking the remote origin. Requires --enable-mutations.",
-	}, s.handleAdoptRepo)
 }
 
 // registerDestructiveTools attaches corral_delete_repo. Kept in its
@@ -220,6 +227,9 @@ func (s *Server) auditRefusal(rec AuditRecord, message string) error {
 // `corralctl <owner>` sync path — no separate write-through cache to
 // maintain. Refuses when the repo is not in the workspace index or
 // when the operation cannot be sandboxed to the configured Root.
+// It also refuses, through syncGuards, a clone whose origin is not the
+// indexed one or that is off its default branch, and holds the
+// per-repository lock that deletion takes.
 func (s *Server) handleSyncRepo(ctx context.Context, _ *mcp.CallToolRequest, in queryInput) (*mcp.CallToolResult, MutationOutput, error) {
 	query := in.Query
 	idx, err := s.scan()
@@ -235,34 +245,59 @@ func (s *Server) handleSyncRepo(ctx context.Context, _ *mcp.CallToolRequest, in 
 		return nil, MutationOutput{}, fmt.Errorf("%v", err)
 	}
 
+	// One mutation at a time per clone: the guards and the pull must see
+	// the same repository, and a delete of it must wait.
+	lock := s.repoLocks.lock(safe)
+	lock.Lock()
+	defer lock.Unlock()
+
+	if err := s.pullGuarded(ctx, *repo, safe, query); err != nil {
+		return nil, MutationOutput{}, err
+	}
+	s.invalidateScanCache()
+	out := MutationOutput{Tool: "corral_sync_repo", Repo: repo.RelPath, Result: "synced"}
+	return jsonResult(out), out, nil
+}
+
+// pullGuarded is corral_sync_repo's work once the clone is resolved and
+// locked: the refusal cascade, then the audited pull and state stamp. A
+// refusal is audited like any other outcome.
+func (s *Server) pullGuarded(ctx context.Context, repo RepoEntry, safe, query string) error {
 	rec := AuditRecord{
 		Tool:   "corral_sync_repo",
 		Target: safe,
 		Args:   map[string]any{"query": query},
 	}
-	rec, err = s.beginMutation(rec)
-	if err != nil {
-		return nil, MutationOutput{}, fmt.Errorf("audit intent failed: %v", err)
-	}
-	pullErr := gitPull(ctx, safe, git.PullOptions{})
-	if pullErr != nil {
-		if auditErr := s.completeMutation(rec, "error", pullErr.Error()); auditErr != nil {
-			return nil, MutationOutput{}, fmt.Errorf("%v; audit completion failed: %v", pullErr, auditErr)
+	if reason, ok := syncGuards(ctx, repo, safe); !ok {
+		if auditErr := s.auditRefusal(rec, reason); auditErr != nil {
+			return fmt.Errorf("%s; audit failed: %v", reason, auditErr)
 		}
-		return nil, MutationOutput{}, fmt.Errorf("%v", pullErr)
+		return fmt.Errorf("%s", reason)
+	}
+	rec, err := s.beginMutation(rec)
+	if err != nil {
+		return fmt.Errorf("audit intent failed: %v", err)
+	}
+	if err := gitPull(ctx, safe, git.PullOptions{}); err != nil {
+		return s.failMutation(rec, "", err)
 	}
 	if err := markSynced(safe); err != nil {
-		if auditErr := s.completeMutation(rec, "error", err.Error()); auditErr != nil {
-			return nil, MutationOutput{}, fmt.Errorf("state update failed: %v; audit completion failed: %v", err, auditErr)
-		}
-		return nil, MutationOutput{}, fmt.Errorf("state update failed: %v", err)
+		return s.failMutation(rec, "state update failed: ", err)
 	}
 	if err := s.completeMutation(rec, "ok", ""); err != nil {
-		return nil, MutationOutput{}, fmt.Errorf("audit completion failed: %v", err)
+		return fmt.Errorf("audit completion failed: %v", err)
 	}
-	s.invalidateScanCache()
-	out := MutationOutput{Tool: "corral_sync_repo", Repo: repo.RelPath, Result: "synced"}
-	return jsonResult(out), out, nil
+	return nil
+}
+
+// failMutation records a mutation that failed after its intent was
+// audited, and returns the error for the agent: the cause, prefixed, and
+// the audit failure too when the completion record could not be written.
+func (s *Server) failMutation(rec AuditRecord, prefix string, cause error) error {
+	if auditErr := s.completeMutation(rec, "error", cause.Error()); auditErr != nil {
+		return fmt.Errorf("%s%v; audit completion failed: %v", prefix, cause, auditErr)
+	}
+	return fmt.Errorf("%s%v", prefix, cause)
 }
 
 // cloneRepoTool returns corral_clone_repo. Wraps git.Clone into the

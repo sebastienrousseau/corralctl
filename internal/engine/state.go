@@ -11,7 +11,9 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/sebastienrousseau/corralctl/internal/diag"
 	"github.com/sebastienrousseau/corralctl/internal/git"
+	"github.com/sebastienrousseau/corralctl/internal/github"
 )
 
 // StateFileName is the basename of the per-clone sidecar file Corral writes
@@ -59,6 +61,11 @@ type cloneState struct {
 	// that touched the working tree (clone or successful pull). Used for
 	// human display only — never for sync-skip decisions.
 	LastSyncedAt time.Time `json:"last_synced_at"`
+	// Visibility is the repository's visibility on the forge it was
+	// listed from, "public" or "private", as of the last run that listed
+	// it. `corralctl sync` creates a destination public only when this
+	// says so; the directory a clone sits in is never evidence enough.
+	Visibility string `json:"visibility,omitempty"`
 }
 
 type stateTempFile interface {
@@ -160,4 +167,62 @@ func writeCloneState(repoDir string, s cloneState) error {
 	// must not fail the sync that already succeeded.
 	_ = os.Remove(legacyStatePath(repoDir))
 	return nil
+}
+
+// Recorded visibility values.
+const (
+	visibilityPublic  = "public"
+	visibilityPrivate = "private"
+)
+
+// visibilityRecord is the sidecar spelling of a listed repository's
+// visibility, or "" when the forge reported something else.
+func visibilityRecord(listed string) string {
+	switch listed {
+	case "Public":
+		return visibilityPublic
+	case "Private":
+		return visibilityPrivate
+	}
+	return ""
+}
+
+// RecordedVisibility reports the visibility the source forge gave repoDir
+// the last time `corralctl clone` listed it. known is false when nothing
+// was recorded: a clone corral did not make, one made before 0.0.54, or
+// a sidecar that cannot be read. A caller that needs a visibility treats
+// unknown as private, because a guess that leaks cannot be undone.
+func RecordedVisibility(repoDir string) (private, known bool) {
+	st, err := readCloneState(repoDir)
+	if err != nil {
+		return true, false
+	}
+	switch st.Visibility {
+	case visibilityPublic:
+		return false, true
+	case visibilityPrivate:
+		return true, true
+	}
+	return true, false
+}
+
+// recordVisibility stores repo's listed visibility in the sidecar of the
+// clone at targetDir, keeping the fields already there. It runs on every
+// pass over an existing clone, not only after a pull, because a
+// visibility change upstream does not move pushed_at and would otherwise
+// never reach the record. Best-effort, like stampCloneState: a failure
+// leaves the old record, or none, and none reads as private.
+func recordVisibility(targetDir string, repo github.Repo) {
+	want := visibilityRecord(repo.Visibility)
+	if want == "" {
+		return
+	}
+	st, err := readCloneState(targetDir)
+	if err == nil && st.Visibility == want {
+		return
+	}
+	st.Visibility = want
+	if err := writeCloneState(targetDir, st); err != nil {
+		diag.Warnf("failed writing %s in %s: %v", StateFileName, targetDir, err)
+	}
 }

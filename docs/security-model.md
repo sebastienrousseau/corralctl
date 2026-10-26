@@ -233,17 +233,28 @@ push is a single
 `git push --prune --no-verify <remote> refs/heads/*:refs/heads/*
 +refs/tags/*:refs/tags/*`: branches carry no force marker, so a
 non-fast-forward is refused by git and surfaced as an error, while tags are
-forced because the local tag namespace is authoritative for a mirror. Before
+forced because the local tag namespace is authoritative for a mirror. The
+claim is about rewriting, not deleting: `--prune` deletes every destination
+branch and tag with no local counterpart, and "local" is the clone's
+`refs/heads`, so an upstream branch the clone holds only as
+`refs/remotes/origin/<name>` is neither pushed nor kept on the destination
+(`TestPushMirrorCarriesOnlyLocalBranches`). Before
 any push, `internal/mirror` compares the destination's host with every host
 `origin` may reach: as written, as git rewrites it (`insteadOf`), as ssh
 resolves it (`ssh -G`), and with a forge's port-443 SSH host folded to the
 forge. It skips the pair when any matches, so a clone taken *from* a forge is
 never pruned against that forge. A destination repository
 that already exists with the other visibility is refused rather than reused.
+A destination is created public only when the visibility the source forge
+reported at the last `corralctl clone` (recorded in the clone's state
+sidecar) is public and the clone's directory says public; a clone with no
+record is private wherever it sits.
 
 **Evidence.** `internal/git/mirror_test.go` pushes to a real bare repository
 and asserts all three properties; `internal/mirror/mirror_test.go` covers the
 origin guard in real and dry runs and the visibility refusal;
+`internal/mirror/visibility_test.go` and `internal/engine/visibility_test.go`
+cover the recorded visibility;
 `internal/mirror/origin_guard_test.go` covers `insteadOf`, ssh aliases and
 `ssh.github.com` (GHSA-mmpx-r9vh-gjxv).
 

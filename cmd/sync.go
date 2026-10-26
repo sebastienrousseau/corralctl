@@ -52,9 +52,18 @@ creating the destination repository when it does not exist and bringing its
 branches and tags to parity with the local clone: everything local exists
 there, and nothing else does. Branches are never forced.
 
+Local means the clone's own branches (refs/heads). An upstream branch the
+clone holds only as origin/<name> is not pushed, and the prune deletes it
+from a destination that has it; check a branch out locally to carry it.
+
 A repository is never pushed to the forge its origin lives on, and a
 destination that already holds a same-named repository with the wrong
 visibility is refused rather than reused.
+
+A destination is created public only when the source forge reported the
+repository as public at the last 'corralctl clone' and the clone sits under
+a Public directory. Anything else, including a clone with no recorded
+visibility, is created private.
 
 Destinations are named as <forge>[:<owner>][@<url>]:
 

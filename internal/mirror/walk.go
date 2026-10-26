@@ -10,14 +10,16 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/sebastienrousseau/corralctl/internal/engine"
 	"github.com/sebastienrousseau/corralctl/internal/git"
 )
 
 // Seams for the walk, so the error branches are reachable without a
 // filesystem that produces them.
 var (
-	walkDir      = filepath.WalkDir
-	isRepository = git.IsRepository
+	walkDir            = filepath.WalkDir
+	isRepository       = git.IsRepository
+	recordedVisibility = engine.RecordedVisibility
 )
 
 // Walk finds every repository under baseDir, in path order.
@@ -35,27 +37,27 @@ var (
 // original is ordinary, and the other two hundred repositories should not
 // wait on it.
 func Walk(baseDir string) ([]Repo, error) {
-	w := &walker{baseDir: baseDir, seen: map[string]int{}}
+	w := &walker{base: baseDir, seen: map[string]int{}}
 	if err := walkDir(baseDir, w.visit); err != nil {
 		return nil, err
 	}
-	repos := w.repos
-	sort.Slice(repos, func(i, j int) bool { return repos[i].Path < repos[j].Path })
-	return repos, nil
+	sort.Slice(w.repos, func(i, j int) bool { return w.repos[i].Path < w.repos[j].Path })
+	return w.repos, nil
 }
 
-// walker is Walk's state: the repositories found so far and the index of
-// the first one seen under each case-folded name.
+// walker is the state of one Walk: what has been found, and the index of
+// the first repository seen under each case-folded name.
 type walker struct {
-	baseDir string
-	repos   []Repo
-	seen    map[string]int
+	base  string
+	repos []Repo
+	seen  map[string]int
 }
 
-// visit is the WalkDir callback.
+// visit is the WalkDirFunc. It stops at a repository, so a nested one is
+// not counted twice.
 func (w *walker) visit(path string, d fs.DirEntry, err error) error {
 	if err != nil {
-		if filepath.Clean(path) == filepath.Clean(w.baseDir) {
+		if filepath.Clean(path) == filepath.Clean(w.base) {
 			return err
 		}
 		return nil //nolint:nilerr // deliberate: skip this entry, keep walking
@@ -69,19 +71,20 @@ func (w *walker) visit(path string, d fs.DirEntry, err error) error {
 	if d.Name() == ".git" || git.IsDeletionStaging(path) {
 		return fs.SkipDir
 	}
-	if path == w.baseDir || !isRepository(path) {
+	if path == w.base || !isRepository(path) {
 		return nil
 	}
 	w.add(path)
 	return fs.SkipDir
 }
 
-// add records the repository at path, marking it and any earlier one with
-// the same case-folded name as a conflict.
+// add records the repository at path, marking it and the first one of
+// the same name in any case as conflicting.
 func (w *walker) add(path string) {
 	name := filepath.Base(path)
 	key := strings.ToLower(name)
-	repo := Repo{Name: name, Path: path, Private: privateFromPath(w.baseDir, path)}
+	private, known := visibility(w.base, path)
+	repo := Repo{Name: name, Path: path, Private: private, VisibilityKnown: known}
 	if i, dup := w.seen[key]; dup {
 		first := &w.repos[i]
 		if first.Conflict == "" {
@@ -92,6 +95,18 @@ func (w *walker) add(path string) {
 		w.seen[key] = len(w.repos)
 	}
 	w.repos = append(w.repos, repo)
+}
+
+// visibility decides what a destination is created with. Public needs
+// two agreeing witnesses: the source forge's own answer, recorded in the
+// clone's sidecar by `corralctl clone`, and a directory that says public.
+// Either one saying anything else makes it private, so a clone with no
+// record is private wherever it sits, and nothing is public that the
+// directory alone would not have made public. known reports whether a
+// record was found.
+func visibility(baseDir, repoPath string) (private, known bool) {
+	recorded, known := recordedVisibility(repoPath)
+	return !known || recorded || privateFromPath(baseDir, repoPath), known
 }
 
 // privateFromPath reads visibility from the directory segments between

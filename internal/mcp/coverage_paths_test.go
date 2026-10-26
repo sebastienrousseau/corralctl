@@ -133,7 +133,8 @@ func TestSyncRepoRejectsUnknownQuery(t *testing.T) {
 
 func TestSyncRepoReportsStateAndAuditFailureTogether(t *testing.T) {
 	base := t.TempDir()
-	makeFakeRepo(t, base, "Public", "go", "alpha", "", "")
+	makeFakeRepo(t, base, "Public", "go", "alpha", "https://github.com/o/alpha.git", "")
+	safeSyncGuards(t)
 	stubSeam(t, &gitPull, func(context.Context, string, git.PullOptions) error { return nil })
 	stubSeam(t, &markSynced, func(string) error { return errors.New("sidecar write failed") })
 	h, _ := mutationHarness(t, base, false)
@@ -508,7 +509,8 @@ func TestSyncRepoRefusesUnsandboxablePath(t *testing.T) {
 
 func TestSyncRepoReportsStateFailureWhenCompletionAuditAlsoFails(t *testing.T) {
 	base := t.TempDir()
-	makeFakeRepo(t, base, "Public", "go", "alpha", "", "")
+	makeFakeRepo(t, base, "Public", "go", "alpha", "https://github.com/o/alpha.git", "")
+	safeSyncGuards(t)
 	stubSeam(t, &gitPull, func(context.Context, string, git.PullOptions) error { return nil })
 	stubSeam(t, &markSynced, func(string) error { return errors.New("sidecar write failed") })
 	h, _ := mutationHarness(t, base, false)

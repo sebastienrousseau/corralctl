@@ -283,7 +283,7 @@ func TestFetchAnnouncementNamesTheForge(t *testing.T) {
 // syncs it exercises the origin check rather than skipping it.
 //
 // Fixtures used to create a bare ".git" directory with no config. That
-// silently disabled originMismatch — the guard against pulling one
+// silently disabled OriginMismatch — the guard against pulling one
 // project's history into another project's directory — so tests asserting
 // "dry run pull" were asserting it without the check having run.
 func makeCloneAt(t *testing.T, dir, remote string) {
@@ -301,7 +301,7 @@ func makeCloneAt(t *testing.T, dir, remote string) {
 // identity was "github.com/" + FullName, which only ever agreed with a
 // real remote because GitHub's clone URLs happen to take that shape.
 //
-// On any other forge it disagreed with every clone, and originMismatch
+// On any other forge it disagreed with every clone, and OriginMismatch
 // reads a disagreement as an origin collision — so cloning worked and the
 // second run failed with "expected github.com/...".
 func TestOriginIdentityUsesTheCloneURL(t *testing.T) {
@@ -367,14 +367,14 @@ func TestOriginMismatchAcceptsAMatchingNonGitHubClone(t *testing.T) {
 		Name: "meta", FullName: "forgejo/meta",
 		CloneURL: "https://codeberg.org/forgejo/meta.git",
 	}
-	if msg, mismatch := originMismatch(repo, dir); mismatch {
+	if msg, mismatch := OriginMismatch(repo, dir); mismatch {
 		t.Errorf("a matching Codeberg clone was reported as a collision: %s", msg)
 	}
 
 	// And a genuine collision is still caught, with both hosts named.
 	other := t.TempDir()
 	makeCloneAt(t, other, "https://codeberg.org/someone-else/different.git")
-	msg, mismatch := originMismatch(repo, other)
+	msg, mismatch := OriginMismatch(repo, other)
 	if !mismatch {
 		t.Fatal("a clone pointing elsewhere must be reported")
 	}

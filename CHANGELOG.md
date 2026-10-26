@@ -238,6 +238,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   passes through the environment, such as a proxy or `http.sslCAInfo`.
   corralctl's entries are now numbered after the user's and the count raised
   to cover both.
+### Security
+
+- **`sync` no longer creates a public destination on a directory name.**
+  Visibility was read from the path alone, so a repository made private
+  upstream but still filed under `Public/`, or a clone corral never made,
+  was created public on every destination. `corralctl clone` now records the
+  visibility the source forge reports in each clone's state sidecar, on
+  every pass including skipped pulls, and `sync` creates a destination
+  public only when that record says public and the directory agrees.
+  Anything else is private. Behaviour change: until `corralctl clone` has
+  run once for an owner, its clones mirror as private, and an existing
+  public destination is refused with a message that says how to clear it.
+  `--dry-run` now names the visibility each destination would get.
+
+- **`corral_sync_repo` makes the CLI's checks before it pulls.** The MCP
+  tool ran `git pull --rebase --autostash` on whatever branch was checked
+  out, so an agent could rebase a user's feature branch, and it took no lock,
+  so it could race `corral_delete_repo` on the same clone. It now refuses,
+  through the same engine functions `corralctl clone` uses, a clone with no
+  origin or whose origin changed since the index was read, one with no
+  commits, and one that is not on the branch `origin/HEAD` names (the server
+  never calls a forge API, so a clone without `origin/HEAD` is refused rather
+  than trusted). Every refusal is audited, and the pull holds the
+  per-repository lock deletion takes.
+
+### Documentation
+
+- **What `sync` mirrors is stated plainly.** A destination mirrors the
+  clone's own branches (`refs/heads`), not its origin: an upstream branch the
+  clone holds only as `origin/<name>` is not pushed, and the pruning push
+  deletes it from a destination that has it. The README, `corralctl sync
+  --help`, the `internal/mirror` package comment and security-model claim C6
+  now say so, and `TestPushMirrorCarriesOnlyLocalBranches` pins the
+  behaviour. The push semantics are unchanged.
 
 ## [0.0.53] - 2026-10-25
 
