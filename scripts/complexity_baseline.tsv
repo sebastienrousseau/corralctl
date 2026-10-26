@@ -12,8 +12,6 @@ cognitive	31	cmd/branch.go	runBranchList
 cognitive	16	cmd/branch.go	runBranchSwitch
 cognitive	22	cmd/doctor_filter.go	inspectRepoWorktrees
 cognitive	18	cmd/doctor_rules.go	evaluateDoctorRules
-cognitive	17	cmd/exec.go	filterLocalRepos
-cognitive	30	cmd/exec.go	runExecCommands
 cognitive	24	cmd/flags_validate.go	validateCommonFlags
 cognitive	44	cmd/graph.go	runGraphWith
 cognitive	34	cmd/search.go	runSearch
@@ -91,7 +89,6 @@ cyclomatic	11	cmd/config.go	settingToString
 cyclomatic	13	cmd/doctor_filter.go	inspectRepoWorktrees
 cyclomatic	12	cmd/doctor_filter.go	isRepoExcluded
 cyclomatic	16	cmd/doctor_rules.go	evaluateDoctorRules
-cyclomatic	11	cmd/exec.go	runExecCommands
 cyclomatic	27	cmd/flags_validate.go	validateCommonFlags
 cyclomatic	27	cmd/graph.go	runGraphWith
 cyclomatic	23	cmd/search.go	runSearch
