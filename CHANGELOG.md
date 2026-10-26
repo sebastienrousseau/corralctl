@@ -31,6 +31,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Sync refuses to pull over work in progress or local commits.** An
+  unattended `git pull --rebase --autostash` ran whatever state a clone was
+  in: a revert staged with `--no-commit` was stashed, HEAD moved, and
+  `REVERT_HEAD` was left pointing at the old base; commits only in the clone
+  were rebased, and since signing is off for the pull, a signed commit came
+  back unsigned. `corralctl` sync and `corral_sync_repo` now refuse, naming
+  the reason, when a rebase, `git am`, merge, cherry-pick, revert or bisect is
+  in progress, when the branch has commits its upstream lacks, or when it has
+  no upstream. Push the local commits, or finish the operation, then sync.
+  This is a behaviour change: those clones used to be rebased.
+
 - **A credential no longer replaces your own `GIT_CONFIG_*` settings.**
   Attaching the GitHub token or a mirror's push credential wrote
   `GIT_CONFIG_COUNT=1` and `GIT_CONFIG_KEY_0`, which overwrote config a user

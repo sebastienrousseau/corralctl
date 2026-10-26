@@ -251,10 +251,12 @@ graph TD
     I -- "Yes (--no-sync)" --> K[SKIP]
     I -- Yes --> L{Smart sync:<br/>pushed_at advanced?}
     L -- No --> M[SKIP up-to-date]
-    L -- "Yes (or --force-sync)" --> N[git pull --rebase --autostash]
+    L -- "Yes (or --force-sync)" --> LG{"Operation in progress,<br/>local commits ahead,<br/>or no upstream?"}
+    LG -- Yes --> LR[ERROR: pull refused]
+    LG -- No --> N[git pull --rebase --autostash]
     N --> N1["+ optional submodule update<br/>(--ignore-submodule-failures)"]
     J & N1 --> O[Stamp .corral-state.json]
-    O & K & M --> P{All workers done?}
+    O & K & M & LR --> P{All workers done?}
     P -- No --> H
     P -- Yes --> Q[Cleanup empty legacy dirs]
     Q --> R{--orphans?}
@@ -479,7 +481,7 @@ Where GitHub's own MCP server covers the remote API surface (issues, PRs, search
 
 **Write tools (v0.0.12, opt-in via `--enable-mutations`):**
 
-- `corral_sync_repo` — Runs `git pull --rebase --autostash` against one clone
+- `corral_sync_repo` — Runs `git pull --rebase --autostash` against one clone. Refuses, as `sync` does, when a rebase, merge, cherry-pick, revert or bisect is in progress, when the branch has commits its upstream lacks, or when it has no upstream
 - `corral_clone_repo` — Clones a URL into a sandboxed target path
 - `corral_adopt_repo` — Adopts a local repository with optional relocation and remote creation
 - `corral_delete_repo` — Removes a clone. Requires `--enable-destructive-mutations`. Refuses on uncommitted/unpushed changes, and asks a person to approve each deletion

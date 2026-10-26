@@ -122,6 +122,9 @@ type PullOptions struct {
 }
 
 // Pull executes a `git pull --rebase --autostash` in the target directory.
+// It first refuses, with an error wrapping ErrPullRefused, when the clone has
+// an operation in progress (rebase, merge, cherry-pick, revert, bisect), has
+// commits its upstream lacks, or has no upstream (see pullRefusal).
 // Signature verification (merge.verifySignatures / rebase.verifySignatures)
 // and commit signing (commit.gpgsign) are explicitly disabled for this
 // invocation so an unattended sync never aborts on unsigned commits or
@@ -136,6 +139,9 @@ type PullOptions struct {
 //     separate `git submodule update --init --recursive` step whose
 //     error is logged but not returned.
 func Pull(ctx context.Context, targetDir string, opts PullOptions) error {
+	if reason := pullRefusal(ctx, targetDir); reason != "" {
+		return fmt.Errorf("%w in %s: %s", ErrPullRefused, filepath.Base(targetDir), reason)
+	}
 	args := hardened(
 		"-c", "merge.verifySignatures=false",
 		"-c", "rebase.verifySignatures=false",

@@ -442,22 +442,12 @@ func TestPullArgsContainCommitSigningOverride(t *testing.T) {
 	run(t, "git", "-C", targetDir, "config", "user.name", "Test")
 	run(t, "git", "-C", targetDir, "config", "user.email", "test@test.com")
 
-	// Make an upstream change so rebase actually replays a local commit on
-	// pull. First make a local divergent commit so rebase has something to
-	// re-apply through the signing path.
-	if err := os.WriteFile(filepath.Join(targetDir, "local.txt"), []byte("l"), 0o600); err != nil {
+	// A local commit is now refused rather than replayed (see
+	// TestPullRefusesLocalCommitsAhead), so the signing path this exercises
+	// is the autostash: an uncommitted change to a tracked file is stashed
+	// and reapplied around the pull, under the same signing configuration.
+	if err := os.WriteFile(filepath.Join(targetDir, "test.txt"), []byte("local edit"), 0o600); err != nil {
 		t.Fatal(err)
-	}
-	run(t, "git", "-C", targetDir, "add", "local.txt")
-	// The local commit must NOT be signed (we'd hit the bad key); use git
-	// directly with explicit overrides to make the test setup deterministic.
-	setup := exec.Command("git", "-C", targetDir, // #nosec G204 -- fixed executable and test-owned path
-		"-c", "commit.gpgsign=false",
-		"-c", "user.name=Test",
-		"-c", "user.email=test@test.com",
-		"commit", "-m", "local")
-	if out, err := setup.CombinedOutput(); err != nil {
-		t.Fatalf("setup commit failed: %v (%s)", err, out)
 	}
 
 	upstreamFile := filepath.Join(workDir, "upstream.txt")
@@ -469,7 +459,10 @@ func TestPullArgsContainCommitSigningOverride(t *testing.T) {
 	run(t, "git", "-C", workDir, "push", "origin", "main")
 
 	if err := Pull(context.Background(), targetDir, PullOptions{}); err != nil {
-		t.Fatalf("Pull must disable commit.gpgsign during rebase replay, got: %v", err)
+		t.Fatalf("Pull must not fail on the user's signing configuration, got: %v", err)
+	}
+	if got, err := os.ReadFile(filepath.Join(targetDir, "test.txt")); err != nil || string(got) != "local edit" {
+		t.Fatalf("autostashed change not restored: %q, %v", got, err)
 	}
 }
 
