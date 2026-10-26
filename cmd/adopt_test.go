@@ -8,6 +8,7 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/sebastienrousseau/corralctl/internal/adopt"
 	"github.com/sebastienrousseau/corralctl/internal/discover"
 	"github.com/sebastienrousseau/corralctl/internal/engine"
 	"github.com/sebastienrousseau/corralctl/internal/forge"
@@ -240,16 +241,16 @@ func TestAdoptRunEExecutionAndOutputs(t *testing.T) {
 		return "dummytoken"
 	}
 
-	adoptExecute = func(ctx context.Context, opts engine.AdoptOptions) (engine.AdoptResult, error) {
+	adoptExecute = func(ctx context.Context, opts adopt.Options) (adopt.Result, error) {
 		if opts.RepoName == "repo1" {
-			return engine.AdoptResult{
+			return adopt.Result{
 				RepoName:  "repo1",
 				FinalPath: opts.NewTargetDir,
 				Action:    "ADOPTED",
 				RemoteURL: "https://dummy.com/repo1.git",
 			}, nil
 		}
-		return engine.AdoptResult{}, errors.New("execution failure")
+		return adopt.Result{}, errors.New("execution failure")
 	}
 
 	// Text output with relocation
@@ -322,8 +323,8 @@ func TestAdoptRunEInteractiveWizard(t *testing.T) {
 	adoptWizardRun = func(ctx context.Context, c []discover.Candidate) ([]discover.Candidate, bool, error) {
 		return c, true, nil
 	}
-	adoptExecute = func(ctx context.Context, opts engine.AdoptOptions) (engine.AdoptResult, error) {
-		return engine.AdoptResult{Action: "ADOPTED", RepoName: opts.RepoName}, nil
+	adoptExecute = func(ctx context.Context, opts adopt.Options) (adopt.Result, error) {
+		return adopt.Result{Action: "ADOPTED", RepoName: opts.RepoName}, nil
 	}
 	adoptOutput = "text"
 	if err := adoptCmd.RunE(adoptCmd, nil); err != nil {
@@ -390,10 +391,10 @@ func TestAdoptCollectionAndRelocate(t *testing.T) {
 		return candidates, nil
 	}
 
-	var capturedOpts engine.AdoptOptions
-	adoptExecute = func(ctx context.Context, opts engine.AdoptOptions) (engine.AdoptResult, error) {
+	var capturedOpts adopt.Options
+	adoptExecute = func(ctx context.Context, opts adopt.Options) (adopt.Result, error) {
 		capturedOpts = opts
-		return engine.AdoptResult{Action: "ADOPTED", RepoName: opts.RepoName, FinalPath: opts.NewTargetDir}, nil
+		return adopt.Result{Action: "ADOPTED", RepoName: opts.RepoName, FinalPath: opts.NewTargetDir}, nil
 	}
 
 	// 1. With explicit collection: Forks

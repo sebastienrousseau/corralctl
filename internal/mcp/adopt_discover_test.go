@@ -9,8 +9,8 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/sebastienrousseau/corralctl/internal/adopt"
 	"github.com/sebastienrousseau/corralctl/internal/discover"
-	"github.com/sebastienrousseau/corralctl/internal/engine"
 	"github.com/sebastienrousseau/corralctl/internal/forge"
 	"github.com/sebastienrousseau/corralctl/internal/github"
 )
@@ -162,8 +162,8 @@ func TestAdoptRepoTool(t *testing.T) {
 	adoptForgeToken = func(ctx context.Context, name string, mode github.AuthMode) string {
 		return "token"
 	}
-	adoptExecFunc = func(ctx context.Context, opts engine.AdoptOptions) (engine.AdoptResult, error) {
-		return engine.AdoptResult{}, errors.New("execution error")
+	adoptExecFunc = func(ctx context.Context, opts adopt.Options) (adopt.Result, error) {
+		return adopt.Result{}, errors.New("execution error")
 	}
 	_, isErr = h.callTool("corral_adopt_repo", map[string]any{
 		"repo_name":  "r",
@@ -175,8 +175,8 @@ func TestAdoptRepoTool(t *testing.T) {
 	}
 
 	// Successful adoption without relocate
-	adoptExecFunc = func(ctx context.Context, opts engine.AdoptOptions) (engine.AdoptResult, error) {
-		return engine.AdoptResult{
+	adoptExecFunc = func(ctx context.Context, opts adopt.Options) (adopt.Result, error) {
+		return adopt.Result{
 			RepoName:  opts.RepoName,
 			FinalPath: opts.LocalPath,
 			Action:    "ADOPTED",

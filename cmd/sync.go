@@ -30,7 +30,7 @@ var (
 	syncOutput      string
 	syncWalk        = mirror.Walk
 	syncRun         = mirror.Run
-	syncToken       = engine.ForgeToken
+	syncToken       = forge.Token
 	// asTarget is a seam: every registered forge is a Target today, so the
 	// refusal below is unreachable without one, and an unreachable error
 	// path is an untested error path.

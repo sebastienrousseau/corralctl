@@ -41,10 +41,10 @@ type RepoEntry struct {
 	relPathLower string
 }
 
-// StateRecord mirrors the on-disk .corral-state.json sidecar without
-// importing internal/engine (which would create a dependency cycle —
-// internal/engine already imports internal/git, and corral-mcp will need
-// to import internal/engine in later phases for sync operations).
+// StateRecord mirrors the on-disk corral-state.json sidecar without
+// importing internal/engine, which drives the terminal UI and would pull
+// the Bubble Tea stack into the MCP server. import_boundary_test.go keeps
+// that edge out.
 type StateRecord struct {
 	// LastSyncedPushedAt is the upstream pushed_at timestamp the engine
 	// observed on the previous successful sync, formatted per RFC 3339.

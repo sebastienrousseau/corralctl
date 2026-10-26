@@ -1,7 +1,14 @@
 // SPDX-FileCopyrightText: 2026 Sebastien Rousseau <sebastian.rousseau@gmail.com>
 // SPDX-License-Identifier: GPL-3.0-only
 
-package engine
+// Package adopt brings an untracked local repository under management:
+// it optionally relocates the clone into the layout, provisions a remote
+// on a forge, points origin at it and pushes the current branch.
+//
+// It is shared by `corralctl adopt` and the MCP `corral_adopt_repo` tool,
+// and lives outside internal/engine so the MCP server does not link the
+// terminal UI that the engine drives.
+package adopt
 
 import (
 	"context"
@@ -30,9 +37,9 @@ var (
 	adoptReadFile      = os.ReadFile
 )
 
-// AdoptOptions encapsulates options for discovering, relocating, and
+// Options encapsulates options for discovering, relocating, and
 // provisioning a remote repository for an untracked local repository.
-type AdoptOptions struct {
+type Options struct {
 	// LocalPath is the current filesystem path of the repository.
 	LocalPath string
 	// NewTargetDir is the destination directory if the repository is relocated.
@@ -57,8 +64,8 @@ type AdoptOptions struct {
 	DryRun bool
 }
 
-// AdoptResult describes the outcome of adopting a repository.
-type AdoptResult struct {
+// Result describes the outcome of adopting a repository.
+type Result struct {
 	// RepoName is the name of the adopted repository.
 	RepoName string `json:"repo_name"`
 	// OriginalPath is the initial filesystem path before adoption.
@@ -73,10 +80,10 @@ type AdoptResult struct {
 	Message string `json:"message"`
 }
 
-// ExecuteAdoption executes the repository adoption process: local relocation,
+// Execute runs the repository adoption process: local relocation,
 // remote creation on the forge, remote origin configuration, and initial push.
-func ExecuteAdoption(ctx context.Context, opts AdoptOptions) (AdoptResult, error) {
-	res := AdoptResult{
+func Execute(ctx context.Context, opts Options) (Result, error) {
+	res := Result{
 		RepoName:     opts.RepoName,
 		OriginalPath: opts.LocalPath,
 		FinalPath:    opts.LocalPath,

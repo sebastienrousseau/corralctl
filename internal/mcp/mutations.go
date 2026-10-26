@@ -32,7 +32,7 @@ import (
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	"github.com/sebastienrousseau/corralctl/internal/engine"
+	"github.com/sebastienrousseau/corralctl/internal/adopt"
 	"github.com/sebastienrousseau/corralctl/internal/forge"
 	"github.com/sebastienrousseau/corralctl/internal/git"
 )
@@ -55,10 +55,10 @@ var (
 	mkdirMutation      = os.MkdirAll
 	removeMutation     = os.RemoveAll
 	markSynced         = markStateSynced
-	adoptExecFunc      = engine.ExecuteAdoption
+	adoptExecFunc      = adopt.Execute
 	adoptForgeResolve  = forge.Resolve
 	adoptForgeAsTarget = forge.AsTarget
-	adoptForgeToken    = engine.ForgeToken
+	adoptForgeToken    = forge.Token
 )
 
 var mutationSequence atomic.Uint64

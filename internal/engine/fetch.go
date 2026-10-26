@@ -156,7 +156,7 @@ func FetchRepos(ctx context.Context, owner string, opts github.FetchOptions, for
 		Visibility:      opts.Visibility,
 		IncludeForks:    opts.IncludeForks,
 		IncludeArchived: opts.IncludeArchived,
-		Token:           forgeToken(ctx, f.Name(), opts.AuthMode),
+		Token:           forge.EnvToken(f.Name()),
 		BaseURL:         forgeURL,
 		RequestTimeout:  opts.RequestTimeout,
 		TotalTimeout:    opts.TotalTimeout,
@@ -186,45 +186,4 @@ func FetchRepos(ctx context.Context, owner string, opts github.FetchOptions, for
 		})
 	}
 	return out, nil
-}
-
-// forgeToken resolves the credential for a forge.
-//
-// GitHub's is resolved by its own client, which knows the ladder from an
-// explicit token through the environment to the gh CLI — passing a token
-// in would bypass that. The others read one environment variable each,
-// named the way each forge's own tooling names it, so a developer who
-// already has it exported does not have to learn a corral-specific name.
-var forgeToken = func(ctx context.Context, name string, mode github.AuthMode) string {
-	switch name {
-	case "github":
-		return "" // resolved inside the GitHub client
-	case "gitlab":
-		return firstEnv("CORRAL_GITLAB_TOKEN", "GITLAB_TOKEN", "CI_JOB_TOKEN")
-	case "bitbucket":
-		return firstEnv("CORRAL_BITBUCKET_TOKEN", "BITBUCKET_TOKEN")
-	default:
-		return firstEnv("CORRAL_FORGE_TOKEN", "FORGEJO_TOKEN", "GITEA_TOKEN", "CODEBERG_TOKEN")
-	}
-}
-
-// ForgeToken resolves the credential `corralctl sync` presents to a
-// destination forge, through the same ladder `corralctl clone` uses to
-// list from one: GitHub through its own client, every other forge from
-// the environment variable its own tooling names.
-func ForgeToken(ctx context.Context, name string, mode github.AuthMode) string {
-	if name == "github" {
-		return github.Token(ctx, mode)
-	}
-	return forgeToken(ctx, name, mode)
-}
-
-// firstEnv returns the first of these variables that is set and non-empty.
-func firstEnv(names ...string) string {
-	for _, n := range names {
-		if v := strings.TrimSpace(os.Getenv(n)); v != "" {
-			return v
-		}
-	}
-	return ""
 }
