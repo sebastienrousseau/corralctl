@@ -143,16 +143,25 @@ vet:
 # honours //nolint directives; the standalone binary CI runs honours only
 # //lint:ignore. A suppression that satisfies one and not the other passes
 # locally and fails in CI, which has now happened twice.
+#
+# Pinned, not @latest, so a release of the linter cannot turn a local
+# `make check` red (or green) overnight. v0.8.2 is what CI's reusable
+# go-ci workflow resolves its own `staticcheck@latest` to today; bump the
+# two together.
+STATICCHECK_VERSION ?= v0.8.2
 staticcheck:
-	go run honnef.co/go/tools/cmd/staticcheck@latest ./...
+	go run honnef.co/go/tools/cmd/staticcheck@$(STATICCHECK_VERSION) ./...
 
 ## vuln-check: verify no known vulnerabilities in dependencies using govulncheck
+#
+# The same pinned version the Vulnerability Scan job in ci.yml installs.
+# A govulncheck already on PATH is deliberately not preferred: it could be
+# any version, so a local run and CI could disagree about the same tree.
+# The vulnerability database is fetched at run time, so the pin does not
+# stale the results.
+GOVULNCHECK_VERSION ?= v1.7.0
 vuln-check:
-	@if command -v govulncheck >/dev/null 2>&1; then \
-		govulncheck ./...; \
-	else \
-		go run golang.org/x/vuln/cmd/govulncheck@latest ./...; \
-	fi
+	go run golang.org/x/vuln/cmd/govulncheck@$(GOVULNCHECK_VERSION) ./...
 
 ## lint: run golangci-lint
 lint:

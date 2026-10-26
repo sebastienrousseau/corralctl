@@ -14,6 +14,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Auto-merge now covers only GitHub Actions and Docker digest updates; every
   Go module update waits for a person.
 
+### Changed
+
+- **`make staticcheck` and `make vuln-check` run pinned tool versions.**
+  They installed `staticcheck@latest` and `govulncheck@latest`, so a local
+  `make check` and CI could run different scanners against the same tree.
+  They now run staticcheck v0.8.2 and govulncheck v1.7.0 (the version CI
+  pins), set by `STATICCHECK_VERSION` and `GOVULNCHECK_VERSION`.
+
 ## [0.0.53] - 2026-10-25
 
 ### Security

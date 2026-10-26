@@ -100,7 +100,8 @@ is the cross-platform matrix.
 | Race & Shuffled Tests | `go test -race -shuffle=on ./...` |
 | Fixed shuffle seeds | `for s in 1 2 3; do go test -count=1 -shuffle=$s ./...; done` |
 | Benchmarks smoke | `go test -run '^$' -bench . -benchtime 1x ./...` |
-| Vulnerability Scan | `go run golang.org/x/vuln/cmd/govulncheck@latest ./...` |
+| Vulnerability Scan | `make vuln-check` (govulncheck v1.7.0, the version CI pins) |
+| Staticcheck (in Go CI) | `make staticcheck` (staticcheck v0.8.2) |
 | Documentation Coverage | `make doc-check` |
 | Licence headers (SPDX) | `make spdx-check` |
 | Manifest drift | `make sbom-check` |
