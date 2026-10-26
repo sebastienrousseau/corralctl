@@ -202,39 +202,32 @@ func TestPullIgnoresSignatureVerification(t *testing.T) {
 }
 
 func TestAuthEnv(t *testing.T) {
-	defer func() { CloneCredential = nil }()
-
-	CloneCredential = nil
-	if env := authEnv(); env != nil {
-		t.Errorf("expected nil env when CloneCredential is unset, got %v", env)
+	if env := authEnv(nil); env != nil {
+		t.Errorf("expected nil env when no credential is set, got %v", env)
 	}
 
-	CloneCredential = func() (string, *PushCredential) { return "https://gitlab.com/", nil }
-	if env := authEnv(); env != nil {
+	if env := authEnv(func() (string, *PushCredential) { return "https://gitlab.com/", nil }); env != nil {
 		t.Errorf("expected nil env for no credential, got %v", env)
 	}
 
-	CloneCredential = func() (string, *PushCredential) {
+	if env := authEnv(func() (string, *PushCredential) {
 		return "https://gitlab.com/", &PushCredential{Username: "oauth2"}
-	}
-	if env := authEnv(); env != nil {
+	}); env != nil {
 		t.Errorf("expected nil env for an empty secret, got %v", env)
 	}
 
 	// A plain-http or unparseable origin is never sent a credential.
 	for _, origin := range []string{"http://git.example/", "https://"} {
-		CloneCredential = func() (string, *PushCredential) {
+		if env := authEnv(func() (string, *PushCredential) {
 			return origin, &PushCredential{Username: "u", Secret: "secret"}
-		}
-		if env := authEnv(); env != nil {
+		}); env != nil {
 			t.Errorf("origin %q: expected nil env, got %v", origin, env)
 		}
 	}
 
-	CloneCredential = func() (string, *PushCredential) {
+	env := authEnv(func() (string, *PushCredential) {
 		return "https://gitlab.com/", &PushCredential{Username: "oauth2", Secret: "secret"}
-	}
-	env := authEnv()
+	})
 	if len(env) != 1 || env[0].key != "http.https://gitlab.com/.extraheader" ||
 		!strings.HasPrefix(env[0].value, "Authorization: Basic ") {
 		t.Fatalf("expected one gitlab.com extraheader entry, got %v", env)
@@ -251,13 +244,10 @@ func envContains(env []string, want string) bool {
 }
 
 func TestWithGitEnvAlwaysSetsNonInteractive(t *testing.T) {
-	defer func() { CloneCredential = nil }()
-
 	// No token: still must set the non-interactive guards so cron clones of
 	// public repos don't hang on an SSH passphrase or askpass helper.
-	CloneCredential = nil
 	cmd := exec.Command("git", "version")
-	withGitEnv(cmd)
+	withGitEnv(cmd, nil)
 	for _, want := range []string{
 		"GIT_TERMINAL_PROMPT=0",
 		"GIT_ASKPASS=/bin/true",
@@ -276,13 +266,10 @@ func TestWithGitEnvAlwaysSetsNonInteractive(t *testing.T) {
 }
 
 func TestWithGitEnvIncludesAuthHeader(t *testing.T) {
-	defer func() { CloneCredential = nil }()
-
-	CloneCredential = func() (string, *PushCredential) {
-		return "https://github.com/", &PushCredential{Username: "x-access-token", Secret: "secret"}
-	}
 	cmd := exec.Command("git", "version")
-	withGitEnv(cmd)
+	withGitEnv(cmd, func() (string, *PushCredential) {
+		return "https://github.com/", &PushCredential{Username: "x-access-token", Secret: "secret"}
+	})
 	if !envContains(cmd.Env, "GIT_CONFIG_COUNT=1") {
 		t.Errorf("expected GIT_CONFIG_COUNT=1 when a token is available, got %v", cmd.Env)
 	}
@@ -685,11 +672,26 @@ func TestPullSwallowsInjectedSubmoduleFailure(t *testing.T) {
 	defer cleanup(t, work)
 	oldUpdate := updateSubmodulesFn
 	t.Cleanup(func() { updateSubmodulesFn = oldUpdate })
-	updateSubmodulesFn = func(context.Context, string) error { return errors.New("submodule failed") }
-	if err := Pull(context.Background(), work, PullOptions{RecurseSubmodules: true, IgnoreSubmoduleFailures: true}); err != nil {
+	var gotCredential CredentialFunc
+	updateSubmodulesFn = func(_ context.Context, _ string, credential CredentialFunc) error {
+		gotCredential = credential
+		return errors.New("submodule failed")
+	}
+	credential := func() (string, *PushCredential) { return "https://forge.example/", nil }
+	if err := Pull(context.Background(), work, PullOptions{
+		RecurseSubmodules: true, IgnoreSubmoduleFailures: true, Credential: credential,
+	}); err != nil {
 		t.Fatalf("injected submodule failure must be swallowed: %v", err)
 	}
-	if err := updateSubmodules(context.Background(), filepath.Join(work, "missing")); err == nil {
+	// The submodule update fetches from the same forge, so it presents the
+	// pull's own credential.
+	if gotCredential == nil {
+		t.Fatal("the submodule update was not given the pull's credential")
+	}
+	if origin, _ := gotCredential(); origin != "https://forge.example/" {
+		t.Errorf("submodule credential origin = %q", origin)
+	}
+	if err := updateSubmodules(context.Background(), filepath.Join(work, "missing"), nil); err == nil {
 		t.Fatal("expected direct submodule update failure")
 	}
 }

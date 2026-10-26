@@ -249,7 +249,7 @@ func RunE(ctx context.Context, opts RunOptions) error {
 	if err := checkRunForge(opts); err != nil {
 		return err
 	}
-	installTokenProvider(ctx, opts)
+	opts.Clone.Credential = runCloneCredential(ctx, opts)
 
 	isTTY := isTerminal(os.Stdout.Fd())
 	// stdout is reserved for the selected output format. Diagnostics always go

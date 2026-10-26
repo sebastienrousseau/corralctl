@@ -6,6 +6,7 @@ package git
 import (
 	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -85,16 +86,22 @@ func TestCorralConfigAppendsToTheUsersEnvConfig(t *testing.T) {
 	t.Setenv("GIT_CONFIG_COUNT", "1")
 	t.Setenv("GIT_CONFIG_KEY_0", "corral.user")
 	t.Setenv("GIT_CONFIG_VALUE_0", "kept")
-	defer func() { CloneCredential = nil }()
-	CloneCredential = func() (string, *PushCredential) {
+	token := func() (string, *PushCredential) {
 		return "https://github.com/", &PushCredential{Username: "x-access-token", Secret: "secret"}
 	}
+	// What git itself reads from the environment withGitEnv builds.
+	output := func(cmd *exec.Cmd) (string, error) {
+		cmd.Dir = repo
+		withGitEnv(cmd, token)
+		out, err := cmd.Output()
+		return string(out), err
+	}
 
-	out, err := runGitOutput(ctx, repo, "config", "--get", "corral.user")
+	out, err := output(exec.CommandContext(ctx, "git", "config", "--get", "corral.user"))
 	if err != nil || strings.TrimSpace(out) != "kept" {
 		t.Errorf("user's env config lost under a token: %q, %v", out, err)
 	}
-	if _, err := runGitOutput(ctx, repo, "config", "--get", "http.https://github.com/.extraheader"); err != nil {
+	if _, err := output(exec.CommandContext(ctx, "git", "config", "--get", "http.https://github.com/.extraheader")); err != nil {
 		t.Errorf("corral's own header is missing: %v", err)
 	}
 

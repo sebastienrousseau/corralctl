@@ -190,6 +190,7 @@ func syncExistingClone(
 	err := gitPull(ctx, targetDir, git.PullOptions{
 		RecurseSubmodules:       cloneOpts.RecurseSubmodules,
 		IgnoreSubmoduleFailures: syncOpts.IgnoreSubmoduleFailures,
+		Credential:              cloneOpts.Credential,
 	})
 	if err != nil {
 		result.Action = "ERROR"

@@ -14,28 +14,30 @@ import (
 	"github.com/sebastienrousseau/corralctl/internal/diag"
 )
 
-// CloneCredential, when set, returns the credential HTTPS clones and pulls
-// present, and the origin it is scoped to ("https://gitlab.com/"), so
-// private repositories on any forge can be cloned non-interactively. A nil
-// credential means none.
+// CredentialFunc returns the credential HTTPS clones and pulls present,
+// and the origin it is scoped to ("https://gitlab.com/"), so private
+// repositories on any forge can be cloned non-interactively. A nil
+// credential means none. It is carried per call in CloneOptions and
+// PullOptions, never in package state, so two runs in one process with
+// different forges each present their own.
 //
 // The credential reaches git as an http.<origin>.extraheader in GIT_CONFIG_*
 // environment variables, the same mechanism PushMirror uses: it is never
 // written to a repository's .git/config, never part of a URL, and never in
 // the process argument list. Scoping it to one origin means a clone URL
 // that points at any other host is sent nothing.
-var CloneCredential func() (origin string, cred *PushCredential)
+type CredentialFunc func() (origin string, cred *PushCredential)
 
 var updateSubmodulesFn = updateSubmodules
 
 // authEnv returns the config entries that inject an Authorization header
 // for requests to the credential's origin, or nil when there is no
 // credential or its origin is not HTTPS. SSH remotes are unaffected.
-func authEnv() []configPair {
-	if CloneCredential == nil {
+func authEnv(credential CredentialFunc) []configPair {
+	if credential == nil {
 		return nil
 	}
-	origin, cred := CloneCredential()
+	origin, cred := credential()
 	if cred == nil || cred.Secret == "" {
 		return nil
 	}
@@ -59,12 +61,12 @@ func nonInteractiveEnv() []string {
 	}
 }
 
-// withGitEnv attaches the credentials header (when available) plus the
+// withGitEnv attaches the credential's header (when there is one) plus the
 // non-interactive env vars to cmd, replacing any prior cmd.Env. It always sets
 // cmd.Env so the non-interactive guards apply even on anonymous clones, and
 // it starts from childEnv so an inherited GIT_DIR cannot redirect the command.
-func withGitEnv(cmd *exec.Cmd) {
-	cmd.Env = withConfig(childEnv(), authEnv()...)
+func withGitEnv(cmd *exec.Cmd, credential CredentialFunc) {
+	cmd.Env = withConfig(childEnv(), authEnv(credential)...)
 }
 
 // CloneOptions configures optional clone-time performance and layout flags.
@@ -81,6 +83,9 @@ type CloneOptions struct {
 	// Depth, when greater than zero, creates a shallow clone truncated to the
 	// given number of commits by adding the --depth flag.
 	Depth int
+	// Credential, when set, supplies the HTTPS credential the clone
+	// presents, scoped to one origin. Nil clones anonymously.
+	Credential CredentialFunc
 }
 
 // Clone executes a git clone command for the given URL into the target directory.
@@ -104,7 +109,7 @@ func Clone(ctx context.Context, url, targetDir string, opts CloneOptions) error 
 	// #nosec G204 -- the executable is the fixed "git" binary and all arguments
 	// are constructed internally from controlled options, not shell input.
 	cmd := exec.CommandContext(ctx, gitBinary, args...)
-	withGitEnv(cmd)
+	withGitEnv(cmd, opts.Credential)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		// Do not include args here: MCP callers may supply clone URLs with
@@ -125,6 +130,9 @@ type PullOptions struct {
 	// submodule has been deleted upstream or access has been revoked but
 	// the parent repository's history should still update.
 	IgnoreSubmoduleFailures bool
+	// Credential, when set, supplies the HTTPS credential the pull and
+	// its submodule update present, scoped to one origin.
+	Credential CredentialFunc
 }
 
 // Pull executes a `git pull --rebase --autostash` in the target directory.
@@ -164,7 +172,7 @@ func Pull(ctx context.Context, targetDir string, opts PullOptions) error {
 	// #nosec G204 -- the executable is the fixed "git" binary and all arguments
 	// are constructed internally from controlled options, not shell input.
 	cmd := exec.CommandContext(ctx, gitBinary, args...)
-	withGitEnv(cmd)
+	withGitEnv(cmd, opts.Credential)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		// The operation, not the argv. Joining every argument put the
@@ -177,7 +185,7 @@ func Pull(ctx context.Context, targetDir string, opts PullOptions) error {
 	}
 
 	if opts.RecurseSubmodules && opts.IgnoreSubmoduleFailures {
-		if sErr := updateSubmodulesFn(ctx, targetDir); sErr != nil {
+		if sErr := updateSubmodulesFn(ctx, targetDir, opts.Credential); sErr != nil {
 			// Best-effort: log and swallow, matching the documented contract.
 			diag.Warnf("submodule update failed in %s: %v (continuing)", targetDir, sErr)
 		}
@@ -188,11 +196,11 @@ func Pull(ctx context.Context, targetDir string, opts PullOptions) error {
 // updateSubmodules runs `git submodule update --init --recursive` in
 // targetDir as a separate subprocess. Exposed indirectly via Pull's
 // IgnoreSubmoduleFailures branch.
-func updateSubmodules(ctx context.Context, targetDir string) error {
+func updateSubmodules(ctx context.Context, targetDir string, credential CredentialFunc) error {
 	args := hardened("-C", targetDir, "submodule", "update", "--init", "--recursive")
 	// #nosec G204 -- fixed binary; controlled args.
 	cmd := exec.CommandContext(ctx, gitBinary, args...)
-	withGitEnv(cmd)
+	withGitEnv(cmd, credential)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("git submodule update failed: %w: %s", err, strings.TrimSpace(string(out)))

@@ -1333,36 +1333,60 @@ func TestNormalizeLayoutDirCase(t *testing.T) {
 	normalizeLayoutDirCase("/invalid_dir_that_does_not_exist", repos)
 }
 
-func TestRunWiresGitTokenProvider(t *testing.T) {
-	oldFetch := fetchRepos
-	defer func() { fetchRepos = oldFetch }()
-	fetchRepos = func(ctx context.Context, owner string, opts github.FetchOptions, _, _ string) ([]github.Repo, error) {
-		return nil, nil
+// TestRunWiresCloneCredential: RunE hands the run's credential to every
+// clone through the clone options, not through git package state.
+func TestRunWiresCloneCredential(t *testing.T) {
+	oldFetch, oldClone, oldTTY := fetchRepos, gitClone, isTerminal
+	t.Cleanup(func() { fetchRepos, gitClone, isTerminal = oldFetch, oldClone, oldTTY })
+	fetchRepos = func(context.Context, string, github.FetchOptions, string, string) ([]github.Repo, error) {
+		return []github.Repo{{Name: "r", Language: "Go", Visibility: "Public", DefaultBranch: "main"}}, nil
 	}
-	oldIsTerminal := isTerminal
-	defer func() { isTerminal = oldIsTerminal }()
-	isTerminal = func(fd uintptr) bool { return false }
-
-	oldTok, had := os.LookupEnv("GITHUB_TOKEN")
-	defer func() {
-		if had {
-			_ = os.Setenv("GITHUB_TOKEN", oldTok)
-		} else {
-			_ = os.Unsetenv("GITHUB_TOKEN")
-		}
-	}()
-	_ = os.Setenv("GITHUB_TOKEN", "tok-xyz")
-
-	baseDir, _ := os.MkdirTemp("", "engine_tok")
-	defer func() { _ = os.RemoveAll(baseDir) }()
-
-	Run(context.Background(), defaultRunOptions(baseDir))
-	if git.CloneCredential == nil {
-		t.Fatal("expected git.CloneCredential to be wired after Run")
+	isTerminal = func(uintptr) bool { return false }
+	var credential git.CredentialFunc
+	gitClone = func(_ context.Context, _, _ string, opts git.CloneOptions) error {
+		credential = opts.Credential
+		return nil
 	}
-	origin, cred := git.CloneCredential()
+	t.Setenv("GITHUB_TOKEN", "tok-xyz")
+
+	if err := RunE(context.Background(), defaultRunOptions(t.TempDir())); err != nil {
+		t.Fatalf("RunE: %v", err)
+	}
+	if credential == nil {
+		t.Fatal("the clone was not given the run's credential")
+	}
+	origin, cred := credential()
 	if origin != "https://github.com/" || cred == nil || cred.Username != "x-access-token" || cred.Secret != "tok-xyz" {
-		t.Errorf("git.CloneCredential() = %q, %+v; want github.com, x-access-token:tok-xyz", origin, cred)
+		t.Errorf("credential() = %q, %+v; want github.com, x-access-token:tok-xyz", origin, cred)
+	}
+}
+
+// TestSyncPassesTheCloneCredentialToPull: a pull of a private repository
+// needs the same credential its clone used.
+func TestSyncPassesTheCloneCredentialToPull(t *testing.T) {
+	oldPull, oldBranch, oldEmpty, oldOrigin := gitPull, gitCurrentBranch, gitIsEmpty, gitRemoteOrigin
+	t.Cleanup(func() {
+		gitPull, gitCurrentBranch, gitIsEmpty, gitRemoteOrigin = oldPull, oldBranch, oldEmpty, oldOrigin
+	})
+	gitCurrentBranch = func(context.Context, string) (string, error) { return "main", nil }
+	gitIsEmpty = func(context.Context, string) bool { return false }
+	var got git.CredentialFunc
+	gitPull = func(_ context.Context, _ string, opts git.PullOptions) error {
+		got = opts.Credential
+		return nil
+	}
+	want := func() (string, *git.PushCredential) { return "https://gitlab.com/", nil }
+	repo := github.Repo{Name: "r", DefaultBranch: "main"}
+	res := syncExistingClone(context.Background(), RepoResult{}, repo, t.TempDir(), false,
+		git.CloneOptions{Credential: want}, SyncOptions{})
+	if res.Action != "SYNC" {
+		t.Fatalf("Action = %s (%s), want SYNC", res.Action, res.Message)
+	}
+	if got == nil {
+		t.Fatal("the pull was not given the clone credential")
+	}
+	if origin, _ := got(); origin != "https://gitlab.com/" {
+		t.Errorf("pull credential origin = %q", origin)
 	}
 }
 
