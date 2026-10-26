@@ -127,12 +127,12 @@ func TestExecCommandAdditionalBranches(t *testing.T) {
 	}
 
 	findRepos = func(string) ([]localRepoInfo, error) { return []localRepoInfo{{Path: "/repo"}}, nil }
-	execBatch = func(context.Context, []string, string, int) ExecSummary { return ExecSummary{Failed: 1} }
+	execBatch = func(context.Context, []string, execOptions) ExecSummary { return ExecSummary{Failed: 1} }
 	execCmd.Run(execCmd, []string{"echo", "joined"})
 	if exitCode != 1 {
 		t.Fatalf("batch failure exit = %d", exitCode)
 	}
-	execBatch = func(context.Context, []string, string, int) ExecSummary { return ExecSummary{Canceled: true} }
+	execBatch = func(context.Context, []string, execOptions) ExecSummary { return ExecSummary{Canceled: true} }
 	execCmd.Run(execCmd, []string{"echo"})
 }
 
@@ -255,7 +255,7 @@ func TestRunExecCommandsSuccess(t *testing.T) {
 	}
 
 	out := captureStdout(t, func() {
-		runExecCommands(context.Background(), []string{a, b}, "echo hello", 2)
+		runExecCommands(context.Background(), []string{a, b}, execOptions{Command: "echo hello", Concurrency: 2})
 	})
 
 	for _, name := range []string{"alpha", "beta"} {
@@ -281,7 +281,7 @@ func TestRunExecCommandsReportsFailure(t *testing.T) {
 	}
 
 	out := captureStdout(t, func() {
-		runExecCommands(context.Background(), []string{repo}, "exit 7", 1)
+		runExecCommands(context.Background(), []string{repo}, execOptions{Command: "exit 7", Concurrency: 1})
 	})
 
 	if !strings.Contains(out, "Command failed") {
@@ -308,7 +308,7 @@ func TestRunExecCommandsHonoursContextCancellation(t *testing.T) {
 
 	done := make(chan struct{})
 	go func() {
-		runExecCommands(ctx, paths, "sleep 5", 2)
+		runExecCommands(ctx, paths, execOptions{Command: "sleep 5", Concurrency: 2})
 		close(done)
 	}()
 
@@ -325,7 +325,7 @@ func TestRunExecCommandsHonoursContextCancellation(t *testing.T) {
 func TestRunExecCommandsEmpty(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
-		runExecCommands(context.Background(), nil, "echo x", 1)
+		runExecCommands(context.Background(), nil, execOptions{Command: "echo x", Concurrency: 1})
 		close(done)
 	}()
 	select {
@@ -428,7 +428,7 @@ func TestRunExecCommandsIgnoresUserShell(t *testing.T) {
 	t.Setenv("COMSPEC", "")
 	var summary ExecSummary
 	out := captureStdout(t, func() {
-		summary = runExecCommands(context.Background(), []string{t.TempDir()}, "test 1 = 1 && echo posix", 1)
+		summary = runExecCommands(context.Background(), []string{t.TempDir()}, execOptions{Command: "test 1 = 1 && echo posix", Concurrency: 1})
 	})
 	if summary.Failed != 0 || !strings.Contains(out, "posix") {
 		t.Fatalf("exec used $SHELL instead of /bin/sh: %+v %q", summary, out)

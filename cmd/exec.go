@@ -80,7 +80,7 @@ the command: corralctl exec "fish -c 'string upper (basename $PWD)'".`,
 		}
 
 		// Run commands concurrently
-		summary := execBatch(cmdContext(cmd), filtered, commandStr, execConcurrency)
+		summary := execBatch(cmdContext(cmd), filtered, execOptions{Command: commandStr, Concurrency: execConcurrency})
 		if summary.Failed > 0 || summary.Canceled {
 			osExit(1)
 		}
@@ -225,7 +225,25 @@ func execShell() (shell, flag string) {
 	return "cmd.exe", "/C"
 }
 
-func runExecCommands(ctx context.Context, repoPaths []string, commandStr string, concurrency int) ExecSummary {
+// execOptions describes one exec run.
+type execOptions struct {
+	// Command is the command line handed to the platform shell.
+	Command string
+	// Concurrency is the number of repositories worked at once.
+	Concurrency int
+}
+
+// execResult is the outcome of the command in one repository.
+type execResult struct {
+	// Repo labels the repository in the output.
+	Repo string
+	// Output is the command's combined stdout and stderr, capped.
+	Output string
+	// Err is why the command failed; nil on success.
+	Err error
+}
+
+func runExecCommands(ctx context.Context, repoPaths []string, opts execOptions) ExecSummary {
 	jobs := make(chan string, len(repoPaths))
 	for _, p := range repoPaths {
 		jobs <- p
@@ -233,55 +251,70 @@ func runExecCommands(ctx context.Context, repoPaths []string, commandStr string,
 	close(jobs)
 
 	var wg sync.WaitGroup
-	var outMu sync.Mutex
+	var mu sync.Mutex
 	summary := ExecSummary{Total: len(repoPaths)}
-	var summaryMu sync.Mutex
-
-	for i := 0; i < concurrency; i++ {
+	report := func(r execResult) {
+		mu.Lock()
+		defer mu.Unlock()
+		printExecText(r)
+		if r.Err != nil {
+			summary.Failed++
+		}
+	}
+	for i := 0; i < opts.Concurrency; i++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			for {
-				select {
-				case <-ctx.Done():
-					return
-				case path, ok := <-jobs:
-					if !ok {
-						return
-					}
-					repoName := filepath.Base(path)
-
-					shell, shellFlag := execShell()
-
-					// #nosec G204,G702 -- exec intentionally runs the user-supplied command through the platform shell.
-					cmd := exec.CommandContext(ctx, shell, shellFlag, commandStr)
-					cmd.Dir = path
-					cmd.Env = os.Environ()
-
-					out := &cappedBuffer{limit: maxExecOutputBytes}
-					cmd.Stdout = out
-					cmd.Stderr = out
-					err := cmd.Run()
-
-					outMu.Lock()
-					fmt.Printf("\n--- [%s] ---\n", repoName)
-					if rendered := out.String(); rendered != "" {
-						fmt.Print(rendered)
-					}
-					if err != nil {
-						fmt.Printf("Command failed: %v\n", err)
-						summaryMu.Lock()
-						summary.Failed++
-						summaryMu.Unlock()
-					}
-					outMu.Unlock()
-				}
-			}
+			execWorker(ctx, jobs, opts, report)
 		}()
 	}
 	wg.Wait()
 	summary.Canceled = ctx.Err() != nil
 	return summary
+}
+
+// execWorker runs the command in each repository it takes from jobs
+// until jobs is drained or ctx is done.
+func execWorker(ctx context.Context, jobs <-chan string, opts execOptions, report func(execResult)) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case path, ok := <-jobs:
+			if !ok {
+				return
+			}
+			report(runExecOne(ctx, path, opts))
+		}
+	}
+}
+
+// runExecOne runs the command in one repository.
+func runExecOne(ctx context.Context, path string, opts execOptions) execResult {
+	shell, shellFlag := execShell()
+
+	// #nosec G204,G702 -- exec intentionally runs the user-supplied command through the platform shell.
+	cmd := exec.CommandContext(ctx, shell, shellFlag, opts.Command)
+	cmd.Dir = path
+	cmd.Env = os.Environ()
+
+	out := &cappedBuffer{limit: maxExecOutputBytes}
+	cmd.Stdout = out
+	cmd.Stderr = out
+	err := cmd.Run()
+	return execResult{Repo: filepath.Base(path), Output: out.String(), Err: err}
+}
+
+// printExecText writes one result in the text format: a header naming
+// the repository, the captured output, and the failure if there was one.
+func printExecText(r execResult) {
+	fmt.Printf("\n--- [%s] ---\n", r.Repo)
+	if r.Output != "" {
+		fmt.Print(r.Output)
+	}
+	if r.Err != nil {
+		fmt.Printf("Command failed: %v\n", r.Err)
+	}
 }
 
 func init() {
