@@ -56,7 +56,7 @@ func EnsureRemote(ctx context.Context, targetDir, name, url string) error {
 		if strings.TrimSpace(current) == url {
 			return nil
 		}
-		return runMirror(ctx, targetDir, nil, "remote", "set-url", "--", name, url)
+		return runMirror(ctx, targetDir, nil, "remote set-url "+name, "remote", "set-url", "--", name, url)
 	}
 	// `git config --get` exits 1 when the key is absent. Anything else is
 	// a real failure and must not be papered over with `remote add`.
@@ -64,7 +64,7 @@ func EnsureRemote(ctx context.Context, targetDir, name, url string) error {
 	if !errors.As(err, &exitErr) || exitErr.ExitCode() != 1 {
 		return err
 	}
-	return runMirror(ctx, targetDir, nil, "remote", "add", "--", name, url)
+	return runMirror(ctx, targetDir, nil, "remote add "+name, "remote", "add", "--", name, url)
 }
 
 // PushMirror brings the named remote's branches and tags to parity with
@@ -86,7 +86,7 @@ func PushMirror(ctx context.Context, targetDir, remote, pushURL string, cred *Pu
 		return err
 	}
 	args := append([]string{"push", "--prune", "--no-verify", remote}, mirrorRefspecs...)
-	return runMirror(ctx, targetDir, env, args...)
+	return runMirror(ctx, targetDir, env, "push to "+remote, args...)
 }
 
 // PushBranch pushes a branch to remote and configures upstream tracking.
@@ -103,7 +103,7 @@ func PushBranch(ctx context.Context, targetDir, remote, branch, pushURL string, 
 		return err
 	}
 	args := []string{"push", "-u", "--no-verify", "--", remote, branch}
-	return runMirror(ctx, targetDir, env, args...)
+	return runMirror(ctx, targetDir, env, "push to "+remote, args...)
 }
 
 // PushRef pushes one local branch to the branch of the same name on
@@ -122,7 +122,7 @@ func PushRef(ctx context.Context, targetDir, remote, branch, pushURL string, cre
 		return err
 	}
 	ref := "refs/heads/" + branch
-	return runMirror(ctx, targetDir, env, "push", "--no-verify", "--", remote, ref+":"+ref)
+	return runMirror(ctx, targetDir, env, "push to "+remote, "push", "--no-verify", "--", remote, ref+":"+ref)
 }
 
 // validatePushBranch refuses a branch name git would read as an option.
@@ -166,18 +166,24 @@ func validateRemoteName(name string) error {
 }
 
 // runMirror runs one git command in targetDir with the non-interactive
-// environment plus extra, and reports failure with the command's stderr.
+// environment plus extra, and reports failure as what (the subcommand and
+// remote name) with the command's stderr.
+//
+// The message names the operation, never the argv: the argv of
+// `remote add` and `remote set-url` carries the URL, and an error reaches
+// terminal output, JSON results and the MCP audit log. Pull stopped
+// echoing its argv for the same reason.
 //
 // It deliberately does not go through withGitEnv: that attaches the
 // GitHub token to every invocation, and a push to another forge should
 // carry exactly one credential, the one meant for it.
-func runMirror(ctx context.Context, targetDir string, extra []configPair, args ...string) error {
+func runMirror(ctx context.Context, targetDir string, extra []configPair, what string, args ...string) error {
 	fullArgs := append(hardened("-C", targetDir), args...)
 	cmd := exec.CommandContext(ctx, gitBinary, fullArgs...) // #nosec G204 -- fixed git binary and structured arguments
 	cmd.Env = withConfig(childEnv(), extra...)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		return fmt.Errorf("git %s: %w: %s", strings.Join(args, " "), err, strings.TrimSpace(string(out)))
+		return fmt.Errorf("git %s failed: %w: %s", what, err, strings.TrimSpace(string(out)))
 	}
 	return nil
 }

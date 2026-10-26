@@ -42,6 +42,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   no upstream. Push the local commits, or finish the operation, then sync.
   This is a behaviour change: those clones used to be rebased.
 
+- **Mirror errors no longer print the git command line.** A failing
+  `remote add` or `remote set-url` reported its full argv, URL included, in
+  terminal output and `--output json` results. The message now names the
+  subcommand and remote (`git remote add gitlab failed: ...`), as `git pull`
+  errors already did.
+
 - **A credential no longer replaces your own `GIT_CONFIG_*` settings.**
   Attaching the GitHub token or a mirror's push credential wrote
   `GIT_CONFIG_COUNT=1` and `GIT_CONFIG_KEY_0`, which overwrote config a user

@@ -57,7 +57,7 @@ func TestChildEnvIgnoresRepositoryRedirects(t *testing.T) {
 	if origin, err := RemoteOrigin(ctx, target); err != nil || !strings.Contains(origin, "target.git") {
 		t.Errorf("RemoteOrigin = %q, %v; want the target's origin", origin, err)
 	}
-	if err := runMirror(ctx, target, nil, "config", "corral.probe", "1"); err != nil {
+	if err := runMirror(ctx, target, nil, "config", "config", "corral.probe", "1"); err != nil {
 		t.Fatal(err)
 	}
 	cfg, err := os.ReadFile(filepath.Join(target, ".git", "config"))
@@ -95,10 +95,10 @@ func TestCorralConfigAppendsToTheUsersEnvConfig(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := runMirror(ctx, repo, cred, "config", "--get", "corral.user"); err != nil {
+	if err := runMirror(ctx, repo, cred, "config", "config", "--get", "corral.user"); err != nil {
 		t.Errorf("user's env config lost under a push credential: %v", err)
 	}
-	if err := runMirror(ctx, repo, cred, "config", "--get", "http.https://forge.example/.extraheader"); err != nil {
+	if err := runMirror(ctx, repo, cred, "config", "config", "--get", "http.https://forge.example/.extraheader"); err != nil {
 		t.Errorf("push credential header is missing: %v", err)
 	}
 }
