@@ -213,7 +213,7 @@ func parseDestination(raw string) (destinationSpec, error) {
 func buildDestinations(ctx context.Context, specs []destinationSpec) ([]mirror.Destination, error) {
 	out := make([]mirror.Destination, 0, len(specs))
 	for _, s := range specs {
-		token := syncToken(ctx, s.name, github.AuthMode(authMode))
+		token := syncToken(ctx, s.name, github.AuthMode(authMode), s.baseURL)
 		if token == "" {
 			return nil, fmt.Errorf("no credential for %s: set %s", s.name, tokenHint(s.name))
 		}

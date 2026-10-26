@@ -8,6 +8,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`sync` and `adopt` use the Enterprise Server's own token.**
+  `corralctl sync --to github:<owner>@<url>` and `corralctl adopt --forge
+  github --forge-url <url>` resolved the github.com credential
+  (`GITHUB_TOKEN`, `GH_TOKEN` or `gh auth token`) for a GitHub Enterprise
+  Server destination. The token is now resolved for that host
+  (`GH_ENTERPRISE_TOKEN`, `GITHUB_ENTERPRISE_TOKEN`, then
+  `gh auth token --hostname <host>`).
+
 - **`--forge github --forge-url` lists from GitHub Enterprise Server.**
   The GitHub adapter dropped the forge URL, so
   `corralctl acme --forge github --forge-url https://ghe.corp` listed and

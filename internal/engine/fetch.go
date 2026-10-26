@@ -212,9 +212,13 @@ var forgeToken = func(ctx context.Context, name string, mode github.AuthMode) st
 // destination forge, through the same ladder `corralctl clone` uses to
 // list from one: GitHub through its own client, every other forge from
 // the environment variable its own tooling names.
-func ForgeToken(ctx context.Context, name string, mode github.AuthMode) string {
+//
+// baseURL is the instance the token will be presented to. For GitHub it
+// selects github.com's credential or an Enterprise Server's own, so a
+// github.com token never reaches another host.
+func ForgeToken(ctx context.Context, name string, mode github.AuthMode, baseURL string) string {
 	if name == "github" {
-		return github.Token(ctx, mode)
+		return github.TokenFor(ctx, mode, baseURL)
 	}
 	return forgeToken(ctx, name, mode)
 }

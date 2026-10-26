@@ -153,7 +153,7 @@ func processAdoption(ctx context.Context, candidates []discover.Candidate) error
 		}
 		targetForge = tf
 
-		tok := adoptForgeToken(ctx, f.Name(), github.AuthModeAuto)
+		tok := adoptForgeToken(ctx, f.Name(), github.AuthModeAuto, adoptForgeURL)
 		if tok == "" && !dryRun {
 			return fmt.Errorf("no authentication token found for forge %s", f.Name())
 		}

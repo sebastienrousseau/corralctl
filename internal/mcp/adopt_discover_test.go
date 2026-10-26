@@ -159,7 +159,7 @@ func TestAdoptRepoTool(t *testing.T) {
 	adoptForgeAsTarget = func(f forge.Forge) (forge.Target, bool) {
 		return &dummyMCPTarget{}, true
 	}
-	adoptForgeToken = func(ctx context.Context, name string, mode github.AuthMode) string {
+	adoptForgeToken = func(ctx context.Context, name string, mode github.AuthMode, _ string) string {
 		return "token"
 	}
 	adoptExecFunc = func(ctx context.Context, opts engine.AdoptOptions) (engine.AdoptResult, error) {
