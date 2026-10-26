@@ -11,6 +11,7 @@ import (
 	"io"
 	"io/fs"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -711,5 +712,21 @@ func TestExecVisibilityReachesEveryCollection(t *testing.T) {
 	err = execCmd.PreRunE(execCmd, nil)
 	if err == nil || !strings.Contains(err.Error(), "all, public, private, work, forks") {
 		t.Fatalf("unknown visibility error = %v", err)
+	}
+}
+
+// TestExecExitStatus pins each branch of execExitStatus without relying on
+// how a timed-out process happens to report its end: a command that never
+// started (or was killed before reporting a status) gives -1.
+func TestExecExitStatus(t *testing.T) {
+	if code, msg := execExitStatus(nil); code != 0 || msg != "" {
+		t.Errorf("nil error = %d %q, want 0 \"\"", code, msg)
+	}
+	if code, msg := execExitStatus(errors.New("never started")); code != -1 || msg != "never started" {
+		t.Errorf("start failure = %d %q, want -1 \"never started\"", code, msg)
+	}
+	err := exec.Command("sh", "-c", "exit 3").Run() // #nosec G204 -- fixed test command
+	if code, _ := execExitStatus(err); code != 3 {
+		t.Errorf("exit 3 = %d, want 3", code)
 	}
 }
