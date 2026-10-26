@@ -235,11 +235,8 @@ func repoNameFromURL(url string) string {
 	return url
 }
 
-func findOrphans(owner, baseDir string, repos []github.Repo) []string {
-	return findOrphansOn(owner, baseDir, repos, fetchForgeName, fetchForgeURL)
-}
-
-// findOrphansOn is findOrphans with the forge named explicitly.
+// findOrphansOn lists the clones under baseDir that belong to owner on the
+// named forge and are absent from repos.
 //
 // The host is derived rather than assumed. It used to be the literal
 // "github.com", which silently made orphan detection a no-op for every
@@ -303,10 +300,6 @@ func emitOrphans(owner string, orphans []string) {
 	}
 }
 
-func detectOrphans(owner, baseDir string, repos []github.Repo) {
-	emitOrphans(owner, findOrphans(owner, baseDir, repos))
-}
-
 // emitOrphanReport finds and reports local clones that no longer exist
 // upstream, returning the paths so the aggregate JSON document can carry
 // them. Orphan detection is skipped on cancellation: the local tree may be
@@ -315,7 +308,7 @@ func emitOrphanReport(opts RunOptions, repos []github.Repo, outcome *runOutcome,
 	if !opts.Orphans || outcome.summary.Canceled {
 		return nil
 	}
-	orphanPaths := findOrphans(opts.Owner, opts.BaseDir, repos)
+	orphanPaths := findOrphansOn(opts.Owner, opts.BaseDir, repos, opts.Forge, opts.ForgeURL)
 	switch opts.Output {
 	case OutputText:
 		emitOrphans(opts.Owner, orphanPaths)

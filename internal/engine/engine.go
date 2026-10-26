@@ -246,11 +246,9 @@ func RunE(ctx context.Context, opts RunOptions) error {
 	if err := opts.normalize(); err != nil {
 		return err
 	}
-	forgeName, err := resolveRunForge(opts)
-	if err != nil {
+	if err := checkRunForge(opts); err != nil {
 		return err
 	}
-	fetchForgeName, fetchForgeURL = forgeName, opts.ForgeURL
 	installTokenProvider(ctx, opts)
 
 	isTTY := isTerminal(os.Stdout.Fd())
@@ -281,25 +279,27 @@ func RunE(ctx context.Context, opts RunOptions) error {
 	return finishRun(ctx, opts, repos, isTTY, encoder, &outcome)
 }
 
-// resolveRunForge validates the forge selection and returns its name.
-// Validated here rather than at the fetch, so `--forge gitub` fails
+// checkRunForge validates the forge selection. The selection itself
+// travels with opts to every reader (the listing and orphan detection),
+// never through package state, so concurrent runs cannot see each
+// other's forge. Validated here rather than at the fetch, so `--forge gitub` fails
 // immediately instead of after a workspace scan.
-func resolveRunForge(opts RunOptions) (string, error) {
+func checkRunForge(opts RunOptions) error {
 	f, err := forge.Resolve(opts.Forge, opts.ForgeURL)
 	if err != nil {
-		return "", err
+		return err
 	}
 	// Search selectors are a GitHub API feature. Passed to any other forge
 	// they are read as an owner name, and the 404 that follows blames the
 	// owner — sending somebody to look for a typo that is not there.
 	if isSearchOwner(opts.Owner) && f.Name() != "github" {
-		return "", fmt.Errorf(
+		return fmt.Errorf(
 			"%s does not support %q: topic: and language: are GitHub search queries, "+
 				"and %s lists repositories by owner\n"+
 				"Name an owner instead, or drop --forge to search GitHub",
 			f.Name(), opts.Owner, f.Name())
 	}
-	return f.Name(), nil
+	return nil
 }
 
 // finishRun reports a completed worker phase: it marks and announces a

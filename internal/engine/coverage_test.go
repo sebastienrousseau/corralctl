@@ -217,7 +217,7 @@ func TestRunInteractiveFetchClosureAndTTY(t *testing.T) {
 	t.Cleanup(func() {
 		runSelector, fetchRepos, isTerminal, osExit, runProgram = oldSelector, oldFetch, oldTTY, oldExit, oldProgram
 	})
-	fetchRepos = func(context.Context, string, github.FetchOptions) ([]github.Repo, error) {
+	fetchRepos = func(context.Context, string, github.FetchOptions, string, string) ([]github.Repo, error) {
 		return []github.Repo{{Name: "repo", Visibility: "Public", Language: "Go"}}, nil
 	}
 	runSelector = func(ctx context.Context, owner string, opts github.FetchOptions, fetch tui.FetchFunc) ([]github.Repo, bool, error) {
@@ -238,7 +238,9 @@ func TestRunLayoutFailureResults(t *testing.T) {
 	isTerminal = func(uintptr) bool { return false }
 	exitCode := 0
 	osExit = func(code int) { exitCode = code }
-	fetchRepos = func(context.Context, string, github.FetchOptions) ([]github.Repo, error) { return nil, nil }
+	fetchRepos = func(context.Context, string, github.FetchOptions, string, string) ([]github.Repo, error) {
+		return nil, nil
+	}
 	opts := defaultRunOptions(t.TempDir())
 	opts.Layout = "{{"
 	Run(context.Background(), opts)
@@ -247,7 +249,7 @@ func TestRunLayoutFailureResults(t *testing.T) {
 	}
 
 	exitCode = 0
-	fetchRepos = func(context.Context, string, github.FetchOptions) ([]github.Repo, error) {
+	fetchRepos = func(context.Context, string, github.FetchOptions, string, string) ([]github.Repo, error) {
 		return []github.Repo{{Name: "not-a-function"}}, nil
 	}
 	opts.Layout = "{{call .Name}}"
@@ -260,7 +262,9 @@ func TestRunLayoutFailureResults(t *testing.T) {
 func TestNDJSONOrphanAndCancellationEncodeFailures(t *testing.T) {
 	oldFetch, oldExit, oldTTY := fetchRepos, osExit, isTerminal
 	t.Cleanup(func() { fetchRepos, osExit, isTerminal = oldFetch, oldExit, oldTTY })
-	fetchRepos = func(context.Context, string, github.FetchOptions) ([]github.Repo, error) { return nil, nil }
+	fetchRepos = func(context.Context, string, github.FetchOptions, string, string) ([]github.Repo, error) {
+		return nil, nil
+	}
 	isTerminal = func(uintptr) bool { return false }
 	osExit = func(int) {}
 	base := t.TempDir()

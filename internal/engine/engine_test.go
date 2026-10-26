@@ -37,7 +37,7 @@ func defaultRunOptions(baseDir string) RunOptions {
 func TestEngineRunError(t *testing.T) {
 	oldFetchRepos := fetchRepos
 	defer func() { fetchRepos = oldFetchRepos }()
-	fetchRepos = func(ctx context.Context, owner string, opts github.FetchOptions) ([]github.Repo, error) {
+	fetchRepos = func(ctx context.Context, owner string, opts github.FetchOptions, _, _ string) ([]github.Repo, error) {
 		return nil, fmt.Errorf("mock error")
 	}
 
@@ -83,7 +83,7 @@ func TestEngineRunHeadlessErrors(t *testing.T) {
 
 	oldFetchRepos := fetchRepos
 	defer func() { fetchRepos = oldFetchRepos }()
-	fetchRepos = func(ctx context.Context, owner string, opts github.FetchOptions) ([]github.Repo, error) {
+	fetchRepos = func(ctx context.Context, owner string, opts github.FetchOptions, _, _ string) ([]github.Repo, error) {
 		return []github.Repo{
 			{Name: "repo_error", Language: "Go", Visibility: "Public", DefaultBranch: "main"},
 			{Name: "repo_skip", Language: "Go", Visibility: "Public", DefaultBranch: "main"},
@@ -120,7 +120,7 @@ func TestEngineRunHeadlessErrors(t *testing.T) {
 func TestEngineRunSuccess(t *testing.T) {
 	oldFetchRepos := fetchRepos
 	defer func() { fetchRepos = oldFetchRepos }()
-	fetchRepos = func(ctx context.Context, owner string, opts github.FetchOptions) ([]github.Repo, error) {
+	fetchRepos = func(ctx context.Context, owner string, opts github.FetchOptions, _, _ string) ([]github.Repo, error) {
 		return []github.Repo{
 			{Name: "repo1", Language: "Go", Visibility: "Public", DefaultBranch: "main"},
 			{Name: "repo2", Language: "Go", Visibility: "Public", DefaultBranch: "main"},
@@ -287,7 +287,7 @@ func TestProcessRepoFull(t *testing.T) {
 		t.Errorf("Expected DRY-RUN for ssh fallback, got %v", msg)
 	}
 
-	detectOrphans("owner", baseDir, []github.Repo{{Name: "other"}})
+	emitOrphans("owner", findOrphansOn("owner", baseDir, []github.Repo{{Name: "other"}}, "", ""))
 }
 
 func TestProcessRepoCanceled(t *testing.T) {
@@ -313,7 +313,7 @@ func TestProcessRepoCanceled(t *testing.T) {
 }
 
 func TestDetectOrphansError(t *testing.T) {
-	detectOrphans("owner", "/invalid_dir_that_does_not_exist", []github.Repo{})
+	emitOrphans("owner", findOrphansOn("owner", "/invalid_dir_that_does_not_exist", []github.Repo{}, "", ""))
 
 	baseDir, _ := os.MkdirTemp("", "engine_test")
 	defer func() { _ = os.RemoveAll(baseDir) }()
@@ -326,24 +326,24 @@ func TestDetectOrphansError(t *testing.T) {
 		return "", fmt.Errorf("err")
 	}
 
-	detectOrphans("owner", baseDir, []github.Repo{})
+	emitOrphans("owner", findOrphansOn("owner", baseDir, []github.Repo{}, "", ""))
 
 	gitRemoteOrigin = func(targetDir string) (string, error) {
 		return "https://github.com/someone_else/repo.git", nil
 	}
-	detectOrphans("owner", baseDir, []github.Repo{})
+	emitOrphans("owner", findOrphansOn("owner", baseDir, []github.Repo{}, "", ""))
 
 	gitRemoteOrigin = func(targetDir string) (string, error) {
 		return "git@github.com:owner/repo.git", nil
 	}
-	detectOrphans("owner", baseDir, []github.Repo{})
+	emitOrphans("owner", findOrphansOn("owner", baseDir, []github.Repo{}, "", ""))
 
 	// The local directory name ("repo1") is unknown, but the remote URL resolves
 	// to a known repository, so it must NOT be flagged as an orphan.
 	gitRemoteOrigin = func(targetDir string) (string, error) {
 		return "https://github.com/owner/actualname.git", nil
 	}
-	detectOrphans("owner", baseDir, []github.Repo{{Name: "actualname"}})
+	emitOrphans("owner", findOrphansOn("owner", baseDir, []github.Repo{{Name: "actualname"}}, "", ""))
 }
 
 func TestCleanupEmptyFoldersError(t *testing.T) {
@@ -397,7 +397,7 @@ func TestRunReportsDuplicateCloneLocations(t *testing.T) {
 
 	oldFetch, oldExit := fetchRepos, osExit
 	t.Cleanup(func() { fetchRepos, osExit = oldFetch, oldExit })
-	fetchRepos = func(context.Context, string, github.FetchOptions) ([]github.Repo, error) {
+	fetchRepos = func(context.Context, string, github.FetchOptions, string, string) ([]github.Repo, error) {
 		return []github.Repo{{Name: "repo", Owner: "owner", FullName: "owner/repo", Language: "Go", Visibility: "Public"}}, nil
 	}
 	exitCode := 0
@@ -528,7 +528,7 @@ func TestEnsureAppleCollections(t *testing.T) {
 func TestRunReportsCollectionCreationFailure(t *testing.T) {
 	oldFetch, oldMkdir, oldExit := fetchRepos, mkdirAll, osExit
 	t.Cleanup(func() { fetchRepos, mkdirAll, osExit = oldFetch, oldMkdir, oldExit })
-	fetchRepos = func(context.Context, string, github.FetchOptions) ([]github.Repo, error) {
+	fetchRepos = func(context.Context, string, github.FetchOptions, string, string) ([]github.Repo, error) {
 		return nil, nil
 	}
 	mkdirAll = func(string, os.FileMode) error { return errors.New("collections") }
@@ -553,7 +553,7 @@ func TestRunDryRunDoesNotMigrateLayout(t *testing.T) {
 
 	oldFetch := fetchRepos
 	t.Cleanup(func() { fetchRepos = oldFetch })
-	fetchRepos = func(context.Context, string, github.FetchOptions) ([]github.Repo, error) {
+	fetchRepos = func(context.Context, string, github.FetchOptions, string, string) ([]github.Repo, error) {
 		return []github.Repo{{Name: "repo", Owner: "owner", FullName: "owner/repo", Language: "Go", Visibility: "Public"}}, nil
 	}
 	opts := defaultRunOptions(base)
@@ -668,7 +668,7 @@ func TestEngineRunValidation(t *testing.T) {
 func TestEngineRunNilContextAndDefaultOutput(t *testing.T) {
 	oldFetchRepos := fetchRepos
 	defer func() { fetchRepos = oldFetchRepos }()
-	fetchRepos = func(ctx context.Context, owner string, opts github.FetchOptions) ([]github.Repo, error) {
+	fetchRepos = func(ctx context.Context, owner string, opts github.FetchOptions, _, _ string) ([]github.Repo, error) {
 		return []github.Repo{}, nil
 	}
 
@@ -704,7 +704,7 @@ func TestEngineRunJSON(t *testing.T) {
 		gitCurrentBranch = oldGitCurrentBranch
 	}()
 
-	fetchRepos = func(ctx context.Context, owner string, opts github.FetchOptions) ([]github.Repo, error) {
+	fetchRepos = func(ctx context.Context, owner string, opts github.FetchOptions, _, _ string) ([]github.Repo, error) {
 		return []github.Repo{
 			{Name: "repo_clone", Language: "Go", Visibility: "Public", DefaultBranch: "main"},
 			{Name: "repo_sync", Language: "Go", Visibility: "Public", DefaultBranch: "main"},
@@ -743,7 +743,7 @@ func TestEngineRunNDJSON(t *testing.T) {
 		gitClone = oldGitClone
 	}()
 
-	fetchRepos = func(ctx context.Context, owner string, opts github.FetchOptions) ([]github.Repo, error) {
+	fetchRepos = func(ctx context.Context, owner string, opts github.FetchOptions, _, _ string) ([]github.Repo, error) {
 		return []github.Repo{
 			{Name: "repo_a", Language: "Go", Visibility: "Public", DefaultBranch: "main"},
 		}, nil
@@ -774,7 +774,7 @@ func TestEngineRunLimitWarning(t *testing.T) {
 		gitClone = oldGitClone
 	}()
 
-	fetchRepos = func(ctx context.Context, owner string, opts github.FetchOptions) ([]github.Repo, error) {
+	fetchRepos = func(ctx context.Context, owner string, opts github.FetchOptions, _, _ string) ([]github.Repo, error) {
 		return []github.Repo{
 			{Name: "repo_a", Language: "Go", Visibility: "Public", DefaultBranch: "main"},
 		}, nil
@@ -822,7 +822,7 @@ func TestEngineRunCanceled(t *testing.T) {
 			DefaultBranch: "main",
 		})
 	}
-	fetchRepos = func(ctx context.Context, owner string, opts github.FetchOptions) ([]github.Repo, error) {
+	fetchRepos = func(ctx context.Context, owner string, opts github.FetchOptions, _, _ string) ([]github.Repo, error) {
 		return repos, nil
 	}
 	gitClone = func(ctx context.Context, url, targetDir string, opts git.CloneOptions) error { return nil }
@@ -870,7 +870,7 @@ func TestEngineRunCanceledJSON(t *testing.T) {
 		isTerminal = oldIsTerminal
 	}()
 
-	fetchRepos = func(ctx context.Context, owner string, opts github.FetchOptions) ([]github.Repo, error) {
+	fetchRepos = func(ctx context.Context, owner string, opts github.FetchOptions, _, _ string) ([]github.Repo, error) {
 		return []github.Repo{
 			{Name: "r1", Language: "Go", Visibility: "Public", DefaultBranch: "main"},
 		}, nil
@@ -924,7 +924,7 @@ func TestEngineRunCanceledNDJSON(t *testing.T) {
 		isTerminal = oldIsTerminal
 	}()
 
-	fetchRepos = func(ctx context.Context, owner string, opts github.FetchOptions) ([]github.Repo, error) {
+	fetchRepos = func(ctx context.Context, owner string, opts github.FetchOptions, _, _ string) ([]github.Repo, error) {
 		return []github.Repo{
 			{Name: "r1", Language: "Go", Visibility: "Public", DefaultBranch: "main"},
 		}, nil
@@ -974,7 +974,7 @@ func TestEngineRunCanceledTextSilentOnTTY(t *testing.T) {
 		runProgram = oldRunProgram
 	}()
 
-	fetchRepos = func(ctx context.Context, owner string, opts github.FetchOptions) ([]github.Repo, error) {
+	fetchRepos = func(ctx context.Context, owner string, opts github.FetchOptions, _, _ string) ([]github.Repo, error) {
 		return []github.Repo{
 			{Name: "r1", Language: "Go", Visibility: "Public", DefaultBranch: "main"},
 		}, nil
@@ -1021,7 +1021,7 @@ func TestEngineRunCanceledTextNoisyOnNonTTY(t *testing.T) {
 		log.SetOutput(oldLogOut)
 	}()
 
-	fetchRepos = func(ctx context.Context, owner string, opts github.FetchOptions) ([]github.Repo, error) {
+	fetchRepos = func(ctx context.Context, owner string, opts github.FetchOptions, _, _ string) ([]github.Repo, error) {
 		return []github.Repo{
 			{Name: "r1", Language: "Go", Visibility: "Public", DefaultBranch: "main"},
 		}, nil
@@ -1083,7 +1083,7 @@ func TestEngineRunJSONEncodeError(t *testing.T) {
 		fetchRepos = oldFetchRepos
 		gitClone = oldGitClone
 	}()
-	fetchRepos = func(ctx context.Context, owner string, opts github.FetchOptions) ([]github.Repo, error) {
+	fetchRepos = func(ctx context.Context, owner string, opts github.FetchOptions, _, _ string) ([]github.Repo, error) {
 		return []github.Repo{{Name: "repo_a", Language: "Go", Visibility: "Public", DefaultBranch: "main"}}, nil
 	}
 	gitClone = func(ctx context.Context, url, targetDir string, opts git.CloneOptions) error { return nil }
@@ -1129,7 +1129,7 @@ func TestEngineRunNDJSONEncodeError(t *testing.T) {
 		fetchRepos = oldFetchRepos
 		gitClone = oldGitClone
 	}()
-	fetchRepos = func(ctx context.Context, owner string, opts github.FetchOptions) ([]github.Repo, error) {
+	fetchRepos = func(ctx context.Context, owner string, opts github.FetchOptions, _, _ string) ([]github.Repo, error) {
 		return []github.Repo{{Name: "repo_a", Language: "Go", Visibility: "Public", DefaultBranch: "main"}}, nil
 	}
 	gitClone = func(ctx context.Context, url, targetDir string, opts git.CloneOptions) error { return nil }
@@ -1336,7 +1336,7 @@ func TestNormalizeLayoutDirCase(t *testing.T) {
 func TestRunWiresGitTokenProvider(t *testing.T) {
 	oldFetch := fetchRepos
 	defer func() { fetchRepos = oldFetch }()
-	fetchRepos = func(ctx context.Context, owner string, opts github.FetchOptions) ([]github.Repo, error) {
+	fetchRepos = func(ctx context.Context, owner string, opts github.FetchOptions, _, _ string) ([]github.Repo, error) {
 		return nil, nil
 	}
 	oldIsTerminal := isTerminal

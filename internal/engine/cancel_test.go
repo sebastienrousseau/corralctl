@@ -41,7 +41,7 @@ func TestQuitInProgressViewCancelsRun(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			oldFetch, oldClone, oldTTY, oldProgram := fetchRepos, gitClone, isTerminal, runProgram
 			t.Cleanup(func() { fetchRepos, gitClone, isTerminal, runProgram = oldFetch, oldClone, oldTTY, oldProgram })
-			fetchRepos = func(context.Context, string, github.FetchOptions) ([]github.Repo, error) {
+			fetchRepos = func(context.Context, string, github.FetchOptions, string, string) ([]github.Repo, error) {
 				return []github.Repo{{Name: "slow", Language: "Go", Visibility: "Public", DefaultBranch: "main"}}, nil
 			}
 			started := make(chan struct{})
@@ -82,7 +82,7 @@ func TestQuitInProgressViewCancelsRun(t *testing.T) {
 func TestProgressViewCompletionDoesNotCancel(t *testing.T) {
 	oldFetch, oldTTY, oldProgram := fetchRepos, isTerminal, runProgram
 	t.Cleanup(func() { fetchRepos, isTerminal, runProgram = oldFetch, oldTTY, oldProgram })
-	fetchRepos = func(context.Context, string, github.FetchOptions) ([]github.Repo, error) {
+	fetchRepos = func(context.Context, string, github.FetchOptions, string, string) ([]github.Repo, error) {
 		return []github.Repo{{Name: "r", Language: "Go", Visibility: "Public", DefaultBranch: "main"}}, nil
 	}
 	isTerminal = func(uintptr) bool { return true }

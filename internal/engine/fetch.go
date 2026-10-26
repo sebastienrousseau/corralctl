@@ -18,11 +18,11 @@ import (
 	"github.com/sebastienrousseau/corralctl/internal/tui"
 )
 
-var (
-	fetchRepos     = fetchFromForge
-	fetchForgeName string
-	fetchForgeURL  string
-)
+// fetchRepos is the seam the engine lists repositories through. The forge
+// is passed on every call, from the run's own options, rather than read
+// from package state: two runs in one process with different forges must
+// not see each other's selection.
+var fetchRepos = FetchRepos
 
 // installTokenProvider lets git authenticate HTTPS clones and pulls of
 // private repositories with the credential the run's forge listing uses:
@@ -65,7 +65,7 @@ func installTokenProvider(ctx context.Context, opts RunOptions) {
 func resolveRepos(ctx context.Context, opts RunOptions, isTTY bool) ([]github.Repo, bool, error) {
 	if !opts.Interactive {
 		announceFetch(opts, isTTY)
-		repos, err := fetchRepos(ctx, opts.Owner, opts.Fetch)
+		repos, err := fetchRepos(ctx, opts.Owner, opts.Fetch, opts.Forge, opts.ForgeURL)
 		if err != nil {
 			return nil, false, err
 		}
@@ -75,7 +75,7 @@ func resolveRepos(ctx context.Context, opts RunOptions, isTTY bool) ([]github.Re
 
 	tui.Version = opts.Version
 	repos, ok, err := runSelector(ctx, opts.Owner, opts.Fetch, func() ([]github.Repo, error) {
-		return fetchRepos(ctx, opts.Owner, opts.Fetch)
+		return fetchRepos(ctx, opts.Owner, opts.Fetch, opts.Forge, opts.ForgeURL)
 	})
 	if err != nil {
 		return nil, false, err
@@ -143,21 +143,6 @@ func warnOnLimit(opts RunOptions, fetched int) {
 	}
 }
 
-// fetchFromForge lists an owner's repositories from the selected hosting
-// service.
-//
-// The seam the engine calls, and the one place a forge.Repo becomes the
-// engine's own repository shape.
-//
-// That shape still lives in internal/github, which is now a misnomer: it
-// is the engine's type, and GitHub is one of five things that can produce
-// it. Renaming it across the engine, the TUI and the command layer is
-// churn with no behaviour attached, so it is left for a change that has a
-// reason of its own. The conversion below is where the seam actually is.
-func fetchFromForge(ctx context.Context, owner string, opts github.FetchOptions) ([]github.Repo, error) {
-	return FetchRepos(ctx, owner, opts, fetchForgeName, fetchForgeURL)
-}
-
 // FetchRepos lists an owner's repositories from the named forge.
 //
 // Exported because prune needs it. prune used to call the GitHub client
@@ -165,6 +150,14 @@ func fetchFromForge(ctx context.Context, owner string, opts github.FetchOptions)
 // compared Codeberg clones against a GitHub listing. Everything that
 // decides what is missing upstream has to come through one path, or the
 // flag lies.
+//
+// It is also the one place a forge.Repo becomes the engine's own
+// repository shape. That shape still lives in internal/github, which is
+// now a misnomer: it is the engine's type, and GitHub is one of five
+// things that can produce it. Renaming it across the engine, the TUI and
+// the command layer is churn with no behaviour attached, so it is left for
+// a change that has a reason of its own. The conversion below is where the
+// seam actually is.
 func FetchRepos(ctx context.Context, owner string, opts github.FetchOptions, forgeName, forgeURL string) ([]github.Repo, error) {
 	f, err := forge.Resolve(forgeName, forgeURL)
 	if err != nil {
