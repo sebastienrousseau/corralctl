@@ -6,7 +6,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.0.53] - 2026-10-26
 ### Security
 
 - **Dependabot no longer auto-merges Go module updates.** Patch and minor
@@ -14,119 +13,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   so a compromised upstream release would have reached `main` on its own.
   Auto-merge now covers only GitHub Actions and Docker digest updates; every
   Go module update waits for a person.
-
-### Added
-
-- **A complexity gate with a shrinking baseline.** `make complexity-check`,
-  part of `make check` and run in CI's Lint job, holds every function to
-  cyclomatic 10, cognitive 15, Halstead difficulty 30 and 60 lines of code,
-  and every file to 500 lines of code. The 282 existing offenders are
-  recorded in `scripts/complexity_baseline.tsv`; a new or worse one fails,
-  and so does an improvement the baseline has not recorded, so the backlog
-  can only shrink. gocyclo v0.6.0 and gocognit v1.3.0 are pinned in the
-  script.
-
-### Changed
-
-- **`internal/search`'s per-file search is split into helpers.** `searchFile`
-  was the worst offender in the package (cognitive 29, cyclomatic 19). It is
-  now within every ceiling, with table tests that pin its results for every
-  input shape it branches on. Search results are unchanged.
-
-- **The build-from-source prerequisites name the real toolchain floor.**
-  README and CONTRIBUTING said "Go 1.26+", which admits 1.26.0 to 1.26.9
-  and 1.27.0 to 1.27.2. Those releases carry GO-2026-6809 in
-  `crypto/x509`, reachable from the forge HTTPS client. The docs now point
-  at the `go` directive in `go.mod` and exclude 1.27.0 to 1.27.2, and
-  `docs/packaging.md` explains why a `toolchain` line cannot.
-
-- **`make staticcheck` and `make vuln-check` run pinned tool versions.**
-  They installed `staticcheck@latest` and `govulncheck@latest`, so a local
-  `make check` and CI could run different scanners against the same tree.
-  They now run staticcheck v0.8.2 and govulncheck v1.7.0 (the version CI
-  pins), set by `STATICCHECK_VERSION` and `GOVULNCHECK_VERSION`.
-### Changed
-
-- **The MCP server no longer advertises the `logging` capability.** It never
-  sent a log message; the capability was the Go SDK's default. Logging is
-  Deprecated in protocol `2026-07-28` (SEP-2577), and diagnostics stay on
-  stderr. `initialize` and `server/discover` now list `prompts`, `resources`
-  and `tools` only.
-- **The MCP server no longer links the terminal UI.** Adoption moved from
-  `internal/engine` to a new `internal/adopt` package and the forge token
-  resolver to `internal/forge`, so `internal/mcp` no longer depends on
-  `internal/engine`, `internal/tui` or the Bubble Tea stack. A test keeps
-  that boundary.
-
-### Documentation
-
-- **The documented minimum git is now 2.31,** in the README,
-  `DEVELOPMENT.md`, the Debian package README and the security model, which
-  disagreed (2.20 and 2.30). Credentials reach git through
-  `GIT_CONFIG_COUNT`, which git reads from 2.31.0 on; an older git ignores
-  it and runs the clone or push without the token.
-- **Claims the code contradicted are corrected.** The MCP help, README, docs
-  site and ADR-0007 said the HTTP transports have no authentication; they
-  have an optional bearer token (`--token`, `CORRAL_MCP_TOKEN`), and the
-  loopback guard still applies with one. The security model said corralctl
-  never pushes; `sync` and `adopt` create repositories and push, within the
-  bounds C6 and C7 state. The architecture document listed seven read and
-  three write MCP tools (there are eleven and seven), Go as the only
-  indexed language (there are ten extractors), and a dependency diagram
-  that omitted most packages; it now carries the `go list` import table.
-  The `mcp` help named five indexed languages, and `--enable-mutations` and
-  the server's instructions to agents named two of the six write tools it
-  unlocks.
-
-### Added
-
-- **Trace context from `_meta`.** A request that carries a W3C `traceparent`
-  in its `_meta`, as protocol `2026-07-28` specifies (SEP-414), is recorded
-  under that trace in `--trace-file`, on stdio as well as HTTP. Over HTTP a
-  valid `_meta` value takes precedence over the `traceparent` header.
-### Fixed
-
-- **Quitting the progress view stops the run.** Pressing `q` or `ctrl+c`
-  in the clone progress view closed the view and left the workers cloning
-  with no output, then exited 0. In raw mode `ctrl+c` reaches the view as
-  a key, not as SIGINT, so the signal handler never fired. Quitting the
-  view now cancels the run's context, which interrupts in-flight git
-  processes, and the run exits 130 as a cancelled run.
-
-### Changed
-
-- **Streamed runs no longer keep every result in memory.** The engine
-  appended each result to a slice for every output format, although only
-  `--output json` writes the aggregate. Text and NDJSON runs now keep the
-  summary counts only.
-### Fixed
-
-- **The MCP workspace watcher no longer exhausts file descriptors.** It
-  watched every directory under `--root`, `node_modules` and `target` trees
-  included, which on macOS held one descriptor per directory and per file: over
-  10,000 on a real workspace. Under a 256-descriptor limit the workspace scan
-  then could not open the root and `corral_search_code` answered "No match ...
-  across 0 repositories". The watcher now watches only the layout directories
-  and each clone's `.git` directory, stays within half the open-file limit,
-  reports a failed or skipped watch on stderr, and registers in the background
-  instead of before the stdio handshake. `--watch` stays on by default.
-- **A workspace scan that runs out of file descriptors is an error.** It used
-  to skip the directory it failed on, and with it every repository beneath,
-  and return what was left as a complete index.
-- **The watcher ignores events that cannot change the workspace index.**
-  Every event dropped the whole index and, while symbol tools were in use,
-  started a warm pass, including `git status` rewriting `.git/index`. Inside a
-  `.git` directory only `config`, `HEAD` and the corral state file now count,
-  permission-only changes are ignored, and a file in a clone's working tree
-  never counts.
-- **A warm pass started by the watcher is waited for on shutdown, and only
-  one warm pass runs at a time.** The watcher started its pass as an untracked
-  goroutine, so the HTTP server could release its memory-mapped search indexes
-  while that pass was still reading one, and the watcher and the periodic
-  warmer could scan the whole workspace at once. The watcher now waits for its
-  pass before reporting itself stopped, and a pass requested while another runs
-  returns at once.
-### Security
 
 - **Metrics labels come from fixed sets.** `mcp_requests_total` keyed its
   `endpoint` label on the raw decoded request path, and
@@ -171,18 +57,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   cross the network unencrypted, and the README and security model say a
   TLS-terminating proxy is required.
 
-### Added
-
-- **`--token-file`** reads the bearer token from a file, so it stays out of
-  the process list.
-
-### Deprecated
-
-- **`--token`** prints a warning: anything on the command line is visible
-  to every user on the machine through `ps`. Use `--token-file` or
-  `CORRAL_MCP_TOKEN`.
-### Security
-
 - **git no longer follows an inherited `GIT_DIR`.** Run from a git hook or
   alias, corralctl inherited `GIT_DIR`, `GIT_WORK_TREE`, `GIT_INDEX_FILE`
   and the other variables git exports there, and they outrank `-C`, so every
@@ -198,13 +72,128 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   overridden on every invocation, next to `core.hooksPath` and
   `protocol.ext.allow`.
 
+- **`sync` no longer creates a public destination on a directory name.**
+  Visibility was read from the path alone, so a repository made private
+  upstream but still filed under `Public/`, or a clone corral never made,
+  was created public on every destination. `corralctl clone` now records the
+  visibility the source forge reports in each clone's state sidecar, on
+  every pass including skipped pulls, and `sync` creates a destination
+  public only when that record says public and the directory agrees.
+  Anything else is private. Behaviour change: until `corralctl clone` has
+  run once for an owner, its clones mirror as private, and an existing
+  public destination is refused with a message that says how to clear it.
+  `--dry-run` now names the visibility each destination would get.
+
+- **`corral_sync_repo` makes the CLI's checks before it pulls.** The MCP
+  tool ran `git pull --rebase --autostash` on whatever branch was checked
+  out, so an agent could rebase a user's feature branch, and it took no lock,
+  so it could race `corral_delete_repo` on the same clone. It now refuses,
+  through the same engine functions `corralctl clone` uses, a clone with no
+  origin or whose origin changed since the index was read, one with no
+  commits, and one that is not on the branch `origin/HEAD` names (the server
+  never calls a forge API, so a clone without `origin/HEAD` is refused rather
+  than trusted). Every refusal is audited, and the pull holds the
+  per-repository lock deletion takes.
+
+### Added
+
+- **A complexity gate with a shrinking baseline.** `make complexity-check`,
+  part of `make check` and run in CI's Lint job, holds every function to
+  cyclomatic 10, cognitive 15, Halstead difficulty 30 and 60 lines of code,
+  and every file to 500 lines of code. The 282 existing offenders are
+  recorded in `scripts/complexity_baseline.tsv`; a new or worse one fails,
+  and so does an improvement the baseline has not recorded, so the backlog
+  can only shrink. gocyclo v0.6.0 and gocognit v1.3.0 are pinned in the
+  script.
+
+- **Trace context from `_meta`.** A request that carries a W3C `traceparent`
+  in its `_meta`, as protocol `2026-07-28` specifies (SEP-414), is recorded
+  under that trace in `--trace-file`, on stdio as well as HTTP. Over HTTP a
+  valid `_meta` value takes precedence over the `traceparent` header.
+
+- **`--token-file`** reads the bearer token from a file, so it stays out of
+  the process list.
+
 ### Changed
+
+- **`internal/search`'s per-file search is split into helpers.** `searchFile`
+  was the worst offender in the package (cognitive 29, cyclomatic 19). It is
+  now within every ceiling, with table tests that pin its results for every
+  input shape it branches on. Search results are unchanged.
+
+- **The build-from-source prerequisites name the real toolchain floor.**
+  README and CONTRIBUTING said "Go 1.26+", which admits 1.26.0 to 1.26.9
+  and 1.27.0 to 1.27.2. Those releases carry GO-2026-6809 in
+  `crypto/x509`, reachable from the forge HTTPS client. The docs now point
+  at the `go` directive in `go.mod` and exclude 1.27.0 to 1.27.2, and
+  `docs/packaging.md` explains why a `toolchain` line cannot.
+
+- **`make staticcheck` and `make vuln-check` run pinned tool versions.**
+  They installed `staticcheck@latest` and `govulncheck@latest`, so a local
+  `make check` and CI could run different scanners against the same tree.
+  They now run staticcheck v0.8.2 and govulncheck v1.7.0 (the version CI
+  pins), set by `STATICCHECK_VERSION` and `GOVULNCHECK_VERSION`.
+
+- **The MCP server no longer advertises the `logging` capability.** It never
+  sent a log message; the capability was the Go SDK's default. Logging is
+  Deprecated in protocol `2026-07-28` (SEP-2577), and diagnostics stay on
+  stderr. `initialize` and `server/discover` now list `prompts`, `resources`
+  and `tools` only.
+- **The MCP server no longer links the terminal UI.** Adoption moved from
+  `internal/engine` to a new `internal/adopt` package and the forge token
+  resolver to `internal/forge`, so `internal/mcp` no longer depends on
+  `internal/engine`, `internal/tui` or the Bubble Tea stack. A test keeps
+  that boundary.
+
+- **Streamed runs no longer keep every result in memory.** The engine
+  appended each result to a slice for every output format, although only
+  `--output json` writes the aggregate. Text and NDJSON runs now keep the
+  summary counts only.
 
 - **The documented minimum git is 2.31.** The README and DEVELOPMENT.md said
   2.30, the security model and the Debian notes 2.20, and credentials reach
   git through `GIT_CONFIG_COUNT`, which git 2.31 introduced.
 
+### Deprecated
+
+- **`--token`** prints a warning: anything on the command line is visible
+  to every user on the machine through `ps`. Use `--token-file` or
+  `CORRAL_MCP_TOKEN`.
+
 ### Fixed
+
+- **Quitting the progress view stops the run.** Pressing `q` or `ctrl+c`
+  in the clone progress view closed the view and left the workers cloning
+  with no output, then exited 0. In raw mode `ctrl+c` reaches the view as
+  a key, not as SIGINT, so the signal handler never fired. Quitting the
+  view now cancels the run's context, which interrupts in-flight git
+  processes, and the run exits 130 as a cancelled run.
+
+- **The MCP workspace watcher no longer exhausts file descriptors.** It
+  watched every directory under `--root`, `node_modules` and `target` trees
+  included, which on macOS held one descriptor per directory and per file: over
+  10,000 on a real workspace. Under a 256-descriptor limit the workspace scan
+  then could not open the root and `corral_search_code` answered "No match ...
+  across 0 repositories". The watcher now watches only the layout directories
+  and each clone's `.git` directory, stays within half the open-file limit,
+  reports a failed or skipped watch on stderr, and registers in the background
+  instead of before the stdio handshake. `--watch` stays on by default.
+- **A workspace scan that runs out of file descriptors is an error.** It used
+  to skip the directory it failed on, and with it every repository beneath,
+  and return what was left as a complete index.
+- **The watcher ignores events that cannot change the workspace index.**
+  Every event dropped the whole index and, while symbol tools were in use,
+  started a warm pass, including `git status` rewriting `.git/index`. Inside a
+  `.git` directory only `config`, `HEAD` and the corral state file now count,
+  permission-only changes are ignored, and a file in a clone's working tree
+  never counts.
+- **A warm pass started by the watcher is waited for on shutdown, and only
+  one warm pass runs at a time.** The watcher started its pass as an untracked
+  goroutine, so the HTTP server could release its memory-mapped search indexes
+  while that pass was still reading one, and the watcher and the periodic
+  warmer could scan the whole workspace at once. The watcher now waits for its
+  pass before reporting itself stopped, and a pass requested while another runs
+  returns at once.
 
 - **Sync refuses to pull over work in progress or local commits.** An
   unattended `git pull --rebase --autostash` ran whatever state a clone was
@@ -238,32 +227,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   passes through the environment, such as a proxy or `http.sslCAInfo`.
   corralctl's entries are now numbered after the user's and the count raised
   to cover both.
-### Security
-
-- **`sync` no longer creates a public destination on a directory name.**
-  Visibility was read from the path alone, so a repository made private
-  upstream but still filed under `Public/`, or a clone corral never made,
-  was created public on every destination. `corralctl clone` now records the
-  visibility the source forge reports in each clone's state sidecar, on
-  every pass including skipped pulls, and `sync` creates a destination
-  public only when that record says public and the directory agrees.
-  Anything else is private. Behaviour change: until `corralctl clone` has
-  run once for an owner, its clones mirror as private, and an existing
-  public destination is refused with a message that says how to clear it.
-  `--dry-run` now names the visibility each destination would get.
-
-- **`corral_sync_repo` makes the CLI's checks before it pulls.** The MCP
-  tool ran `git pull --rebase --autostash` on whatever branch was checked
-  out, so an agent could rebase a user's feature branch, and it took no lock,
-  so it could race `corral_delete_repo` on the same clone. It now refuses,
-  through the same engine functions `corralctl clone` uses, a clone with no
-  origin or whose origin changed since the index was read, one with no
-  commits, and one that is not on the branch `origin/HEAD` names (the server
-  never calls a forge API, so a clone without `origin/HEAD` is refused rather
-  than trusted). Every refusal is audited, and the pull holds the
-  per-repository lock deletion takes.
 
 ### Documentation
+
+- **The documented minimum git is now 2.31,** in the README,
+  `DEVELOPMENT.md`, the Debian package README and the security model, which
+  disagreed (2.20 and 2.30). Credentials reach git through
+  `GIT_CONFIG_COUNT`, which git reads from 2.31.0 on; an older git ignores
+  it and runs the clone or push without the token.
+- **Claims the code contradicted are corrected.** The MCP help, README, docs
+  site and ADR-0007 said the HTTP transports have no authentication; they
+  have an optional bearer token (`--token`, `CORRAL_MCP_TOKEN`), and the
+  loopback guard still applies with one. The security model said corralctl
+  never pushes; `sync` and `adopt` create repositories and push, within the
+  bounds C6 and C7 state. The architecture document listed seven read and
+  three write MCP tools (there are eleven and seven), Go as the only
+  indexed language (there are ten extractors), and a dependency diagram
+  that omitted most packages; it now carries the `go list` import table.
+  The `mcp` help named five indexed languages, and `--enable-mutations` and
+  the server's instructions to agents named two of the six write tools it
+  unlocks.
 
 - **What `sync` mirrors is stated plainly.** A destination mirrors the
   clone's own branches (`refs/heads`), not its origin: an upstream branch the
@@ -273,7 +256,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   now say so, and `TestPushMirrorCarriesOnlyLocalBranches` pins the
   behaviour. The push semantics are unchanged.
 
-## [0.0.53] - 2026-10-25
+## [0.0.53] - 2026-10-26
 
 ### Security
 

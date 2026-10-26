@@ -86,3 +86,13 @@ no authentication.
 The rest of the decision stands. The transports are plain HTTP, and the
 loopback guard does not look at the token: a routable bind is refused
 unless `--allow-remote` is passed, whether or not a token is set.
+
+## Amendment, 2026-10-26: a routable bind needs the token
+
+The first amendment's last paragraph no longer holds. From 0.0.54,
+`--allow-remote` lifts the loopback refusal only together with a bearer
+token (`--token-file` or `CORRAL_MCP_TOKEN`); a routable transport or
+metrics listener without one is refused (`cmd/mcp.go`, `checkBinds`). A
+missing or wrong token is answered `401` with a `WWW-Authenticate`
+challenge. The transports are still plain HTTP, and the server warns on
+stderr that a routable listener needs a TLS-terminating proxy.

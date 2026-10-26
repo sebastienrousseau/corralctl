@@ -98,7 +98,7 @@ func (s *Server) registerMutationTools() {
 			IdempotentHint:  true,
 			OpenWorldHint:   &t,
 		},
-		Description: "Run `git pull --rebase --autostash` against one clone in the Corral workspace. Requires --enable-mutations. Reuses corral's non-interactive git environment (no credential prompts, no signing pinentry) and honours smart-sync via the sync sidecar. Refuses when the repo isn't in the index or resolves outside the configured sandbox root, when its origin is unset or has changed since the index was read, when it has no commits, and when it is not on the default branch origin/HEAD names (a rebase pull would rewrite a feature branch).",
+		Description: "Run `git pull --rebase --autostash` against one clone in the Corral workspace. Requires --enable-mutations. Reuses corral's non-interactive git environment (no credential prompts, no signing pinentry) and honours smart-sync via the sync sidecar. Refuses when the repo isn't in the index or resolves outside the configured sandbox root, when its origin is unset or has changed since the index was read, when it has no commits, when it is not on the default branch origin/HEAD names (a rebase pull would rewrite a feature branch), when a rebase, merge, cherry-pick, revert or bisect is in progress, and when the branch has no upstream or has commits its upstream lacks.",
 	}, s.handleSyncRepo)
 
 	addTool(s, &mcp.Tool{
