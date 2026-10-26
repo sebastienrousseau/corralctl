@@ -88,11 +88,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   tool ran `git pull --rebase --autostash` on whatever branch was checked
   out, so an agent could rebase a user's feature branch, and it took no lock,
   so it could race `corral_delete_repo` on the same clone. It now refuses,
-  through the same engine functions `corralctl clone` uses, a clone with no
-  origin or whose origin changed since the index was read, one with no
-  commits, and one that is not on the branch `origin/HEAD` names (the server
-  never calls a forge API, so a clone without `origin/HEAD` is refused rather
-  than trusted). Every refusal is audited, and the pull holds the
+  through the functions `corralctl clone` uses (in the new
+  `internal/syncguard`), a clone with no origin or whose origin changed
+  since the index was read, one with no commits, and one that is not on
+  the branch `origin/HEAD` names (the server never calls a forge API, so a
+  clone without `origin/HEAD` is refused rather than trusted). Every refusal is audited, and the pull holds the
   per-repository lock deletion takes.
 
 ### Added

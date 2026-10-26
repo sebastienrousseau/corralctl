@@ -38,6 +38,7 @@ internal/search      text search inside a repository's source files
 internal/graph       cross-repository package dependency graph
 internal/safefs      opens files under a root without following symlinks
 internal/sanitize    bounds and de-fangs untrusted strings
+internal/syncguard   the pre-pull checks the CLI and the MCP server share
 internal/diag        levelled diagnostics, always to stderr
 internal/version     formats the build's version string for display
 ```
@@ -48,12 +49,13 @@ excluded):
 | Package | Imports (under `internal/`) |
 |---|---|
 | `cmd` | adopt, diag, discover, engine, forge, git, github, graph, mcp, mirror, search, tui, version |
-| `internal/engine` | diag, forge, git, github, tui |
-| `internal/mcp` | adopt, diag, discover, forge, git, github, graph, safefs, sanitize, search, symbols |
+| `internal/engine` | diag, forge, git, github, syncguard, tui |
+| `internal/mcp` | adopt, diag, discover, forge, git, github, graph, safefs, sanitize, search, symbols, syncguard |
 | `internal/tui` | discover, git, github, graph, version |
 | `internal/adopt` | forge, git |
 | `internal/mirror` | forge, git |
 | `internal/forge` | git, github |
+| `internal/syncguard` | git, github |
 | `internal/discover` | git |
 | `internal/git` | diag |
 | `internal/search` | safefs |

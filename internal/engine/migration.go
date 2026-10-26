@@ -15,6 +15,7 @@ import (
 	"github.com/sebastienrousseau/corralctl/internal/forge"
 	"github.com/sebastienrousseau/corralctl/internal/git"
 	"github.com/sebastienrousseau/corralctl/internal/github"
+	"github.com/sebastienrousseau/corralctl/internal/syncguard"
 )
 
 // prepareWorkspace performs the one-off layout work a classic-layout run
@@ -41,30 +42,9 @@ func ensureAppleCollections(baseDir string) error {
 	return nil
 }
 
-// repoRemoteIdentity is the canonical identity of a listed repository, for
-// comparison against a local clone's remote.
-//
-// Derived from the clone URL the forge returned, and through the same
-// function the local side goes through, so the two are comparable by
-// construction.
-func repoRemoteIdentity(repo github.Repo) string {
-	// The URL first, always: it is the only field that carries the host,
-	// and every forge adapter populates it.
-	if repo.CloneURL != "" {
-		if id := git.CanonicalRemote(repo.CloneURL); id != "" {
-			return id
-		}
-	}
-	// Fallbacks for a repository with no clone URL, which no forge here
-	// produces.
-	if repo.FullName != "" {
-		return strings.ToLower("github.com/" + repo.FullName)
-	}
-	if repo.Owner != "" && repo.Name != "" {
-		return strings.ToLower("github.com/" + repo.Owner + "/" + repo.Name)
-	}
-	return ""
-}
+// repoRemoteIdentity is syncguard.RemoteIdentity: the canonical identity
+// of a listed repository, for comparison against a local clone's remote.
+var repoRemoteIdentity = syncguard.RemoteIdentity
 
 func firstPath(paths []string) string {
 	if len(paths) == 0 {

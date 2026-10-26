@@ -7,18 +7,18 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/sebastienrousseau/corralctl/internal/engine"
 	"github.com/sebastienrousseau/corralctl/internal/git"
 	"github.com/sebastienrousseau/corralctl/internal/github"
 	"github.com/sebastienrousseau/corralctl/internal/sanitize"
+	"github.com/sebastienrousseau/corralctl/internal/syncguard"
 )
 
-// The checks corral_sync_repo makes before a pull. They are the engine's
-// own, the ones `corralctl clone` makes before every pull, reached through
+// The checks corral_sync_repo makes before a pull. They are syncguard's,
+// the ones `corralctl clone` makes before every pull, reached through
 // seams so a test can stub them; the MCP path carries no copy of them.
 var (
-	syncOriginMismatch  = engine.OriginMismatch
-	syncBranchRefusal   = engine.BranchRefusal
+	syncOriginMismatch  = syncguard.Default.OriginMismatch
+	syncBranchRefusal   = syncguard.Default.BranchRefusal
 	originDefaultBranch = git.OriginDefaultBranch
 )
 
@@ -31,10 +31,10 @@ const maxSyncReason = 512
 // checked out, so it runs only when:
 //
 //   - origin is set, and is still the repository the index recorded when
-//     the agent's query was resolved (engine.OriginMismatch, the CLI's
+//     the agent's query was resolved (syncguard OriginMismatch, the CLI's
 //     origin-collision check, comparing git.CanonicalRemote identities);
 //   - the clone has a commit and is on the branch origin/HEAD names
-//     (engine.BranchRefusal, the CLI's skip rule). The CLI takes the
+//     (syncguard BranchRefusal, the CLI's skip rule). The CLI takes the
 //     default branch from the forge's listing; the server never contacts
 //     a forge API, so it takes the one the clone recorded, and refuses
 //     when there is none rather than trusting HEAD.

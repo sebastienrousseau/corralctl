@@ -367,14 +367,14 @@ func TestOriginMismatchAcceptsAMatchingNonGitHubClone(t *testing.T) {
 		Name: "meta", FullName: "forgejo/meta",
 		CloneURL: "https://codeberg.org/forgejo/meta.git",
 	}
-	if msg, mismatch := OriginMismatch(repo, dir); mismatch {
+	if msg, mismatch := originMismatch(repo, dir); mismatch {
 		t.Errorf("a matching Codeberg clone was reported as a collision: %s", msg)
 	}
 
 	// And a genuine collision is still caught, with both hosts named.
 	other := t.TempDir()
 	makeCloneAt(t, other, "https://codeberg.org/someone-else/different.git")
-	msg, mismatch := OriginMismatch(repo, other)
+	msg, mismatch := originMismatch(repo, other)
 	if !mismatch {
 		t.Fatal("a clone pointing elsewhere must be reported")
 	}
