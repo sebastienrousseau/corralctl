@@ -6,6 +6,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Forge listings stop retrying when cancelled and honour `Retry-After`.**
+  The GitLab, Gitea-family and Bitbucket client slept through its backoff
+  with `time.Sleep`, so Ctrl-C waited up to eight seconds per retry, and it
+  answered HTTP 429 with a fixed backoff whatever the server asked for. The
+  wait now ends with the context, and a 429 or 5xx that carries
+  `Retry-After` (seconds or an HTTP date, capped at ten minutes) waits that
+  long. A requested wait that would run past `--api-total-timeout` is
+  reported as such instead of being started.
+
 ## [0.0.53] - 2026-10-25
 
 ### Security
