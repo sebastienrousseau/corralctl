@@ -243,12 +243,19 @@ to GitLab carries the GitLab credential and nothing else.
 
 **Argument.** Automated operations (clone, pull, mirror, submodule updates) run
 with explicit configuration disarming git hooks (`-c core.hooksPath=/dev/null`)
-and disallowing external protocol helper execution (`-c protocol.ext.allow=never`).
+and any fsmonitor command a clone's config names (`-c core.fsmonitor=false`),
+disallowing external protocol helper execution (`-c protocol.ext.allow=never`),
+and refusing local-path submodule URLs (`-c protocol.file.allow=user`,
+CVE-2022-39253), whatever the user's or the repository's config says.
 Cloning or updating an untrusted repository cannot trigger local code execution
-via embedded hooks.
+via embedded hooks. The child environment also drops `GIT_DIR`,
+`GIT_WORK_TREE`, `GIT_INDEX_FILE` and the other variables that would point git
+at a different repository than the one named with `-C`.
 
-**Evidence.** `internal/git/git.go`, `internal/git/mirror.go`, and
-`TestGitHooksAreDisarmedDuringOperations` in `internal/git/hardening_test.go`.
+**Evidence.** `hardeningArgs` and `childEnv` in `internal/git/env.go`,
+`TestGitHooksAreDisarmedDuringOperations` in `internal/git/hardening_test.go`,
+and `TestFsmonitorHookIsDisarmed`, `TestFileProtocolSubmodulesStayRefused` and
+`TestChildEnvIgnoresRepositoryRedirects` in `internal/git/env_test.go`.
 
 ## 4. Threats considered and out of scope
 
@@ -261,8 +268,9 @@ via embedded hooks.
 - **Dependency compromise**: mitigated by Dependabot on `go.mod` and by
   `govulncheck` in CI; `go.sum` locks transitive hashes.
 - **Execution of untrusted git hooks or external helpers**: mitigated by
-  enforcing `-c core.hooksPath=/dev/null` and `-c protocol.ext.allow=never`
-  on all automated git subprocess invocations (C8).
+  enforcing `-c core.hooksPath=/dev/null`, `-c core.fsmonitor=false`,
+  `-c protocol.ext.allow=never` and `-c protocol.file.allow=user` on all
+  automated git subprocess invocations (C8).
 - **Cross-origin attacks and unauthorized MCP access**: mitigated by
   `--token` bearer authentication, strict `Origin` header validation, and
   loopback binding enforcement (Boundary 4).
@@ -285,8 +293,11 @@ via embedded hooks.
 
 - The user's `GITHUB_TOKEN` has only the scopes corralctl needs
   (`repo`, `read:user`). corralctl does not need `write:*` scopes.
-- `git` is installed and version ≥ 2.20 (for `-C`, `-c`, and modern
-  transports).
+- `git` is installed and version ≥ 2.31 (for `-C`, `-c`, modern
+  transports, and the `GIT_CONFIG_COUNT` environment config that carries
+  credentials). git 2.31 to 2.35 read `core.fsmonitor=false` as a hook
+  named `false`, which runs the `false` command and disarms a repository's
+  own fsmonitor all the same.
 - The user's clock is roughly correct (needed for TLS validation and
   Rekor entry timestamps).
 - The user runs a supported OS: recent Linux, macOS ≥ 14, or Windows 11.

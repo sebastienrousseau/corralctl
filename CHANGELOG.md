@@ -15,6 +15,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   before `prune` or a delete, inspected the repository the variable named.
   Every git child now starts without them.
 
+- **git runs with `core.fsmonitor=false` and `protocol.file.allow=user`.**
+  A clone whose config named an fsmonitor command ran it on every status, as
+  a hook would. A user who set `protocol.file.allow=always`, or a git older
+  than 2.30.6, 2.31.5 or 2.38.1, let a `--recurse-submodules` clone of an
+  untrusted repository read a local path (CVE-2022-39253). Both are now
+  overridden on every invocation, next to `core.hooksPath` and
+  `protocol.ext.allow`.
+
+### Changed
+
+- **The documented minimum git is 2.31.** The README and DEVELOPMENT.md said
+  2.30, the security model and the Debian notes 2.20, and credentials reach
+  git through `GIT_CONFIG_COUNT`, which git 2.31 introduced.
+
 ### Fixed
 
 - **A credential no longer replaces your own `GIT_CONFIG_*` settings.**

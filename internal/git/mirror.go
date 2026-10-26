@@ -172,11 +172,7 @@ func validateRemoteName(name string) error {
 // GitHub token to every invocation, and a push to another forge should
 // carry exactly one credential, the one meant for it.
 func runMirror(ctx context.Context, targetDir string, extra []configPair, args ...string) error {
-	fullArgs := append([]string{
-		"-c", "core.hooksPath=/dev/null",
-		"-c", "protocol.ext.allow=never",
-		"-C", targetDir,
-	}, args...)
+	fullArgs := append(hardened("-C", targetDir), args...)
 	cmd := exec.CommandContext(ctx, gitBinary, fullArgs...) // #nosec G204 -- fixed git binary and structured arguments
 	cmd.Env = withConfig(childEnv(), extra...)
 	out, err := cmd.CombinedOutput()

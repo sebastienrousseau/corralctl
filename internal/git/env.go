@@ -98,3 +98,28 @@ func inheritedConfigCount(env []string) int {
 	}
 	return count
 }
+
+// hardeningArgs are the -c overrides every git invocation in this package
+// carries, ahead of its own arguments. Command-line config outranks the
+// repository's, the user's and the environment's, so none of them can
+// switch these back on.
+//
+//   - core.hooksPath=/dev/null: no repository hook runs.
+//   - core.fsmonitor=false: no fsmonitor command named in a clone's
+//     config runs; it executes on every status, like a hook.
+//   - protocol.ext.allow=never: no ext:: transport, which runs a command.
+//   - protocol.file.allow=user: a submodule URL cannot read a local path
+//     (CVE-2022-39253). git defaults to this from 2.30.6, 2.31.5 and
+//     2.38.1, so stating it covers older patch levels and a user who set
+//     "always" globally.
+var hardeningArgs = []string{
+	"-c", "core.hooksPath=/dev/null",
+	"-c", "core.fsmonitor=false",
+	"-c", "protocol.ext.allow=never",
+	"-c", "protocol.file.allow=user",
+}
+
+// hardened prefixes args with hardeningArgs.
+func hardened(args ...string) []string {
+	return append(append(make([]string, 0, len(hardeningArgs)+len(args)), hardeningArgs...), args...)
+}

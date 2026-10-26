@@ -956,7 +956,7 @@ corralctl is opinionated, and the opinions do not suit everyone.
 | | |
 |---|---|
 | **Go** | The `go` directive in [`go.mod`](go.mod) — currently **1.26.10** |
-| **git** | 2.30 or newer, on `PATH` |
+| **git** | 2.31 or newer, on `PATH` (`GIT_CONFIG_COUNT`, which carries credentials, arrived in 2.31) |
 | **gh** | Optional; only for `--auth gh` |
 
 The Go floor is stated in exactly one place, `go.mod`, and CI sets
