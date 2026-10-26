@@ -7,7 +7,6 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
-	"os"
 	"os/exec"
 	"path/filepath"
 	"strconv"
@@ -26,10 +25,10 @@ var TokenProvider func() string
 
 var updateSubmodulesFn = updateSubmodules
 
-// authEnv returns the environment variables that inject an Authorization header
-// for github.com HTTPS requests, or nil when no token is available. The header
-// is scoped to https://github.com/, so it is harmless for SSH remotes.
-func authEnv() []string {
+// authEnv returns the config entries that inject an Authorization header for
+// github.com HTTPS requests, or nil when no token is available. The header is
+// scoped to https://github.com/, so it is harmless for SSH remotes.
+func authEnv() []configPair {
 	if TokenProvider == nil {
 		return nil
 	}
@@ -38,11 +37,7 @@ func authEnv() []string {
 		return nil
 	}
 	cred := base64.StdEncoding.EncodeToString([]byte("x-access-token:" + tok))
-	return []string{
-		"GIT_CONFIG_COUNT=1",
-		"GIT_CONFIG_KEY_0=http.https://github.com/.extraheader",
-		"GIT_CONFIG_VALUE_0=Authorization: Basic " + cred,
-	}
+	return []configPair{{"http.https://github.com/.extraheader", "Authorization: Basic " + cred}}
 }
 
 // nonInteractiveEnv returns the environment variables that force git into
@@ -60,13 +55,10 @@ func nonInteractiveEnv() []string {
 
 // withGitEnv attaches the credentials header (when available) plus the
 // non-interactive env vars to cmd, replacing any prior cmd.Env. It always sets
-// cmd.Env so the non-interactive guards apply even on anonymous clones.
+// cmd.Env so the non-interactive guards apply even on anonymous clones, and
+// it starts from childEnv so an inherited GIT_DIR cannot redirect the command.
 func withGitEnv(cmd *exec.Cmd) {
-	env := append(os.Environ(), nonInteractiveEnv()...)
-	if auth := authEnv(); auth != nil {
-		env = append(env, auth...)
-	}
-	cmd.Env = env
+	cmd.Env = withConfig(childEnv(), authEnv()...)
 }
 
 // CloneOptions configures optional clone-time performance and layout flags.
@@ -87,11 +79,7 @@ type CloneOptions struct {
 
 // Clone executes a git clone command for the given URL into the target directory.
 func Clone(ctx context.Context, url, targetDir string, opts CloneOptions) error {
-	args := []string{
-		"-c", "core.hooksPath=/dev/null",
-		"-c", "protocol.ext.allow=never",
-		"clone",
-	}
+	args := hardened("clone")
 	if opts.RecurseSubmodules {
 		args = append(args, "--recurse-submodules")
 	}
@@ -134,6 +122,9 @@ type PullOptions struct {
 }
 
 // Pull executes a `git pull --rebase --autostash` in the target directory.
+// It first refuses, with an error wrapping ErrPullRefused, when the clone has
+// an operation in progress (rebase, merge, cherry-pick, revert, bisect), has
+// commits its upstream lacks, or has no upstream (see pullRefusal).
 // Signature verification (merge.verifySignatures / rebase.verifySignatures)
 // and commit signing (commit.gpgsign) are explicitly disabled for this
 // invocation so an unattended sync never aborts on unsigned commits or
@@ -148,9 +139,10 @@ type PullOptions struct {
 //     separate `git submodule update --init --recursive` step whose
 //     error is logged but not returned.
 func Pull(ctx context.Context, targetDir string, opts PullOptions) error {
-	args := []string{
-		"-c", "core.hooksPath=/dev/null",
-		"-c", "protocol.ext.allow=never",
+	if reason := pullRefusal(ctx, targetDir); reason != "" {
+		return fmt.Errorf("%w in %s: %s", ErrPullRefused, filepath.Base(targetDir), reason)
+	}
+	args := hardened(
 		"-c", "merge.verifySignatures=false",
 		"-c", "rebase.verifySignatures=false",
 		// Rebase replays commits, which respects the global commit.gpgsign
@@ -159,7 +151,7 @@ func Pull(ctx context.Context, targetDir string, opts PullOptions) error {
 		"-c", "commit.gpgsign=false",
 		"-c", "gpg.format=openpgp",
 		"-C", targetDir, "pull", "--rebase", "--autostash",
-	}
+	)
 	if opts.RecurseSubmodules && !opts.IgnoreSubmoduleFailures {
 		args = append(args, "--recurse-submodules")
 	}
@@ -191,11 +183,7 @@ func Pull(ctx context.Context, targetDir string, opts PullOptions) error {
 // targetDir as a separate subprocess. Exposed indirectly via Pull's
 // IgnoreSubmoduleFailures branch.
 func updateSubmodules(ctx context.Context, targetDir string) error {
-	args := []string{
-		"-c", "core.hooksPath=/dev/null",
-		"-c", "protocol.ext.allow=never",
-		"-C", targetDir, "submodule", "update", "--init", "--recursive",
-	}
+	args := hardened("-C", targetDir, "submodule", "update", "--init", "--recursive")
 	// #nosec G204 -- fixed binary; controlled args.
 	cmd := exec.CommandContext(ctx, gitBinary, args...)
 	withGitEnv(cmd)

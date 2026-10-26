@@ -50,6 +50,7 @@ func CurrentBranch(ctx context.Context, targetDir string) (string, error) {
 	defer cancel()
 	// #nosec G204 -- fixed "git" binary; targetDir is a local path, not shell input.
 	cmd := exec.CommandContext(ctx, gitBinary, "-C", targetDir, "rev-parse", "--abbrev-ref", "HEAD")
+	cmd.Env = childEnv()
 	out, err := cmd.Output()
 	if err != nil {
 		return "", err
@@ -108,6 +109,7 @@ func HeadCommit(ctx context.Context, targetDir string) (string, error) {
 	defer cancel()
 	// #nosec G204 -- fixed binary; targetDir is a local path.
 	cmd := exec.CommandContext(ctx, gitBinary, "-C", targetDir, "rev-parse", "--verify", "HEAD")
+	cmd.Env = childEnv()
 	out, err := cmd.Output()
 	if err != nil {
 		return "", err
@@ -272,6 +274,7 @@ func IsEmpty(ctx context.Context, targetDir string) bool {
 	defer cancel()
 	// #nosec G204 -- fixed binary; targetDir is a local path.
 	cmd := exec.CommandContext(ctx, gitBinary, "-C", targetDir, "rev-parse", "--verify", "-q", "HEAD^{commit}")
+	cmd.Env = childEnv()
 	return cmd.Run() != nil
 }
 
@@ -284,6 +287,7 @@ func RemoteOrigin(ctx context.Context, targetDir string) (string, error) {
 	defer cancel()
 	// #nosec G204 -- fixed "git" binary; targetDir is a local path, not shell input.
 	cmd := exec.CommandContext(ctx, gitBinary, "-C", targetDir, "remote", "get-url", "origin")
+	cmd.Env = childEnv()
 	out, err := cmd.Output()
 	if err != nil {
 		return "", err

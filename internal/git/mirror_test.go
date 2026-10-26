@@ -239,7 +239,7 @@ func TestPushMirrorScopesTheCredential(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	joined := strings.Join(env, "\n")
+	joined := strings.Join(withConfig(nil, env...), "\n")
 	if !strings.Contains(joined, "GIT_CONFIG_KEY_0=http.https://gitlab.example.com:8443/.extraheader") ||
 		!strings.Contains(joined, "GIT_CONFIG_VALUE_0=Authorization: Basic b2F1dGgyOnRvaw==") ||
 		strings.Contains(joined, "tok\n") {
@@ -258,7 +258,7 @@ func TestPushMirrorScopesTheCredential(t *testing.T) {
 	// And a real push over HTTPS with the header in place, against a
 	// server that demands exactly that header.
 	repo := mirrorRepo(t)
-	if err := runMirror(context.Background(), repo, env, "config", "corral.probe", "1"); err != nil {
+	if err := runMirror(context.Background(), repo, env, "config", "config", "corral.probe", "1"); err != nil {
 		t.Fatalf("extra env broke a plain git command: %v", err)
 	}
 }

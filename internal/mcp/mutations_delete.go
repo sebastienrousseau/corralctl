@@ -61,7 +61,10 @@ func deleteGuards(ctx context.Context, path string) (reason string, ok bool) {
 // Leading dot so it sorts out of the way and reads as machinery rather
 // than as a repository somebody named oddly; the full word so that anyone
 // who finds one after a crash can tell what it is and search for it.
-const stagePrefix = ".corral-deleting-"
+//
+// The value is git.DeletionStagePrefix, shared with the mirror walk and
+// doctor, which must recognise a directory this left behind.
+const stagePrefix = git.DeletionStagePrefix
 
 // stageForRemoval renames dir aside within its own parent directory.
 //

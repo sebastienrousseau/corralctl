@@ -181,6 +181,63 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`--token`** prints a warning: anything on the command line is visible
   to every user on the machine through `ps`. Use `--token-file` or
   `CORRAL_MCP_TOKEN`.
+### Security
+
+- **git no longer follows an inherited `GIT_DIR`.** Run from a git hook or
+  alias, corralctl inherited `GIT_DIR`, `GIT_WORK_TREE`, `GIT_INDEX_FILE`
+  and the other variables git exports there, and they outrank `-C`, so every
+  git command, including the guards that check a clone for unpublished work
+  before `prune` or a delete, inspected the repository the variable named.
+  Every git child now starts without them.
+
+- **git runs with `core.fsmonitor=false` and `protocol.file.allow=user`.**
+  A clone whose config named an fsmonitor command ran it on every status, as
+  a hook would. A user who set `protocol.file.allow=always`, or a git older
+  than 2.30.6, 2.31.5 or 2.38.1, let a `--recurse-submodules` clone of an
+  untrusted repository read a local path (CVE-2022-39253). Both are now
+  overridden on every invocation, next to `core.hooksPath` and
+  `protocol.ext.allow`.
+
+### Changed
+
+- **The documented minimum git is 2.31.** The README and DEVELOPMENT.md said
+  2.30, the security model and the Debian notes 2.20, and credentials reach
+  git through `GIT_CONFIG_COUNT`, which git 2.31 introduced.
+
+### Fixed
+
+- **Sync refuses to pull over work in progress or local commits.** An
+  unattended `git pull --rebase --autostash` ran whatever state a clone was
+  in: a revert staged with `--no-commit` was stashed, HEAD moved, and
+  `REVERT_HEAD` was left pointing at the old base; commits only in the clone
+  were rebased, and since signing is off for the pull, a signed commit came
+  back unsigned. `corralctl` sync and `corral_sync_repo` now refuse, naming
+  the reason, when a rebase, `git am`, merge, cherry-pick, revert or bisect is
+  in progress, when the branch has commits its upstream lacks, or when it has
+  no upstream. Push the local commits, or finish the operation, then sync.
+  This is a behaviour change: those clones used to be rebased.
+
+- **An interrupted delete is reported, and never mirrored.**
+  `corral_delete_repo` renames a clone to `.corral-deleting-<name>-<hex>`
+  before removing it, so a crash in between leaves that directory, `.git`
+  included. `corralctl sync` took it for a repository and would have created
+  and pushed a destination repository under that name, and `doctor` counted
+  it as a healthy clone. The mirror walk now skips it, and `doctor` lists it
+  under "Interrupted Deletions" (`staged_deletions` in JSON) and reports the
+  workspace as needing attention. Neither removes it.
+
+- **Mirror errors no longer print the git command line.** A failing
+  `remote add` or `remote set-url` reported its full argv, URL included, in
+  terminal output and `--output json` results. The message now names the
+  subcommand and remote (`git remote add gitlab failed: ...`), as `git pull`
+  errors already did.
+
+- **A credential no longer replaces your own `GIT_CONFIG_*` settings.**
+  Attaching the GitHub token or a mirror's push credential wrote
+  `GIT_CONFIG_COUNT=1` and `GIT_CONFIG_KEY_0`, which overwrote config a user
+  passes through the environment, such as a proxy or `http.sslCAInfo`.
+  corralctl's entries are now numbered after the user's and the count raised
+  to cover both.
 
 ## [0.0.53] - 2026-10-25
 
