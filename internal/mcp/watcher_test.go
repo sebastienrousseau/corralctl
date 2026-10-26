@@ -8,6 +8,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strconv"
 	"sync"
 	"testing"
 	"time"
@@ -92,16 +93,17 @@ func TestWorkspaceWatcherInvalidatesScanCache(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	done := srv.startWorkspaceWatcher(ctx)
 
-	// Touch a file in alpha to trigger an event
-	touchFile := filepath.Join(base, "Public", "go", "alpha", "touched.txt")
-	if err := os.WriteFile(touchFile, []byte("hello"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-
-	// Wait for debounce timer to fire and invalidate cache
+	// Add an entry to a layout directory, which is what a clone does.
+	// Registration runs on the watcher's goroutine, so keep adding until
+	// one lands after the watch is in place.
 	deadline := time.Now().Add(2 * time.Second)
 	invalidated := false
-	for time.Now().Before(deadline) {
+	for i := 0; time.Now().Before(deadline); i++ {
+		touch := filepath.Join(base, "Public", "go", "new-"+strconv.Itoa(i))
+		if err := os.WriteFile(touch, []byte("hello"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		time.Sleep(4 * watcherDebounceDelay)
 		srv.scanMu.Lock()
 		exp := srv.scanExpires
 		srv.scanMu.Unlock()
@@ -109,7 +111,6 @@ func TestWorkspaceWatcherInvalidatesScanCache(t *testing.T) {
 			invalidated = true
 			break
 		}
-		time.Sleep(10 * time.Millisecond)
 	}
 
 	if !invalidated {
@@ -202,8 +203,8 @@ func TestWorkspaceWatcherRegisterWatchDirsEdges(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := srv.registerWatchDirs(rw, base); err != nil {
-		t.Fatalf("registerWatchDirs failed: %v", err)
+	if rep := srv.registerWatchDirs(context.Background(), rw, base); rep.err != nil || rep.watched == 0 {
+		t.Fatalf("registerWatchDirs = %+v", rep)
 	}
 }
 
@@ -283,8 +284,8 @@ func TestWorkspaceWatcherUnreadablePath(t *testing.T) {
 	srv, _ := NewServer(ServerOptions{Root: base})
 
 	mock := newMockWatcher()
-	if err := srv.registerWatchDirs(mock, filepath.Join(base, "missing-subdir")); err != nil {
-		t.Fatalf("expected nil on missing root, got %v", err)
+	if rep := srv.registerWatchDirs(context.Background(), mock, filepath.Join(base, "missing-subdir")); rep.err != nil || rep.watched != 0 {
+		t.Fatalf("expected nothing watched and no error on a missing directory, got %+v", rep)
 	}
 }
 
@@ -344,11 +345,14 @@ func TestWorkspaceWatcherAutoWarmsSymbolsOnActiveQuery(t *testing.T) {
 	defer func() { newFSWatcher = oldWatcher }()
 
 	warmCalled := make(chan struct{}, 1)
-	oldWarm := warmSymbolsAsync
-	warmSymbolsAsync = func(s *Server, ctx context.Context) {
-		warmCalled <- struct{}{}
+	oldWarm := watcherWarm
+	watcherWarm = func(s *Server, ctx context.Context) {
+		select {
+		case warmCalled <- struct{}{}:
+		default:
+		}
 	}
-	defer func() { warmSymbolsAsync = oldWarm }()
+	defer func() { watcherWarm = oldWarm }()
 
 	// Mark query active
 	srv.noteSymbolQuery()
@@ -367,7 +371,7 @@ func TestWorkspaceWatcherAutoWarmsSymbolsOnActiveQuery(t *testing.T) {
 	case <-warmCalled:
 		// Success!
 	case <-time.After(2 * time.Second):
-		t.Fatal("expected warmSymbolsAsync to be called on file change with active query")
+		t.Fatal("expected watcherWarm to be called on file change with active query")
 	}
 }
 
@@ -387,11 +391,14 @@ func TestWorkspaceWatcherSkipsWarmingWhenIdle(t *testing.T) {
 	defer func() { newFSWatcher = oldWatcher }()
 
 	warmCalled := make(chan struct{}, 1)
-	oldWarm := warmSymbolsAsync
-	warmSymbolsAsync = func(s *Server, ctx context.Context) {
-		warmCalled <- struct{}{}
+	oldWarm := watcherWarm
+	watcherWarm = func(s *Server, ctx context.Context) {
+		select {
+		case warmCalled <- struct{}{}:
+		default:
+		}
 	}
-	defer func() { warmSymbolsAsync = oldWarm }()
+	defer func() { watcherWarm = oldWarm }()
 
 	// Symbol queries are idle (never called)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -407,28 +414,23 @@ func TestWorkspaceWatcherSkipsWarmingWhenIdle(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 	select {
 	case <-warmCalled:
-		t.Fatal("warmSymbolsAsync should not be called when idle")
+		t.Fatal("watcherWarm should not be called when idle")
 	default:
 		// Success!
 	}
 }
 
-func TestWarmSymbolsAsyncDefaultExecution(t *testing.T) {
+func TestWatcherWarmDefaultExecution(t *testing.T) {
 	base := t.TempDir()
 	srv, err := NewServer(ServerOptions{Root: base})
 	if err != nil {
 		t.Fatal(err)
 	}
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	warmSymbolsAsync(srv, ctx)
-	for i := 0; i < 100; i++ {
-		srv.scanMu.Lock()
-		cached := srv.scanIndex != nil
-		srv.scanMu.Unlock()
-		if cached {
-			break
-		}
-		time.Sleep(10 * time.Millisecond)
+	watcherWarm(srv, context.Background())
+	srv.scanMu.Lock()
+	cached := srv.scanIndex != nil
+	srv.scanMu.Unlock()
+	if !cached {
+		t.Fatal("the default watcher warm pass did not scan the workspace")
 	}
 }

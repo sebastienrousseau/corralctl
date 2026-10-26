@@ -99,6 +99,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   appended each result to a slice for every output format, although only
   `--output json` writes the aggregate. Text and NDJSON runs now keep the
   summary counts only.
+### Fixed
+
+- **The MCP workspace watcher no longer exhausts file descriptors.** It
+  watched every directory under `--root`, `node_modules` and `target` trees
+  included, which on macOS held one descriptor per directory and per file: over
+  10,000 on a real workspace. Under a 256-descriptor limit the workspace scan
+  then could not open the root and `corral_search_code` answered "No match ...
+  across 0 repositories". The watcher now watches only the layout directories
+  and each clone's `.git` directory, stays within half the open-file limit,
+  reports a failed or skipped watch on stderr, and registers in the background
+  instead of before the stdio handshake. `--watch` stays on by default.
+- **A workspace scan that runs out of file descriptors is an error.** It used
+  to skip the directory it failed on, and with it every repository beneath,
+  and return what was left as a complete index.
+- **The watcher ignores events that cannot change the workspace index.**
+  Every event dropped the whole index and, while symbol tools were in use,
+  started a warm pass, including `git status` rewriting `.git/index`. Inside a
+  `.git` directory only `config`, `HEAD` and the corral state file now count,
+  permission-only changes are ignored, and a file in a clone's working tree
+  never counts.
+- **A warm pass started by the watcher is waited for on shutdown, and only
+  one warm pass runs at a time.** The watcher started its pass as an untracked
+  goroutine, so the HTTP server could release its memory-mapped search indexes
+  while that pass was still reading one, and the watcher and the periodic
+  warmer could scan the whole workspace at once. The watcher now waits for its
+  pass before reporting itself stopped, and a pass requested while another runs
+  returns at once.
 
 ## [0.0.53] - 2026-10-25
 

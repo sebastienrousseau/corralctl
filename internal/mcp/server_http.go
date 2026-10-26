@@ -156,9 +156,10 @@ func (s *Server) serve(ctx context.Context, addr string, handler http.Handler) e
 		}
 		stopWarm()
 		<-warmDone
-		// After the warmer has stopped and every request has finished, no
-		// reference to a mapping can remain, so this is the one safe point
-		// to release them.
+		// After the warmer has stopped, the watcher has stopped (which it
+		// does only once any warm pass it started has returned) and every
+		// request has finished, no reference to a mapping can remain, so
+		// this is the one safe point to release them.
 		s.indexCache.closeAll()
 	}()
 
