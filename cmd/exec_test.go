@@ -674,3 +674,42 @@ func TestExecCmdMachineOutputKeepsStdoutClean(t *testing.T) {
 		t.Fatalf("failed JSON write exit = %d", exitCode)
 	}
 }
+
+// TestExecVisibilityReachesEveryCollection pins D-01: Forks and Work are
+// top-level collections of the layout, so --visibility must reach them.
+func TestExecVisibilityReachesEveryCollection(t *testing.T) {
+	oldConcurrency, oldVisibility, oldLanguages, oldExclude := execConcurrency, execVisibility, execLanguages, execExcludeLangs
+	t.Cleanup(func() {
+		execConcurrency, execVisibility, execLanguages, execExcludeLangs = oldConcurrency, oldVisibility, oldLanguages, oldExclude
+	})
+	base := t.TempDir()
+	for _, rel := range []string{"Public/Go/a", "Private/Go/b", "Forks/Go/c", "Work/Rust/d"} {
+		if err := os.MkdirAll(filepath.Join(base, filepath.FromSlash(rel), ".git"), 0o750); err != nil {
+			t.Fatal(err)
+		}
+	}
+	repos, err := findLocalRepos(base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	execConcurrency, execLanguages, execExcludeLangs = 1, "", ""
+	for value, want := range map[string]string{"Forks": "c", " work ": "d", "public": "a", "PRIVATE": "b"} {
+		execVisibility = value
+		if err := execCmd.PreRunE(execCmd, nil); err != nil {
+			t.Fatalf("--visibility %q refused: %v", value, err)
+		}
+		got := filterLocalRepos(repos)
+		if len(got) != 1 || filepath.Base(got[0]) != want {
+			t.Fatalf("--visibility %q = %v, want only %s", value, got, want)
+		}
+	}
+	execVisibility = "all"
+	if got := filterLocalRepos(repos); len(got) != 4 {
+		t.Fatalf("--visibility all = %v", got)
+	}
+	execVisibility = "shared"
+	err = execCmd.PreRunE(execCmd, nil)
+	if err == nil || !strings.Contains(err.Error(), "all, public, private, work, forks") {
+		t.Fatalf("unknown visibility error = %v", err)
+	}
+}

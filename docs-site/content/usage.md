@@ -155,7 +155,8 @@ corralctl exec "git status --porcelain" --output ndjson | jq -r 'select(.stdout 
 ```
 
 The same filtering flags apply, so you can scope a command to one ecosystem,
-one visibility, or both. `--dry-run` works here too, and lists the
+one collection, or both. `--visibility` takes `all` or any top-level
+collection of the layout: `public`, `private`, `work` or `forks`. `--dry-run` works here too, and lists the
 repositories a command would run against without running it.
 
 ## Mirror to other forges

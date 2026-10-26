@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -72,8 +73,8 @@ and error when the command failed. Diagnostics go to stderr.`,
 			return errors.New("--dry-run lists repositories as text; drop --output or --dry-run")
 		}
 		execVisibility = strings.ToLower(strings.TrimSpace(execVisibility))
-		if execVisibility != "all" && execVisibility != "public" && execVisibility != "private" {
-			return fmt.Errorf("--visibility must be one of: all, public, private")
+		if !slices.Contains(execVisibilities(), execVisibility) {
+			return fmt.Errorf("--visibility must be one of: %s", strings.Join(execVisibilities(), ", "))
 		}
 		return nil
 	},
@@ -130,7 +131,7 @@ func reportNoExecRepos() {
 
 type localRepoInfo struct {
 	Path       string
-	Visibility string // "public", "private"
+	Visibility string // lower-cased top-level collection: "public", "private", "work", "forks"
 	Language   string
 }
 
@@ -215,31 +216,43 @@ func findLocalRepos(baseDir string) ([]localRepoInfo, error) {
 	return repos, err
 }
 
+// execVisibilities lists the values --visibility accepts: all, and each
+// top-level collection of the layout, lower-cased as findLocalRepos
+// records them.
+func execVisibilities() []string {
+	values := []string{"all"}
+	for _, collection := range engine.Collections() {
+		values = append(values, strings.ToLower(collection))
+	}
+	return values
+}
+
 func filterLocalRepos(repos []localRepoInfo) []string {
 	var out []string
 	includeLang := toLookupSet(parseCSV(execLanguages))
 	excludeLang := toLookupSet(parseCSV(execExcludeLangs))
 
 	for _, r := range repos {
-		if execVisibility == "public" && r.Visibility != "public" {
+		if execVisibility != "all" && r.Visibility != execVisibility {
 			continue
 		}
-		if execVisibility == "private" && r.Visibility != "private" {
-			continue
+		if languageSelected(r.Language, includeLang, excludeLang) {
+			out = append(out, r.Path)
 		}
-		if len(includeLang) > 0 {
-			if _, ok := includeLang[r.Language]; !ok {
-				continue
-			}
-		}
-		if len(excludeLang) > 0 {
-			if _, ok := excludeLang[r.Language]; ok {
-				continue
-			}
-		}
-		out = append(out, r.Path)
 	}
 	return out
+}
+
+// languageSelected reports whether a repository's language passes the
+// include list (when one is given) and is not on the exclude list.
+func languageSelected(language string, include, exclude map[string]struct{}) bool {
+	if len(include) > 0 {
+		if _, ok := include[language]; !ok {
+			return false
+		}
+	}
+	_, excluded := exclude[language]
+	return !excluded
 }
 
 func toLookupSet(values []string) map[string]struct{} {
@@ -458,6 +471,6 @@ func init() {
 	execCmd.Flags().StringVar(&execExcludeLangs, "exclude-languages", "", "comma-separated language exclude filter")
 	execCmd.Flags().StringVar(&execOutput, "output", string(engine.OutputText), "output format: text, json, ndjson")
 	execCmd.Flags().DurationVar(&execTimeout, "timeout", 0, "deadline per repository (0 to disable)")
-	execCmd.Flags().StringVar(&execVisibility, "visibility", "all", "filter repositories by visibility: all, public, private")
+	execCmd.Flags().StringVar(&execVisibility, "visibility", "all", "filter by top-level collection: "+strings.Join(execVisibilities(), ", "))
 	rootCmd.AddCommand(execCmd)
 }

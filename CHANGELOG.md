@@ -33,6 +33,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   directory** (`--- [Public/Go/x] ---`) instead of its basename, so two
   clones that share a name in different collections can be told apart.
 
+### Fixed
+
+- **`exec --visibility` reaches every collection.** It knew only `public`
+  and `private`, so clones under `Forks/` and `Work/` could not be selected.
+  It now accepts `all` and each top-level collection of the layout (`public`,
+  `private`, `work`, `forks`), read from the same list the layout uses.
+
 ## [0.0.53] - 2026-10-25
 
 ### Security
