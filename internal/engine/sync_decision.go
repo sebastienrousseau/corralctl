@@ -220,7 +220,7 @@ func syncSkipReason(ctx context.Context, repo github.Repo, targetDir string, syn
 	}
 	// Skip the network round-trip when the upstream pushed_at is unchanged
 	// since the last successful sync. The cached value lives in
-	// <targetDir>/.corral-state.json. A read error or a zero state falls
+	// <targetDir>/.git/corral-state.json. A read error or a zero state falls
 	// through to the original pull-always behaviour, so a missing or corrupt
 	// sidecar can never cause a stale working tree.
 	if !syncOpts.Force && !repo.PushedAt.IsZero() {
