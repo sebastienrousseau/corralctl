@@ -22,6 +22,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   repository. On Windows it runs through `cmd.exe /C` (or `%COMSPEC%`). To
   use another shell, name it in the command.
 
+- **`exec` headers name the repository by its path under the base
+  directory** (`--- [Public/Go/x] ---`) instead of its basename, so two
+  clones that share a name in different collections can be told apart.
+
 ## [0.0.53] - 2026-10-25
 
 ### Security

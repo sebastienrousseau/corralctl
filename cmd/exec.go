@@ -91,7 +91,7 @@ the other repositories carry on.`,
 		}
 
 		// Run commands concurrently
-		summary := execBatch(cmdContext(cmd), filtered, execOptions{Command: commandStr, Concurrency: execConcurrency, Timeout: execTimeout})
+		summary := execBatch(cmdContext(cmd), filtered, execOptions{Root: bDir, Command: commandStr, Concurrency: execConcurrency, Timeout: execTimeout})
 		if summary.Failed > 0 || summary.Canceled {
 			osExit(1)
 		}
@@ -238,6 +238,9 @@ func execShell() (shell, flag string) {
 
 // execOptions describes one exec run.
 type execOptions struct {
+	// Root is the base directory; output names repositories relative
+	// to it.
+	Root string
 	// Command is the command line handed to the platform shell.
 	Command string
 	// Concurrency is the number of repositories worked at once.
@@ -332,7 +335,21 @@ func runExecOne(ctx context.Context, path string, opts execOptions) execResult {
 	cmd.Stderr = out
 	err := cmd.Run()
 	timedOut := err != nil && ctx.Err() == nil && errors.Is(repoCtx.Err(), context.DeadlineExceeded)
-	return execResult{Repo: filepath.Base(path), Output: out.String(), Err: err, TimedOut: timedOut}
+	return execResult{Repo: execRepoLabel(opts.Root, path), Output: out.String(), Err: err, TimedOut: timedOut}
+}
+
+// execRepoLabel names a repository in the output by its slash-separated
+// path relative to root, so Public/Go/x and Private/Go/x stay distinct.
+// A path that is not under root keeps its full form.
+func execRepoLabel(root, path string) string {
+	if root == "" {
+		return path
+	}
+	rel, err := filepath.Rel(root, path)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return path
+	}
+	return filepath.ToSlash(rel)
 }
 
 // printExecText writes one result in the text format: a header naming

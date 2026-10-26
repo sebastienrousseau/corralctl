@@ -255,10 +255,10 @@ func TestRunExecCommandsSuccess(t *testing.T) {
 	}
 
 	out := captureStdout(t, func() {
-		runExecCommands(context.Background(), []string{a, b}, execOptions{Command: "echo hello", Concurrency: 2})
+		runExecCommands(context.Background(), []string{a, b}, execOptions{Root: base, Command: "echo hello", Concurrency: 2})
 	})
 
-	for _, name := range []string{"alpha", "beta"} {
+	for _, name := range []string{"public/go/alpha", "public/rust/beta"} {
 		if !strings.Contains(out, "--- ["+name+"] ---") {
 			t.Errorf("expected per-repo header for %q in output: %q", name, out)
 		}
@@ -477,5 +477,38 @@ func TestExecCmdRejectsNegativeTimeout(t *testing.T) {
 	}
 	if flag := execCmd.Flags().Lookup("timeout"); flag == nil || flag.DefValue != "0s" {
 		t.Fatalf("--timeout flag = %+v, want default 0s", flag)
+	}
+}
+
+// TestRunExecCommandsHeaderIsRelativePath pins D-01: two clones that
+// share a name in different collections must be told apart in the output.
+func TestRunExecCommandsHeaderIsRelativePath(t *testing.T) {
+	if _, err := os.Stat("/bin/sh"); err != nil {
+		t.Skip("/bin/sh not available")
+	}
+	base := t.TempDir()
+	public := filepath.Join(base, "Public", "Go", "x")
+	private := filepath.Join(base, "Private", "Go", "x")
+	for _, p := range []string{public, private} {
+		if err := os.MkdirAll(p, 0o750); err != nil {
+			t.Fatal(err)
+		}
+	}
+	out := captureStdout(t, func() {
+		runExecCommands(context.Background(), []string{public, private}, execOptions{Root: base, Command: "true", Concurrency: 1})
+	})
+	for _, want := range []string{"--- [Public/Go/x] ---", "--- [Private/Go/x] ---"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing header %q in %q", want, out)
+		}
+	}
+}
+
+func TestExecRepoLabelFallsBackToPath(t *testing.T) {
+	if got := execRepoLabel("", "/abs/repo"); got != "/abs/repo" {
+		t.Fatalf("label without root = %q", got)
+	}
+	if got := execRepoLabel("/base", "/elsewhere/repo"); got != "/elsewhere/repo" {
+		t.Fatalf("label outside root = %q", got)
 	}
 }
