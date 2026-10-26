@@ -7,7 +7,8 @@ Codeberg and Bitbucket by visibility and language. Contributions are welcome.
 
 1. Fork and clone the repository.
 2. Install development dependencies:
-   - **Go 1.26+**
+   - **Go** at or above the `go` directive in `go.mod`, but not 1.27.0 to
+     1.27.2 (see [docs/packaging.md](docs/packaging.md#minimum-toolchain-policy))
    - **Make**
    - **Git**
 

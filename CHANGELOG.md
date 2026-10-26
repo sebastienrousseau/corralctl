@@ -16,6 +16,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **The build-from-source prerequisites name the real toolchain floor.**
+  README and CONTRIBUTING said "Go 1.26+", which admits 1.26.0 to 1.26.9
+  and 1.27.0 to 1.27.2. Those releases carry GO-2026-6809 in
+  `crypto/x509`, reachable from the forge HTTPS client. The docs now point
+  at the `go` directive in `go.mod` and exclude 1.27.0 to 1.27.2, and
+  `docs/packaging.md` explains why a `toolchain` line cannot.
+
 - **`make staticcheck` and `make vuln-check` run pinned tool versions.**
   They installed `staticcheck@latest` and `govulncheck@latest`, so a local
   `make check` and CI could run different scanners against the same tree.

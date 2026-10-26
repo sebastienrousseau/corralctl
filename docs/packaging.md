@@ -41,6 +41,19 @@ claim here would be worse than none.
 The reason for each rise is recorded in the CHANGELOG entry for the release
 that raises it.
 
+**The floor is not a guarantee about newer toolchains.** The `go` directive
+accepts any newer Go, including a point release that still carries a
+standard-library advisory the floor has a fix for. Go 1.27.0 to 1.27.2 are
+the current case: they carry GO-2026-6809 (`crypto/x509`), which corralctl
+reaches through its forge HTTPS client (`internal/github/transport.go`), and
+govulncheck reports it when the tree is built with them. 1.26.10 and 1.27.3
+are fixed. Build with the floor, or with 1.27.3 or newer.
+
+A `toolchain` line in `go.mod` cannot express this. It only ever selects a
+*newer* toolchain than the local one, so it could fix 1.27.0 to 1.27.2 only
+by moving every build, CI and the release onto Go 1.27.3. Release binaries
+are built with the floor and are not affected.
+
 ## Building
 
 No code generation, no vendored tree, no CGO.
