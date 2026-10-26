@@ -53,7 +53,7 @@ excluded):
 | `internal/mcp` | adopt, diag, discover, forge, git, github, graph, safefs, sanitize, search, symbols, syncguard |
 | `internal/tui` | discover, git, github, graph, version |
 | `internal/adopt` | forge, git |
-| `internal/mirror` | forge, git |
+| `internal/mirror` | engine, forge, git |
 | `internal/forge` | git, github |
 | `internal/syncguard` | git, github |
 | `internal/discover` | git |
