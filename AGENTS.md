@@ -95,8 +95,8 @@ established pattern throughout, not an exception made for the new code.
 
 - Do not couple a structure or documentation cleanup to a behaviour change.
   They review differently and the cleanup is what gets dropped.
-- Do not add a dependency without saying why in the commit. The module has
-  eleven direct dependencies and a hand-maintained `SBOM.md` that CI checks
-  against `go.mod`; a new one is not free.
+- Do not add a dependency without saying why in the commit. Every direct
+  dependency in `go.mod` has a row in a hand-maintained `SBOM.md` that CI
+  checks against it; a new one is not free.
 - Do not add a CI gate that does not currently pass. A red gate on arrival
   teaches everyone to ignore it.

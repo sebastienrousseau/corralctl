@@ -23,7 +23,7 @@ bug in this file — please report it.
 | Tool | Version | Why |
 |---|---|---|
 | Go | as pinned by the `go` directive in `go.mod` | `GOTOOLCHAIN=auto` downloads it; CI never pins a version separately, so `go.mod` is the single source of truth |
-| git | 2.30+ | corralctl shells out to `git` for every clone, pull and inspection |
+| git | 2.31+ | corralctl shells out to `git` for every clone, pull and inspection, and hands it credentials through `GIT_CONFIG_COUNT`, which 2.31 introduced |
 | make | any | Task runner for everything below |
 
 Optional, only needed for the gate that uses them:

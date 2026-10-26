@@ -25,25 +25,45 @@ already-cloned local mirror.
 cmd/corralctl        main(); nothing but a call into cmd
 cmd/                 cobra commands, flag validation, config file
 internal/engine      the reconciliation loop: workers, layout, migration
-internal/forge       one adapter per forge: list an owner (Forge) and hold a mirror (Target)
+internal/adopt       bring an untracked clone under management: relocate, create a remote, push
+internal/forge       one adapter per forge: list an owner (Forge), hold a mirror (Target), resolve its token
 internal/mirror      `corralctl sync`: walk the tree, guard, push in parallel
 internal/github      GitHub API client, paging, retry, token resolution
 internal/git         every `git` subprocess, credentials, remote identity
+internal/discover    pruned walk that finds unmanaged and untracked clones
 internal/tui         Bubble Tea progress view and interactive selector
 internal/mcp         the MCP server: index, tools, resources, audit
-internal/diag        levelled diagnostics, always to stderr
-internal/sanitize    bounds and de-fangs untrusted strings
 internal/symbols     declaration extraction: where a symbol is defined
+internal/search      text search inside a repository's source files
+internal/graph       cross-repository package dependency graph
+internal/safefs      opens files under a root without following symlinks
+internal/sanitize    bounds and de-fangs untrusted strings
+internal/diag        levelled diagnostics, always to stderr
+internal/version     formats the build's version string for display
 ```
 
-Dependencies run one way:
+Internal imports, as `go list -f '{{.Imports}}'` reports them (test files
+excluded):
 
-```text
-cmd ──► engine ──► github
-  │        ├────► git ◄──── mcp
-  │        └────► tui
-  └──────────────► mcp
-```
+| Package | Imports (under `internal/`) |
+|---|---|
+| `cmd` | adopt, diag, discover, engine, forge, git, github, graph, mcp, mirror, search, tui, version |
+| `internal/engine` | diag, forge, git, github, tui |
+| `internal/mcp` | adopt, diag, discover, forge, git, github, graph, safefs, sanitize, search, symbols |
+| `internal/tui` | discover, git, github, graph, version |
+| `internal/adopt` | forge, git |
+| `internal/mirror` | forge, git |
+| `internal/forge` | git, github |
+| `internal/discover` | git |
+| `internal/git` | diag |
+| `internal/search` | safefs |
+| `internal/symbols` | safefs |
+| `internal/diag`, `internal/github`, `internal/graph`, `internal/safefs`, `internal/sanitize`, `internal/version` | nothing internal |
+
+`internal/mcp` does not reach `internal/engine` or `internal/tui`, so the
+MCP server does not link the Bubble Tea stack.
+`internal/mcp/import_boundary_test.go` fails if either edge, or any
+`charmbracelet` import, appears anywhere in its in-module import graph.
 
 `internal/github` imports nothing internal and stays a leaf deliberately —
 see [ADR-0002](adr/0002-github-package-is-a-leaf.md).
@@ -127,16 +147,25 @@ the base directory.
 
 ## The MCP server
 
-Stdio JSON-RPC. Seven read tools and three write tools, the write side gated
-behind `--enable-mutations` and deletion behind a second flag.
+JSON-RPC over stdio by default, or over Streamable HTTP or the legacy
+HTTP+SSE transport ([ADR-0007](adr/0007-three-transports-one-command-line.md)).
+Eleven read tools and seven write tools. The write tools are registered
+only with `--enable-mutations`, and `corral_delete_repo` only when
+`--enable-destructive-mutations` is also set.
 
 ```text
 Scan(root)  ──►  Index{ Repos []RepoEntry }   cached for scanTTL
                     │
-                    ├─ tools:     list, find, metadata, summary, index
+                    ├─ tools:     list_repos, find_repo, get_repo_metadata,
+                    │             status_summary, workspace_index, doctor,
+                    │             graph_dependencies, discover_repos
                     ├─ symbols:   find_symbol, repo_overview
+                    ├─ search:    search_code
                     ├─ resources: workspace index, repo state, tree, file
-                    └─ mutations: sync, clone, delete   (audited, gated)
+                    └─ mutations: sync_repo, clone_repo, adopt_repo,
+                                  create_worktree, release_worktree,
+                                  prune_worktrees, delete_repo
+                                  (audited, gated)
 ```
 
 ## The symbol index
@@ -157,11 +186,13 @@ Three properties are load-bearing:
 - **Definitions only.** A symbol is a name, a kind and a location. The agent
   reads the file; this tells it which file and which line. A call graph
   would be an order of magnitude more to build and to keep correct.
-- **`go/ast`, not tree-sitter.** Its Go binding is CGO, and corral builds
+- **No tree-sitter.** Its Go binding is CGO, and corral builds
   `CGO_ENABLED=0` — three of four release targets fail to cross-compile
-  with it. See [ADR-0006](adr/0006-symbol-extraction-without-cgo.md). The
-  cost is that Go is the only language indexed; the `Extractor` interface
-  exists so a second is a new file rather than a rewrite.
+  with it. See [ADR-0006](adr/0006-symbol-extraction-without-cgo.md). Go
+  is parsed with `go/ast`. Python, TypeScript and JavaScript, Rust, C,
+  C++, Java, Kotlin, Swift and Protocol Buffers each have a line scanner
+  that runs over source with comment and string contents blanked. Each
+  language is one `Extractor` registered in `internal/symbols`.
 - **Truncation is reported, never silent.** A repository that exceeds the
   file or symbol cap is named in the response, because a caller cannot
   otherwise tell a missing symbol from an absent one.

@@ -573,11 +573,12 @@ a server somebody else started.
 `--http 127.0.0.1:7777` is the older spelling of `--transport
 streamable-http` and still works.
 
-None of them carries authentication, so a listening transport binds
+A listening transport speaks plain HTTP, and its only authentication is an
+optional bearer token (`--token`, or `CORRAL_MCP_TOKEN`). It therefore binds
 loopback: `--host 0.0.0.0`, or `--http :7777`, which binds every interface,
-is refused because this server exposes every repository under its root.
-Pass `--allow-remote` if you have put your own authentication in front of
-it.
+is refused, with or without a token, because this server exposes every
+repository under its root. Pass `--allow-remote` if you have put your own
+authentication and TLS in front of it.
 
 ### Safety
 
@@ -956,7 +957,7 @@ corralctl is opinionated, and the opinions do not suit everyone.
 | | |
 |---|---|
 | **Go** | The `go` directive in [`go.mod`](go.mod) — currently **1.26.10** |
-| **git** | 2.30 or newer, on `PATH` |
+| **git** | 2.31 or newer, on `PATH` (credentials reach git through `GIT_CONFIG_COUNT`, which 2.31 introduced) |
 | **gh** | Optional; only for `--auth gh` |
 
 The Go floor is stated in exactly one place, `go.mod`, and CI sets

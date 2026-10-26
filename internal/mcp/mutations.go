@@ -83,7 +83,7 @@ func redactCloneURL(raw string) string {
 }
 
 // registerMutationTools attaches the non-destructive write tools
-// (corral_sync_repo, corral_clone_repo) to the underlying MCP server.
+// (sync, clone, adopt and the three worktree tools) to the MCP server.
 // corral_delete_repo lives in registerDestructiveTools so callers can
 // grant "may pull and clone" without also granting "may delete."
 func (s *Server) registerMutationTools() {

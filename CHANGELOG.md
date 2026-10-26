@@ -19,6 +19,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `internal/engine`, `internal/tui` or the Bubble Tea stack. A test keeps
   that boundary.
 
+### Documentation
+
+- **The documented minimum git is now 2.31,** in the README,
+  `DEVELOPMENT.md`, the Debian package README and the security model, which
+  disagreed (2.20 and 2.30). Credentials reach git through
+  `GIT_CONFIG_COUNT`, which git reads from 2.31.0 on; an older git ignores
+  it and runs the clone or push without the token.
+- **Claims the code contradicted are corrected.** The MCP help, README, docs
+  site and ADR-0007 said the HTTP transports have no authentication; they
+  have an optional bearer token (`--token`, `CORRAL_MCP_TOKEN`), and the
+  loopback guard still applies with one. The security model said corralctl
+  never pushes; `sync` and `adopt` create repositories and push, within the
+  bounds C6 and C7 state. The architecture document listed seven read and
+  three write MCP tools (there are eleven and seven), Go as the only
+  indexed language (there are ten extractors), and a dependency diagram
+  that omitted most packages; it now carries the `go list` import table.
+  The `mcp` help named five indexed languages, and `--enable-mutations` and
+  the server's instructions to agents named two of the six write tools it
+  unlocks.
+
 ### Added
 
 - **Trace context from `_meta`.** A request that carries a W3C `traceparent`

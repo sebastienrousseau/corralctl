@@ -28,8 +28,9 @@ type ServerOptions struct {
 	// Version is injected at build time (see cmd.Version); surfaced to
 	// MCP clients in the server-info handshake.
 	Version string
-	// EnableMutations, when true, registers the write-side tools
-	// (corral_sync_repo, corral_clone_repo). The read-only tool set is
+	// EnableMutations, when true, registers the non-destructive write
+	// tools (corral_sync_repo, corral_clone_repo, corral_adopt_repo and
+	// the three worktree tools). The read-only tool set is
 	// always registered; this flag only unlocks the ones that touch
 	// the filesystem or the network.
 	EnableMutations bool

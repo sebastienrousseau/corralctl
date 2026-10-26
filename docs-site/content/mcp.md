@@ -169,10 +169,13 @@ where the client posts its messages.
 `--http 127.0.0.1:7777` is the older spelling of `--transport streamable-http`
 and still works, with a notice on stderr.
 
-The address has to be on loopback. This server has no authentication and
-exposes every repository under its root — with mutations enabled, it can
-change them — so binding it to a routable interface publishes all of that.
+The address has to be on loopback. This server speaks plain HTTP, its only
+authentication is an optional bearer token (`--token`, or
+`CORRAL_MCP_TOKEN`), and it exposes every repository under its root (with
+mutations enabled, it can change them), so binding it to a routable
+interface publishes all of that.
 `--host 0.0.0.0`, or `--http :7777`, which is the form typed by somebody
 thinking about the port and not the host, binds every interface and is
-refused with an explanation. `--allow-remote` overrides the refusal, and is
-for the case where you have put your own authentication in front of it.
+refused with an explanation, with or without a token. `--allow-remote`
+overrides the refusal, and is for the case where you have put your own
+authentication and TLS in front of it.
