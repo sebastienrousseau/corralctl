@@ -216,8 +216,8 @@ func TestAuthEnv(t *testing.T) {
 
 	TokenProvider = func() string { return "secret" }
 	env := authEnv()
-	if len(env) != 3 || env[0] != "GIT_CONFIG_COUNT=1" {
-		t.Fatalf("expected three auth env vars, got %v", env)
+	if len(env) != 1 || env[0].key != "http.https://github.com/.extraheader" {
+		t.Fatalf("expected one github.com extraheader entry, got %v", env)
 	}
 }
 

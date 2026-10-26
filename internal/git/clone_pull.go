@@ -25,10 +25,10 @@ var TokenProvider func() string
 
 var updateSubmodulesFn = updateSubmodules
 
-// authEnv returns the environment variables that inject an Authorization header
-// for github.com HTTPS requests, or nil when no token is available. The header
-// is scoped to https://github.com/, so it is harmless for SSH remotes.
-func authEnv() []string {
+// authEnv returns the config entries that inject an Authorization header for
+// github.com HTTPS requests, or nil when no token is available. The header is
+// scoped to https://github.com/, so it is harmless for SSH remotes.
+func authEnv() []configPair {
 	if TokenProvider == nil {
 		return nil
 	}
@@ -37,11 +37,7 @@ func authEnv() []string {
 		return nil
 	}
 	cred := base64.StdEncoding.EncodeToString([]byte("x-access-token:" + tok))
-	return []string{
-		"GIT_CONFIG_COUNT=1",
-		"GIT_CONFIG_KEY_0=http.https://github.com/.extraheader",
-		"GIT_CONFIG_VALUE_0=Authorization: Basic " + cred,
-	}
+	return []configPair{{"http.https://github.com/.extraheader", "Authorization: Basic " + cred}}
 }
 
 // nonInteractiveEnv returns the environment variables that force git into
@@ -62,11 +58,7 @@ func nonInteractiveEnv() []string {
 // cmd.Env so the non-interactive guards apply even on anonymous clones, and
 // it starts from childEnv so an inherited GIT_DIR cannot redirect the command.
 func withGitEnv(cmd *exec.Cmd) {
-	env := childEnv()
-	if auth := authEnv(); auth != nil {
-		env = append(env, auth...)
-	}
-	cmd.Env = env
+	cmd.Env = withConfig(childEnv(), authEnv()...)
 }
 
 // CloneOptions configures optional clone-time performance and layout flags.

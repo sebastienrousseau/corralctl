@@ -239,7 +239,7 @@ func TestPushMirrorScopesTheCredential(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	joined := strings.Join(env, "\n")
+	joined := strings.Join(withConfig(nil, env...), "\n")
 	if !strings.Contains(joined, "GIT_CONFIG_KEY_0=http.https://gitlab.example.com:8443/.extraheader") ||
 		!strings.Contains(joined, "GIT_CONFIG_VALUE_0=Authorization: Basic b2F1dGgyOnRvaw==") ||
 		strings.Contains(joined, "tok\n") {

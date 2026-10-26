@@ -68,3 +68,58 @@ func TestChildEnvIgnoresRepositoryRedirects(t *testing.T) {
 		t.Errorf("runMirror wrote to another repository's config")
 	}
 }
+
+// TestCorralConfigAppendsToTheUsersEnvConfig reproduces S-10: a user who
+// sets git config through GIT_CONFIG_COUNT/KEY_n/VALUE_n (a proxy, a CA
+// bundle) lost it whenever corralctl injected its own credential, because
+// corral wrote GIT_CONFIG_COUNT=1 and KEY_0 over theirs.
+func TestCorralConfigAppendsToTheUsersEnvConfig(t *testing.T) {
+	ctx := context.Background()
+	repo := t.TempDir()
+	initRepoWithCommit(t, repo, "a.txt")
+	t.Setenv("GIT_CONFIG_COUNT", "1")
+	t.Setenv("GIT_CONFIG_KEY_0", "corral.user")
+	t.Setenv("GIT_CONFIG_VALUE_0", "kept")
+	defer func() { TokenProvider = nil }()
+	TokenProvider = func() string { return "secret" }
+
+	out, err := runGitOutput(ctx, repo, "config", "--get", "corral.user")
+	if err != nil || strings.TrimSpace(out) != "kept" {
+		t.Errorf("user's env config lost under a token: %q, %v", out, err)
+	}
+	if _, err := runGitOutput(ctx, repo, "config", "--get", "http.https://github.com/.extraheader"); err != nil {
+		t.Errorf("corral's own header is missing: %v", err)
+	}
+
+	cred, err := pushAuthEnv("https://forge.example/me/r.git", &PushCredential{Username: "u", Secret: "s"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := runMirror(ctx, repo, cred, "config", "--get", "corral.user"); err != nil {
+		t.Errorf("user's env config lost under a push credential: %v", err)
+	}
+	if err := runMirror(ctx, repo, cred, "config", "--get", "http.https://forge.example/.extraheader"); err != nil {
+		t.Errorf("push credential header is missing: %v", err)
+	}
+}
+
+func TestInheritedConfigCount(t *testing.T) {
+	for _, tc := range []struct {
+		env  []string
+		want int
+	}{
+		{nil, 0},
+		{[]string{"GIT_CONFIG_COUNT=3"}, 3},
+		{[]string{"GIT_CONFIG_COUNT=1", "GIT_CONFIG_COUNT=2"}, 2},
+		{[]string{"GIT_CONFIG_COUNT="}, 0},
+		{[]string{"GIT_CONFIG_COUNT=x"}, 0},
+		{[]string{"GIT_CONFIG_COUNT=-4"}, 0},
+	} {
+		if got := inheritedConfigCount(tc.env); got != tc.want {
+			t.Errorf("inheritedConfigCount(%q) = %d, want %d", tc.env, got, tc.want)
+		}
+	}
+	if env := withConfig([]string{"A=b"}); len(env) != 1 {
+		t.Errorf("no pairs must leave the environment alone, got %q", env)
+	}
+}

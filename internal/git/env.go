@@ -5,6 +5,7 @@ package git
 
 import (
 	"os"
+	"strconv"
 	"strings"
 )
 
@@ -52,4 +53,48 @@ func childEnv() []string {
 		env = append(env, kv)
 	}
 	return append(env, nonInteractiveEnv()...)
+}
+
+// configPair is one git config entry passed through the environment.
+type configPair struct {
+	key, value string
+}
+
+// withConfig adds pairs to env as GIT_CONFIG_KEY_n/GIT_CONFIG_VALUE_n,
+// numbered after the entries env already declares, and raises
+// GIT_CONFIG_COUNT to cover both.
+//
+// Writing GIT_CONFIG_COUNT=1 and KEY_0 instead, as corralctl once did,
+// silently replaced a user's own environment config (a proxy, a CA
+// bundle) whenever a credential was attached. os/exec keeps the last
+// duplicate of a variable, so the new count appended here wins.
+func withConfig(env []string, pairs ...configPair) []string {
+	if len(pairs) == 0 {
+		return env
+	}
+	base := inheritedConfigCount(env)
+	for i, p := range pairs {
+		n := strconv.Itoa(base + i)
+		env = append(env, "GIT_CONFIG_KEY_"+n+"="+p.key, "GIT_CONFIG_VALUE_"+n+"="+p.value)
+	}
+	return append(env, "GIT_CONFIG_COUNT="+strconv.Itoa(base+len(pairs)))
+}
+
+// inheritedConfigCount reads the last GIT_CONFIG_COUNT in env. A value git
+// itself would reject as bogus counts as zero, which is what corralctl did
+// before it preserved the user's entries.
+func inheritedConfigCount(env []string) int {
+	count := 0
+	for _, kv := range env {
+		v, ok := strings.CutPrefix(kv, "GIT_CONFIG_COUNT=")
+		if !ok {
+			continue
+		}
+		n, err := strconv.Atoi(strings.TrimSpace(v))
+		if err != nil || n < 0 {
+			n = 0
+		}
+		count = n
+	}
+	return count
 }

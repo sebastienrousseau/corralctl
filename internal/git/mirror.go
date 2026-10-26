@@ -133,11 +133,12 @@ func validatePushBranch(branch string) error {
 	return nil
 }
 
-// pushAuthEnv renders a credential as the GIT_CONFIG_* environment that
-// injects an Authorization header scoped to pushURL's origin. A nil
+// pushAuthEnv renders a credential as the config entry, passed to git
+// through GIT_CONFIG_*, that injects an Authorization header scoped to
+// pushURL's origin. A nil
 // credential, or a non-HTTPS URL, yields nothing: SSH authenticates
 // itself.
-func pushAuthEnv(pushURL string, cred *PushCredential) ([]string, error) {
+func pushAuthEnv(pushURL string, cred *PushCredential) ([]configPair, error) {
 	if cred == nil || !strings.HasPrefix(pushURL, "https://") {
 		return nil, nil
 	}
@@ -147,11 +148,7 @@ func pushAuthEnv(pushURL string, cred *PushCredential) ([]string, error) {
 	}
 	origin := "https://" + u.Host + "/"
 	pair := base64.StdEncoding.EncodeToString([]byte(cred.Username + ":" + cred.Secret))
-	return []string{
-		"GIT_CONFIG_COUNT=1",
-		"GIT_CONFIG_KEY_0=http." + origin + ".extraheader",
-		"GIT_CONFIG_VALUE_0=Authorization: Basic " + pair,
-	}, nil
+	return []configPair{{"http." + origin + ".extraheader", "Authorization: Basic " + pair}}, nil
 }
 
 // validateRemoteName refuses a remote name git would misread as an option
@@ -174,14 +171,14 @@ func validateRemoteName(name string) error {
 // It deliberately does not go through withGitEnv: that attaches the
 // GitHub token to every invocation, and a push to another forge should
 // carry exactly one credential, the one meant for it.
-func runMirror(ctx context.Context, targetDir string, extra []string, args ...string) error {
+func runMirror(ctx context.Context, targetDir string, extra []configPair, args ...string) error {
 	fullArgs := append([]string{
 		"-c", "core.hooksPath=/dev/null",
 		"-c", "protocol.ext.allow=never",
 		"-C", targetDir,
 	}, args...)
 	cmd := exec.CommandContext(ctx, gitBinary, fullArgs...) // #nosec G204 -- fixed git binary and structured arguments
-	cmd.Env = append(childEnv(), extra...)
+	cmd.Env = withConfig(childEnv(), extra...)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("git %s: %w: %s", strings.Join(args, " "), err, strings.TrimSpace(string(out)))

@@ -15,6 +15,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   before `prune` or a delete, inspected the repository the variable named.
   Every git child now starts without them.
 
+### Fixed
+
+- **A credential no longer replaces your own `GIT_CONFIG_*` settings.**
+  Attaching the GitHub token or a mirror's push credential wrote
+  `GIT_CONFIG_COUNT=1` and `GIT_CONFIG_KEY_0`, which overwrote config a user
+  passes through the environment, such as a proxy or `http.sslCAInfo`.
+  corralctl's entries are now numbered after the user's and the count raised
+  to cover both.
+
 ## [0.0.53] - 2026-10-25
 
 ### Security
