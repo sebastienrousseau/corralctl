@@ -6,6 +6,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **The MCP workspace watcher no longer exhausts file descriptors.** It
+  watched every directory under `--root`, `node_modules` and `target` trees
+  included, which on macOS held one descriptor per directory and per file: over
+  10,000 on a real workspace. Under a 256-descriptor limit the workspace scan
+  then could not open the root and `corral_search_code` answered "No match ...
+  across 0 repositories". The watcher now watches only the layout directories
+  and each clone's `.git` directory, stays within half the open-file limit,
+  reports a failed or skipped watch on stderr, and registers in the background
+  instead of before the stdio handshake. `--watch` stays on by default.
+- **A workspace scan that runs out of file descriptors is an error.** It used
+  to skip the directory it failed on, and with it every repository beneath,
+  and return what was left as a complete index.
+
 ## [0.0.53] - 2026-10-25
 
 ### Security

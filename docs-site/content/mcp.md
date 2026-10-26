@@ -140,6 +140,25 @@ JSON-RPC request, tool invocation, and error with nanosecond timestamps:
 corralctl mcp --trace-file /tmp/corral-trace.jsonl
 ```
 
+## Workspace watcher
+
+`--watch` (on by default) drops the cached workspace index as soon as a
+repository is cloned, moved, removed or re-pointed, instead of waiting for the
+index's five-second expiry. It watches only what that index is built from: the
+layout directories down to the scan depth and each clone's `.git` directory.
+It does not watch a clone's working tree, hidden directories, or dependency and
+build trees such as `node_modules`, `vendor` and `target`.
+
+On macOS and the BSDs every watched directory, and every entry in it, holds a
+file descriptor, so the watcher uses at most half of the process's open-file
+limit. If it reaches that budget, or the system refuses a watch, it says so
+once on stderr and stops adding watches; changes in the directories left
+unwatched are seen when the index expires. Registration runs in the background
+and does not delay the MCP handshake. `--watch=false` turns the watcher off.
+
+A workspace scan that runs out of file descriptors is reported as an error
+rather than as a workspace with fewer (or no) repositories in it.
+
 ## Transport
 
 By default the server speaks stdio: the client launches `corralctl mcp` as a
