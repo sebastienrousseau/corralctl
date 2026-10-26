@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/sebastienrousseau/corralctl/internal/github"
+	"github.com/sebastienrousseau/corralctl/internal/tui"
 )
 
 // TestRunEPassesForgeSelectionToFetch pins A-03: the forge travels with
@@ -78,5 +79,31 @@ func TestRunELeavesTheStandardLoggerAlone(t *testing.T) {
 	}
 	if log.Writer() != &embedder {
 		t.Error("RunE replaced the standard logger's output")
+	}
+}
+
+// TestRunELeavesTheBuildVersionAlone pins A-03: RunE wrote opts.Version
+// into tui.Version, a package variable the build sets, so one run's
+// version leaked into every later selector in the process. The run's
+// version reaches the selector it starts as an argument instead.
+func TestRunELeavesTheBuildVersionAlone(t *testing.T) {
+	oldSelector, oldVersion := runSelector, tui.Version
+	t.Cleanup(func() { runSelector, tui.Version = oldSelector, oldVersion })
+	tui.Version = "build"
+	var gotVersion string
+	runSelector = func(_ context.Context, _, version string, _ github.FetchOptions, _ tui.FetchFunc) ([]github.Repo, bool, error) {
+		gotVersion = version
+		return nil, false, nil
+	}
+	opts := defaultRunOptions(t.TempDir())
+	opts.Interactive, opts.Version = true, "9.9.9-embedder"
+	if err := RunE(context.Background(), opts); err != nil {
+		t.Fatalf("RunE: %v", err)
+	}
+	if tui.Version != "build" {
+		t.Errorf("tui.Version = %q after RunE, want the build's %q", tui.Version, "build")
+	}
+	if gotVersion != "9.9.9-embedder" {
+		t.Errorf("selector was given version %q, want the run's", gotVersion)
 	}
 }

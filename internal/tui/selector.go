@@ -15,6 +15,8 @@ import (
 )
 
 type selectorModel struct {
+	// version is rendered in the footer: the caller's, or the build's.
+	version       string
 	repos         []github.Repo
 	filteredRepos []github.Repo
 	filter        string
@@ -89,6 +91,7 @@ func NewSelectorModel(fetchFn FetchFunc) *selectorModel {
 	sp.Style = lipgloss.NewStyle().Foreground(lipgloss.Color("#F56B5E"))
 
 	m := &selectorModel{
+		version:  Version,
 		fetchFn:  fetchFn,
 		loading:  true,
 		selected: sel,
@@ -289,9 +292,16 @@ func (m *selectorModel) setFilteredSelection(selected bool) (tea.Model, tea.Cmd,
 	return m, nil, true
 }
 
-// RunSelector launches the interactive terminal selector program to choose repositories.
-func RunSelector(ctx context.Context, owner string, fetchOpts github.FetchOptions, fetchFn FetchFunc) ([]github.Repo, bool, error) {
-	m, err := runSelectorProgram(ctx, NewSelectorModel(fetchFn))
+// RunSelector launches the interactive terminal selector program to choose
+// repositories. version is shown in the footer; empty means the build's
+// Version. It is passed per call rather than written to Version, so one
+// caller's version never leaks into another's selector.
+func RunSelector(ctx context.Context, owner, version string, fetchOpts github.FetchOptions, fetchFn FetchFunc) ([]github.Repo, bool, error) {
+	sel := NewSelectorModel(fetchFn)
+	if version != "" {
+		sel.version = version
+	}
+	m, err := runSelectorProgram(ctx, sel)
 	if err != nil {
 		return nil, false, err
 	}

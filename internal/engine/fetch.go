@@ -74,8 +74,7 @@ func resolveRepos(ctx context.Context, opts RunOptions, isTTY bool) ([]github.Re
 		return repos, true, nil
 	}
 
-	tui.Version = opts.Version
-	repos, ok, err := runSelector(ctx, opts.Owner, opts.Fetch, func() ([]github.Repo, error) {
+	repos, ok, err := runSelector(ctx, opts.Owner, opts.Version, opts.Fetch, func() ([]github.Repo, error) {
 		return fetchRepos(ctx, opts.Owner, opts.Fetch, opts.Forge, opts.ForgeURL)
 	})
 	if err != nil {

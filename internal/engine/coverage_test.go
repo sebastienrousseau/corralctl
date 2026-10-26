@@ -31,7 +31,7 @@ func TestRunInteractiveOutcomes(t *testing.T) {
 	opts := defaultRunOptions(t.TempDir())
 	opts.Interactive = true
 
-	runSelector = func(context.Context, string, github.FetchOptions, tui.FetchFunc) ([]github.Repo, bool, error) {
+	runSelector = func(context.Context, string, string, github.FetchOptions, tui.FetchFunc) ([]github.Repo, bool, error) {
 		return nil, false, errors.New("selector failed")
 	}
 	Run(context.Background(), opts)
@@ -40,7 +40,7 @@ func TestRunInteractiveOutcomes(t *testing.T) {
 	}
 
 	exitCode = 0
-	runSelector = func(context.Context, string, github.FetchOptions, tui.FetchFunc) ([]github.Repo, bool, error) {
+	runSelector = func(context.Context, string, string, github.FetchOptions, tui.FetchFunc) ([]github.Repo, bool, error) {
 		return nil, false, nil
 	}
 	Run(context.Background(), opts)
@@ -48,12 +48,12 @@ func TestRunInteractiveOutcomes(t *testing.T) {
 		t.Fatalf("selector cancel exit = %d", exitCode)
 	}
 
-	runSelector = func(context.Context, string, github.FetchOptions, tui.FetchFunc) ([]github.Repo, bool, error) {
+	runSelector = func(context.Context, string, string, github.FetchOptions, tui.FetchFunc) ([]github.Repo, bool, error) {
 		return nil, true, nil
 	}
 	Run(context.Background(), opts)
 
-	runSelector = func(context.Context, string, github.FetchOptions, tui.FetchFunc) ([]github.Repo, bool, error) {
+	runSelector = func(context.Context, string, string, github.FetchOptions, tui.FetchFunc) ([]github.Repo, bool, error) {
 		return []github.Repo{{Name: "repo", Owner: "acme", FullName: "acme/repo", Visibility: "Public", Language: "Go"}}, true, nil
 	}
 	opts.DryRun = true
@@ -220,7 +220,7 @@ func TestRunInteractiveFetchClosureAndTTY(t *testing.T) {
 	fetchRepos = func(context.Context, string, github.FetchOptions, string, string) ([]github.Repo, error) {
 		return []github.Repo{{Name: "repo", Visibility: "Public", Language: "Go"}}, nil
 	}
-	runSelector = func(ctx context.Context, owner string, opts github.FetchOptions, fetch tui.FetchFunc) ([]github.Repo, bool, error) {
+	runSelector = func(ctx context.Context, owner, _ string, opts github.FetchOptions, fetch tui.FetchFunc) ([]github.Repo, bool, error) {
 		repos, err := fetch()
 		return repos, true, err
 	}

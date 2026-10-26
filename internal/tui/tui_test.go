@@ -43,7 +43,7 @@ func TestRunSelectorOutcomes(t *testing.T) {
 	t.Cleanup(func() { runSelectorProgram = oldRun })
 	wantErr := errors.New("runner failed")
 	runSelectorProgram = func(context.Context, tea.Model) (tea.Model, error) { return nil, wantErr }
-	if _, _, err := RunSelector(context.Background(), "owner", github.FetchOptions{}, nil); !errors.Is(err, wantErr) {
+	if _, _, err := RunSelector(context.Background(), "owner", "", github.FetchOptions{}, nil); !errors.Is(err, wantErr) {
 		t.Fatalf("runner error = %v", err)
 	}
 
@@ -52,7 +52,7 @@ func TestRunSelectorOutcomes(t *testing.T) {
 		selected.loadingErr = errors.New("fetch failed")
 		return selected, nil
 	}
-	if _, _, err := RunSelector(context.Background(), "owner", github.FetchOptions{}, nil); err == nil {
+	if _, _, err := RunSelector(context.Background(), "owner", "", github.FetchOptions{}, nil); err == nil {
 		t.Fatal("expected loading error")
 	}
 
@@ -65,7 +65,7 @@ func TestRunSelectorOutcomes(t *testing.T) {
 			configure(selected)
 			return selected, nil
 		}
-		if repos, ok, err := RunSelector(context.Background(), "owner", github.FetchOptions{}, nil); err != nil || ok || repos != nil {
+		if repos, ok, err := RunSelector(context.Background(), "owner", "", github.FetchOptions{}, nil); err != nil || ok || repos != nil {
 			t.Fatalf("cancel outcome = %v %v %v", repos, ok, err)
 		}
 	}
@@ -79,7 +79,7 @@ func TestRunSelectorOutcomes(t *testing.T) {
 		selected.selected[repoSelectionKey(second)] = true
 		return selected, nil
 	}
-	repos, ok, err := RunSelector(context.Background(), "owner", github.FetchOptions{}, nil)
+	repos, ok, err := RunSelector(context.Background(), "owner", "", github.FetchOptions{}, nil)
 	if err != nil || !ok || len(repos) != 1 || repos[0].FullName != second.FullName {
 		t.Fatalf("selection outcome = %+v %v %v", repos, ok, err)
 	}
@@ -613,17 +613,15 @@ func TestRemainingSelectorStates(t *testing.T) {
 		t.Fatalf("language preference sort = %+v", m.filteredRepos)
 	}
 
-	oldVersion := Version
-	t.Cleanup(func() { Version = oldVersion })
 	// "(dev)", not "(vdev)": a build with no version does not get a "v" glued
 	// to the placeholder. See internal/version.
-	Version = ""
+	m.version = ""
 	if footer := m.renderFooter(); !strings.Contains(footer, "(dev)") {
 		t.Fatalf("development footer = %q", footer)
 	}
 	// A version that already carries a "v" keeps exactly the one it has.
-	Version = strings.Repeat("v", 100)
-	if footer := m.renderFooter(); !strings.Contains(footer, Version) {
+	m.version = strings.Repeat("v", 100)
+	if footer := m.renderFooter(); !strings.Contains(footer, m.version) {
 		t.Fatalf("long-version footer = %q", footer)
 	}
 }
@@ -641,5 +639,30 @@ func TestModelAborted(t *testing.T) {
 	}
 	if NewModel(1).(model).Aborted() {
 		t.Error("a running view should not report Aborted")
+	}
+}
+
+// TestRunSelectorRendersTheCallersVersion: the version a caller passes is
+// the one the footer shows, and an empty one falls back to the build's,
+// without either touching the package-level Version.
+func TestRunSelectorRendersTheCallersVersion(t *testing.T) {
+	oldRun, oldVersion := runSelectorProgram, Version
+	t.Cleanup(func() { runSelectorProgram, Version = oldRun, oldVersion })
+	Version = "build"
+	var footer string
+	runSelectorProgram = func(_ context.Context, model tea.Model) (tea.Model, error) {
+		footer = model.(*selectorModel).renderFooter()
+		return model, nil
+	}
+	for given, want := range map[string]string{"1.2.3": "1.2.3", "": "build"} {
+		if _, _, err := RunSelector(context.Background(), "owner", given, github.FetchOptions{}, nil); err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(footer, want) {
+			t.Errorf("version %q: footer = %q, want it to show %q", given, footer, want)
+		}
+	}
+	if Version != "build" {
+		t.Errorf("RunSelector changed Version to %q", Version)
 	}
 }
