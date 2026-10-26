@@ -8,6 +8,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -74,6 +75,12 @@ func TestOpenRegularRefuses(t *testing.T) {
 		"../escape":       ErrOutsideRoot,
 		"real/../../x":    ErrOutsideRoot,
 		"/etc/passwd":     ErrOutsideRoot,
+	}
+	if runtime.GOOS == "windows" {
+		cases[`\etc\passwd`] = ErrOutsideRoot
+		cases[`C:x`] = ErrOutsideRoot
+		cases[`C:\Windows\win.ini`] = ErrOutsideRoot
+		cases[`\\server\share\x`] = ErrOutsideRoot
 	}
 	for rel, want := range cases {
 		if _, _, err := OpenRegular(root, rel); !errors.Is(err, want) {

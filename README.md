@@ -590,7 +590,7 @@ it.
   commits**; a target that is not a git repository at all; or any state Git
   cannot verify. Each refusal names its specific reason and is written to the
   audit log.
-- **Path-traversal protected.** File-resource lookups canonicalise the selected repository root and candidate path, blocking `..` and symlink escapes into sibling repositories or outside the workspace.
+- **Path-traversal protected.** File-resource lookups canonicalise the selected repository root and candidate path, blocking `..` and symlink escapes into sibling repositories or outside the workspace. Search, the symbol index and the file resource never follow a symlink committed in a repository.
 - **Per-call approval for deletion.** With `--enable-destructive-mutations`,
   each individual deletion is put to a person over MCP elicitation before it
   runs. The refusal cascade above stops *mistakes*; this is what stops a
@@ -1019,8 +1019,8 @@ crossing a privilege boundary. Full detail in
   stashed, submodule or *gitignored* work — the last because `git status`
   hides exactly the files no remote has a copy of.
 - **The MCP server is sandboxed and gated.** Path resolution canonicalises
-  symlinks on both sides and compares path segments, not string prefixes.
-  Write tools require `--enable-mutations`; deletion requires a second
+  symlinks on both sides and compares path segments, not string prefixes,
+  and no repository file is read through a symlink. Write tools require `--enable-mutations`; deletion requires a second
   flag. Every mutation is written to an audit log before it is attempted.
 - **Memory safety** comes from Go; there is no CGO anywhere
   (`CGO_ENABLED=0`), so released binaries are static and free of libc

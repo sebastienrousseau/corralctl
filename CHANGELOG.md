@@ -6,6 +6,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.53] - 2026-10-25
+
+### Security
+
+- **Search and the symbol index no longer follow symlinks out of the
+  workspace** (GHSA-7pgr-hvf8-xxfg, affects 0.0.29 to 0.0.52).
+  `corral_search_code` and the symbol index opened every walked file with
+  `os.Open`, so a symlink committed in any clone returned files from outside
+  `--root` on the default read-only MCP server. Both now skip symlinks, and
+  every repository file is read through the new `internal/safefs`, which
+  refuses a symlink at any path component and checks that the file opened is
+  the one checked.
+
+- **The file resource no longer serves a refused file through a symlink**
+  (GHSA-2mm5-xrpm-cv2p, affects 0.0.20 to 0.0.52). The content policy was
+  checked on the requested name and the link's target was served, so
+  `readme.md -> .env` returned the `.env` that a direct request is refused.
+  The resource now reads through `internal/safefs`.
+
+- **The `sync` origin guard sees through aliases** (GHSA-mmpx-r9vh-gjxv,
+  affects 0.0.37 to 0.0.52). The guard compared the raw `origin` host with
+  the destination, so an `insteadOf` rewrite, an `~/.ssh/config` alias or
+  `ssh.github.com` let `sync` run `git push --prune` against a clone's own
+  upstream. It now compares the destination with origin as written, as git
+  rewrites it, as ssh resolves it, and with forge port-443 hosts folded to
+  the forge.
+
 ### Fixed
 
 - **`corralctl sync` no longer fails on a stale Gitea default branch.**
@@ -2760,7 +2787,8 @@ cron-safety overhaul.
   100 % doc coverage.
 - All tests green under `-race -count=1`.
 
-[Unreleased]: https://github.com/sebastienrousseau/corralctl/compare/v0.0.52...HEAD
+[Unreleased]: https://github.com/sebastienrousseau/corralctl/compare/v0.0.53...HEAD
+[0.0.53]: https://github.com/sebastienrousseau/corralctl/compare/v0.0.52...v0.0.53
 [0.0.52]: https://github.com/sebastienrousseau/corralctl/compare/v0.0.51...v0.0.52
 [0.0.51]: https://github.com/sebastienrousseau/corralctl/compare/v0.0.50...v0.0.51
 [0.0.50]: https://github.com/sebastienrousseau/corralctl/compare/v0.0.49...v0.0.50

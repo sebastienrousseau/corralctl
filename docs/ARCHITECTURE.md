@@ -172,6 +172,8 @@ Three rules govern everything the server returns:
    compares path segments, not string prefixes, so a repository legitimately
    named `..foo` is inside the root while `../../etc` is not.
    `SafeMutationPath` additionally refuses the workspace root itself.
+   Repository files are read through `internal/safefs`, which refuses a
+   symlink at any path component, so a committed link is never followed.
 2. **Untrusted output.** Repository names, branch names, paths and origin
    URLs are chosen by whoever owns the repository. `RepoEntry.Redacted()`
    bounds and de-fangs them at every output site — never at construction,
