@@ -146,44 +146,59 @@ func (s *Server) toolInstrumentationMiddleware() mcp.Middleware {
 			res, err := next(ctx, method, req)
 			dur := float64(time.Since(start).Microseconds()) / 1000.0
 
-			if method == "tools/call" {
-				if call, ok := req.(*mcp.CallToolRequest); ok {
-					status := "ok"
-					errMsg := ""
-					if err != nil {
-						status = "error"
-						errMsg = err.Error()
-					} else if callRes, ok := res.(*mcp.CallToolResult); ok && callRes != nil && callRes.IsError {
-						status = "error"
-						errMsg = "tool returned error result"
-					}
-					if s.metrics != nil {
-						s.metrics.incToolCall(call.Params.Name, status)
-					}
-					if s.tracer != nil {
-						_ = s.tracer.Record(ctx, TraceEvent{
-							Type:       EventToolCall,
-							Name:       call.Params.Name,
-							DurationMs: dur,
-							Success:    status == "ok",
-							Error:      errMsg,
-						})
-					}
-				}
-			} else if s.tracer != nil {
-				errMsg := ""
-				if err != nil {
-					errMsg = err.Error()
-				}
-				_ = s.tracer.Record(ctx, TraceEvent{
-					Type:       EventRequest,
-					Name:       method,
-					DurationMs: dur,
-					Success:    err == nil,
-					Error:      errMsg,
-				})
+			if method != "tools/call" {
+				s.recordRequest(ctx, method, dur, err)
+			} else if call, ok := req.(*mcp.CallToolRequest); ok {
+				s.recordToolCall(ctx, call.Params.Name, dur, res, err)
 			}
 			return res, err
 		}
 	}
+}
+
+// toolOutcome classifies a tool call as "ok" or "error", with the reason
+// for an error.
+func toolOutcome(res mcp.Result, err error) (status, errMsg string) {
+	if err != nil {
+		return "error", err.Error()
+	}
+	if callRes, ok := res.(*mcp.CallToolResult); ok && callRes != nil && callRes.IsError {
+		return "error", "tool returned error result"
+	}
+	return "ok", ""
+}
+
+// recordToolCall counts one tool call and traces it.
+func (s *Server) recordToolCall(ctx context.Context, name string, dur float64, res mcp.Result, err error) {
+	status, errMsg := toolOutcome(res, err)
+	if s.metrics != nil {
+		s.metrics.incToolCall(name, status)
+	}
+	if s.tracer != nil {
+		_ = s.tracer.Record(ctx, TraceEvent{
+			Type:       EventToolCall,
+			Name:       name,
+			DurationMs: dur,
+			Success:    status == "ok",
+			Error:      errMsg,
+		})
+	}
+}
+
+// recordRequest traces a JSON-RPC request that is not a tool call.
+func (s *Server) recordRequest(ctx context.Context, method string, dur float64, err error) {
+	if s.tracer == nil {
+		return
+	}
+	errMsg := ""
+	if err != nil {
+		errMsg = err.Error()
+	}
+	_ = s.tracer.Record(ctx, TraceEvent{
+		Type:       EventRequest,
+		Name:       method,
+		DurationMs: dur,
+		Success:    err == nil,
+		Error:      errMsg,
+	})
 }
