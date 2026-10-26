@@ -20,6 +20,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   public destination is refused with a message that says how to clear it.
   `--dry-run` now names the visibility each destination would get.
 
+- **`corral_sync_repo` makes the CLI's checks before it pulls.** The MCP
+  tool ran `git pull --rebase --autostash` on whatever branch was checked
+  out, so an agent could rebase a user's feature branch, and it took no lock,
+  so it could race `corral_delete_repo` on the same clone. It now refuses,
+  through the same engine functions `corralctl clone` uses, a clone with no
+  origin or whose origin changed since the index was read, one with no
+  commits, and one that is not on the branch `origin/HEAD` names (the server
+  never calls a forge API, so a clone without `origin/HEAD` is refused rather
+  than trusted). Every refusal is audited, and the pull holds the
+  per-repository lock deletion takes.
+
 ## [0.0.53] - 2026-10-25
 
 ### Security

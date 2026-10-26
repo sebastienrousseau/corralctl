@@ -488,7 +488,7 @@ Where GitHub's own MCP server covers the remote API surface (issues, PRs, search
 
 **Write tools (v0.0.12, opt-in via `--enable-mutations`):**
 
-- `corral_sync_repo` — Runs `git pull --rebase --autostash` against one clone
+- `corral_sync_repo` — Runs `git pull --rebase --autostash` against one clone, with the checks `corralctl clone` makes before a pull: it refuses a clone with no origin or whose origin changed since the index was read, one with no commits, and one that is not on the default branch `origin/HEAD` names, so an agent cannot rebase a feature branch. It holds the same per-clone lock as `corral_delete_repo`.
 - `corral_clone_repo` — Clones a URL into a sandboxed target path
 - `corral_adopt_repo` — Adopts a local repository with optional relocation and remote creation
 - `corral_delete_repo` — Removes a clone. Requires `--enable-destructive-mutations`. Refuses on uncommitted/unpushed changes, and asks a person to approve each deletion

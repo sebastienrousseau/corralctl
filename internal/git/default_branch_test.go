@@ -77,3 +77,21 @@ func TestDefaultBranchReportsAFailedLookup(t *testing.T) {
 		t.Fatalf("expected the show-ref failure, got %v", err)
 	}
 }
+
+// TestOriginDefaultBranch: origin/HEAD's branch, and an error rather than
+// HEAD's branch when origin/HEAD is not set.
+func TestOriginDefaultBranch(t *testing.T) {
+	ctx := context.Background()
+	upstream := mirrorRepo(t)
+	mirrorGit(t, upstream, "branch", "trunk")
+	mirrorGit(t, upstream, "symbolic-ref", "HEAD", "refs/heads/trunk")
+	clone := filepath.Join(t.TempDir(), "clone")
+	mirrorGit(t, upstream, "clone", "-q", upstream, clone)
+	mirrorGit(t, clone, "switch", "-q", "main")
+	if got, err := OriginDefaultBranch(ctx, clone); err != nil || got != "trunk" {
+		t.Fatalf("origin default = %q, %v", got, err)
+	}
+	if got, err := OriginDefaultBranch(ctx, upstream); err == nil {
+		t.Fatalf("a repository without origin/HEAD named %q", got)
+	}
+}

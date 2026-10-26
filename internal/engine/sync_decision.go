@@ -132,7 +132,7 @@ func processExistingClone(
 	cloneOpts git.CloneOptions,
 	syncOpts SyncOptions,
 ) RepoResult {
-	if msg, mismatched := originMismatch(repo, targetDir); mismatched {
+	if msg, mismatched := OriginMismatch(repo, targetDir); mismatched {
 		result.Action = "ERROR"
 		result.Message = msg
 		return result
@@ -152,10 +152,13 @@ func processExistingClone(
 	return result
 }
 
-// originMismatch reports whether the clone at targetDir points somewhere
+// OriginMismatch reports whether the clone at targetDir points somewhere
 // other than the repository we intend to sync, which would otherwise mean
 // pulling one project's history into another project's directory.
-func originMismatch(repo github.Repo, targetDir string) (string, bool) {
+//
+// Exported so the MCP sync tool refuses on the same comparison as
+// `corralctl clone`, rather than on a copy of it.
+func OriginMismatch(repo github.Repo, targetDir string) (string, bool) {
 	wantIdentity := repoRemoteIdentity(repo)
 	if wantIdentity == "" {
 		return "", false
@@ -211,15 +214,8 @@ func syncExistingClone(
 // syncSkipReason reports why a pull should be skipped, if it should. Each
 // case is a state where pulling is either impossible or provably pointless.
 func syncSkipReason(ctx context.Context, repo github.Repo, targetDir string, syncOpts SyncOptions) (string, bool) {
-	// An empty upstream repo (created but never pushed to) results in an
-	// unborn HEAD locally, and `git pull` would fail with "no such ref was
-	// fetched". Detect that state cheaply and SKIP with a specific reason
-	// instead of surfacing the git error as a sync failure.
-	if gitIsEmpty(ctx, targetDir) {
-		return "empty repository (no commits yet)", true
-	}
-	if branch, err := gitCurrentBranch(ctx, targetDir); err == nil && branch != repo.DefaultBranch {
-		return fmt.Sprintf("on branch %s", branch), true
+	if reason, refuse := BranchRefusal(ctx, targetDir, repo.DefaultBranch); refuse {
+		return reason, true
 	}
 	// Skip the network round-trip when the upstream pushed_at is unchanged
 	// since the last successful sync. The cached value lives in
@@ -232,6 +228,27 @@ func syncSkipReason(ctx context.Context, repo github.Repo, targetDir string, syn
 			!repo.PushedAt.After(st.LastSyncedPushedAt) {
 			return "up-to-date (pushed_at unchanged)", true
 		}
+	}
+	return "", false
+}
+
+// BranchRefusal reports why pulling into the clone at targetDir would be
+// wrong before any network round trip: it has no commits, or it is on a
+// branch other than defaultBranch. `git pull --rebase --autostash` on a
+// feature branch rebases the user's own work, so a pull only ever updates
+// the default branch.
+//
+// An empty upstream repo (created but never pushed to) results in an
+// unborn HEAD locally, and `git pull` would fail with "no such ref was
+// fetched"; that state is reported as a reason rather than surfaced as a
+// git error. Exported so the MCP sync tool refuses on the same checks as
+// `corralctl clone`.
+func BranchRefusal(ctx context.Context, targetDir, defaultBranch string) (string, bool) {
+	if gitIsEmpty(ctx, targetDir) {
+		return "empty repository (no commits yet)", true
+	}
+	if branch, err := gitCurrentBranch(ctx, targetDir); err == nil && branch != defaultBranch {
+		return fmt.Sprintf("on branch %s", branch), true
 	}
 	return "", false
 }
