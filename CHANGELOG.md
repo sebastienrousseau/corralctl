@@ -26,6 +26,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `.git` directory only `config`, `HEAD` and the corral state file now count,
   permission-only changes are ignored, and a file in a clone's working tree
   never counts.
+- **A warm pass started by the watcher is waited for on shutdown, and only
+  one warm pass runs at a time.** The watcher started its pass as an untracked
+  goroutine, so the HTTP server could release its memory-mapped search indexes
+  while that pass was still reading one, and the watcher and the periodic
+  warmer could scan the whole workspace at once. The watcher now waits for its
+  pass before reporting itself stopped, and a pass requested while another runs
+  returns at once.
 
 ## [0.0.53] - 2026-10-25
 

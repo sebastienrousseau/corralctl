@@ -345,11 +345,14 @@ func TestWorkspaceWatcherAutoWarmsSymbolsOnActiveQuery(t *testing.T) {
 	defer func() { newFSWatcher = oldWatcher }()
 
 	warmCalled := make(chan struct{}, 1)
-	oldWarm := warmSymbolsAsync
-	warmSymbolsAsync = func(s *Server, ctx context.Context) {
-		warmCalled <- struct{}{}
+	oldWarm := watcherWarm
+	watcherWarm = func(s *Server, ctx context.Context) {
+		select {
+		case warmCalled <- struct{}{}:
+		default:
+		}
 	}
-	defer func() { warmSymbolsAsync = oldWarm }()
+	defer func() { watcherWarm = oldWarm }()
 
 	// Mark query active
 	srv.noteSymbolQuery()
@@ -368,7 +371,7 @@ func TestWorkspaceWatcherAutoWarmsSymbolsOnActiveQuery(t *testing.T) {
 	case <-warmCalled:
 		// Success!
 	case <-time.After(2 * time.Second):
-		t.Fatal("expected warmSymbolsAsync to be called on file change with active query")
+		t.Fatal("expected watcherWarm to be called on file change with active query")
 	}
 }
 
@@ -388,11 +391,14 @@ func TestWorkspaceWatcherSkipsWarmingWhenIdle(t *testing.T) {
 	defer func() { newFSWatcher = oldWatcher }()
 
 	warmCalled := make(chan struct{}, 1)
-	oldWarm := warmSymbolsAsync
-	warmSymbolsAsync = func(s *Server, ctx context.Context) {
-		warmCalled <- struct{}{}
+	oldWarm := watcherWarm
+	watcherWarm = func(s *Server, ctx context.Context) {
+		select {
+		case warmCalled <- struct{}{}:
+		default:
+		}
 	}
-	defer func() { warmSymbolsAsync = oldWarm }()
+	defer func() { watcherWarm = oldWarm }()
 
 	// Symbol queries are idle (never called)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -408,28 +414,23 @@ func TestWorkspaceWatcherSkipsWarmingWhenIdle(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 	select {
 	case <-warmCalled:
-		t.Fatal("warmSymbolsAsync should not be called when idle")
+		t.Fatal("watcherWarm should not be called when idle")
 	default:
 		// Success!
 	}
 }
 
-func TestWarmSymbolsAsyncDefaultExecution(t *testing.T) {
+func TestWatcherWarmDefaultExecution(t *testing.T) {
 	base := t.TempDir()
 	srv, err := NewServer(ServerOptions{Root: base})
 	if err != nil {
 		t.Fatal(err)
 	}
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	warmSymbolsAsync(srv, ctx)
-	for i := 0; i < 100; i++ {
-		srv.scanMu.Lock()
-		cached := srv.scanIndex != nil
-		srv.scanMu.Unlock()
-		if cached {
-			break
-		}
-		time.Sleep(10 * time.Millisecond)
+	watcherWarm(srv, context.Background())
+	srv.scanMu.Lock()
+	cached := srv.scanIndex != nil
+	srv.scanMu.Unlock()
+	if !cached {
+		t.Fatal("the default watcher warm pass did not scan the workspace")
 	}
 }

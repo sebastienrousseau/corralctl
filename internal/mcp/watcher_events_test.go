@@ -85,3 +85,88 @@ func TestWatcherEventRelevance(t *testing.T) {
 		}
 	}
 }
+
+// P-03: a warm pass started by the watcher was a bare goroutine, so the
+// watcher reported itself stopped (and serve released every mapped index)
+// while that pass could still be reading one.
+func TestWatcherStopWaitsForItsWarmPass(t *testing.T) {
+	base := t.TempDir()
+	srv, err := NewServer(ServerOptions{Root: base})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mock := newMockWatcher()
+	oldW := newFSWatcher
+	newFSWatcher = func() (fsWatcher, error) { return mock, nil }
+	defer func() { newFSWatcher = oldW }()
+
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	oldScan := scanWorkspace
+	scanWorkspace = func(root string) (*Index, error) {
+		close(entered)
+		<-release
+		return &Index{Root: root}, nil
+	}
+	defer func() { scanWorkspace = oldScan }()
+
+	srv.noteSymbolQuery()
+	ctx, cancel := context.WithCancel(context.Background())
+	done := srv.startWorkspaceWatcher(ctx)
+	mock.events <- fsnotify.Event{Name: filepath.Join(base, "Public"), Op: fsnotify.Create}
+
+	select {
+	case <-entered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("watcher never started a warm pass")
+	}
+	cancel()
+	select {
+	case <-done:
+		close(release)
+		t.Fatal("watcher reported stopped while its warm pass was still running")
+	case <-time.After(100 * time.Millisecond):
+	}
+	close(release)
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("watcher did not stop after its warm pass finished")
+	}
+}
+
+// P-03: the ticker warmer and the watcher could each run a full pass at
+// once, duplicating the work.
+func TestWarmSymbolsIsSingleFlight(t *testing.T) {
+	base := t.TempDir()
+	srv, err := NewServer(ServerOptions{Root: base})
+	if err != nil {
+		t.Fatal(err)
+	}
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	oldScan := scanWorkspace
+	scanWorkspace = func(root string) (*Index, error) {
+		close(entered)
+		<-release
+		return &Index{Root: root}, nil
+	}
+	defer func() { scanWorkspace = oldScan }()
+
+	first := make(chan struct{})
+	go func() { srv.warmSymbols(context.Background()); close(first) }()
+	<-entered
+
+	second := make(chan struct{})
+	go func() { srv.warmSymbols(context.Background()); close(second) }()
+	select {
+	case <-second:
+	case <-time.After(time.Second):
+		close(release)
+		<-first
+		<-second
+		t.Fatal("a second warm pass waited for the first instead of returning")
+	}
+	close(release)
+	<-first
+}

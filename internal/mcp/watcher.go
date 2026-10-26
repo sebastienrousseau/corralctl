@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/fsnotify/fsnotify"
@@ -56,10 +57,11 @@ var newFSWatcher = func() (fsWatcher, error) {
 	return &realWatcher{w: w}, nil
 }
 
-// warmSymbolsAsync is a package seam for triggering background symbol warming
-// upon file change events, allowing tests to verify or synchronize warm passes.
-var warmSymbolsAsync = func(s *Server, ctx context.Context) {
-	go s.warmSymbols(ctx)
+// watcherWarm is the warm pass the watcher starts after a change. A seam so
+// tests can observe or hold it. The watcher runs it on a goroutine it tracks
+// (see workspaceWatcher.flush); this function itself is synchronous.
+var watcherWarm = func(s *Server, ctx context.Context) {
+	s.warmSymbols(ctx)
 }
 
 // What the watcher watches, and why so little.
@@ -310,11 +312,19 @@ type workspaceWatcher struct {
 	// never blocks, including after the loop has exited.
 	fire  chan struct{}
 	timer *time.Timer
+	// warms tracks the warm passes this watcher started. run does not
+	// return until they have, so the watcher's done channel closing means
+	// nothing it started can still be reading a mapped index: serve
+	// releases every mapping right after.
+	warms sync.WaitGroup
 }
 
 // run registers the watches, then handles events until ctx ends or the
 // watcher closes.
 func (ww *workspaceWatcher) run(ctx context.Context) {
+	// Deferred first so it runs last. Add is only ever called from this
+	// goroutine (in flush), so it cannot race this Wait.
+	defer ww.warms.Wait()
 	defer ww.stopTimer()
 
 	ww.reg.add(ww.reg.root)
@@ -415,7 +425,16 @@ func (ww *workspaceWatcher) stopTimer() {
 func (ww *workspaceWatcher) flush(ctx context.Context) {
 	ww.s.invalidateScanCache()
 	diag.Debugf("corral-mcp: workspace cache invalidated by filesystem watcher")
-	if !ww.s.symbolQueryIdle() {
-		warmSymbolsAsync(ww.s, ctx)
+	if ww.s.symbolQueryIdle() {
+		return
 	}
+	// Off the loop, so events keep draining during a pass that can take
+	// half a minute, but tracked, so stopping the watcher waits for it. A
+	// pass already running (from here or the ticker warmer) makes this one
+	// return at once: warmSymbols is single-flight.
+	ww.warms.Add(1)
+	go func() {
+		defer ww.warms.Done()
+		watcherWarm(ww.s, ctx)
+	}()
 }

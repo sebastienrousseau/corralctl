@@ -102,15 +102,26 @@ func (s *Server) startSymbolWarmer(ctx context.Context) <-chan struct{} {
 // Errors are ignored on purpose: this is speculative work, and a repository
 // that cannot be read now will report its error when a client actually asks
 // for it. Failing the warmer would only mean a slower query later.
+//
+// Single-flight: the ticker warmer and the workspace watcher can both ask for
+// a pass, and a second pass while one runs would repeat the same work over
+// the same repositories. It returns at once instead; the pass in progress
+// will have done what it would have done.
 func (s *Server) warmSymbols(ctx context.Context) {
+	if !s.warming.CompareAndSwap(false, true) {
+		return
+	}
+	defer s.warming.Store(false)
+
 	idx, err := s.scan()
-	if err != nil {
+	if err != nil || len(idx.Repos) == 0 {
 		return
 	}
-	repos := idx.Repos
-	if len(repos) == 0 {
-		return
-	}
+	s.warmRepos(ctx, idx.Repos)
+}
+
+// warmRepos builds the content index and symbol extraction for each of repos.
+func (s *Server) warmRepos(ctx context.Context, repos []RepoEntry) {
 
 	// The same bounded fan-out the query path uses. Going wider does not help:
 	// each repository's own extraction is already parallel underneath, and the

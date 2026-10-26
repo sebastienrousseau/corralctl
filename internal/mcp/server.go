@@ -138,6 +138,8 @@ type Server struct {
 	// whether anyone still cares. Atomic because the warmer runs
 	// concurrently with request handling.
 	lastSymbolQuery atomic.Int64
+	// warming is set while a warm pass runs; see warmSymbols.
+	warming atomic.Bool
 
 	// scanMu guards the in-memory workspace-index cache below.
 	// Every tool and resource handler goes through Server.scan(),
