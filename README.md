@@ -481,7 +481,7 @@ Where GitHub's own MCP server covers the remote API surface (issues, PRs, search
 
 - `corral_sync_repo` — Runs `git pull --rebase --autostash` against one clone
 - `corral_clone_repo` — Clones a URL into a sandboxed target path
-- `corral_adopt_repo` — Adopts a local repository with optional relocation and remote creation
+- `corral_adopt_repo` — Adopts a local repository with optional relocation and remote creation. A self-hosted `forge_url` must be one the operator passed to `corralctl mcp --forge-url`
 - `corral_delete_repo` — Removes a clone. Requires `--enable-destructive-mutations`. Refuses on uncommitted/unpushed changes, and asks a person to approve each deletion
 
 Every mutation writes a JSONL audit record to
