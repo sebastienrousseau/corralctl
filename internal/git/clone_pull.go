@@ -7,7 +7,6 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
-	"os"
 	"os/exec"
 	"path/filepath"
 	"strconv"
@@ -60,9 +59,10 @@ func nonInteractiveEnv() []string {
 
 // withGitEnv attaches the credentials header (when available) plus the
 // non-interactive env vars to cmd, replacing any prior cmd.Env. It always sets
-// cmd.Env so the non-interactive guards apply even on anonymous clones.
+// cmd.Env so the non-interactive guards apply even on anonymous clones, and
+// it starts from childEnv so an inherited GIT_DIR cannot redirect the command.
 func withGitEnv(cmd *exec.Cmd) {
-	env := append(os.Environ(), nonInteractiveEnv()...)
+	env := childEnv()
 	if auth := authEnv(); auth != nil {
 		env = append(env, auth...)
 	}

@@ -6,6 +6,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- **git no longer follows an inherited `GIT_DIR`.** Run from a git hook or
+  alias, corralctl inherited `GIT_DIR`, `GIT_WORK_TREE`, `GIT_INDEX_FILE`
+  and the other variables git exports there, and they outrank `-C`, so every
+  git command, including the guards that check a clone for unpublished work
+  before `prune` or a delete, inspected the repository the variable named.
+  Every git child now starts without them.
+
 ## [0.0.53] - 2026-10-25
 
 ### Security

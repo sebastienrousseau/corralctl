@@ -9,7 +9,6 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
-	"os"
 	"os/exec"
 	"strings"
 	"unicode"
@@ -182,7 +181,7 @@ func runMirror(ctx context.Context, targetDir string, extra []string, args ...st
 		"-C", targetDir,
 	}, args...)
 	cmd := exec.CommandContext(ctx, gitBinary, fullArgs...) // #nosec G204 -- fixed git binary and structured arguments
-	cmd.Env = append(append(os.Environ(), nonInteractiveEnv()...), extra...)
+	cmd.Env = append(childEnv(), extra...)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("git %s: %w: %s", strings.Join(args, " "), err, strings.TrimSpace(string(out)))
