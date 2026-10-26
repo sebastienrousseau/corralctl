@@ -33,6 +33,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   example `--allowed-origins http://localhost:6274`. Clients that are not
   browsers send no `Origin` and are unaffected.
 
+- **`--allow-remote` requires a bearer token.** A routable `--host`,
+  `--http` or `--metrics-addr` was allowed with `--allow-remote` alone, which
+  published every repository under the root to anyone who could reach the
+  port. It is now refused unless a token is set. **Breaking:** an operator
+  who relied on a proxy's own authentication must also set
+  `CORRAL_MCP_TOKEN` or `--token-file`.
+
+- **A wrong bearer token is answered `401` with a challenge.** It was a
+  `403` without `WWW-Authenticate`, which tells a client the token is
+  valid but lacks permission. It now carries
+  `WWW-Authenticate: Bearer realm="corral-mcp", error="invalid_token"`, as
+  RFC 6750 asks.
+
+- **The plain-HTTP limit is stated.** The server has no TLS listener. On a
+  routable address it now warns on stderr that the token and every response
+  cross the network unencrypted, and the README and security model say a
+  TLS-terminating proxy is required.
+
+### Added
+
+- **`--token-file`** reads the bearer token from a file, so it stays out of
+  the process list.
+
+### Deprecated
+
+- **`--token`** prints a warning: anything on the command line is visible
+  to every user on the machine through `ps`. Use `--token-file` or
+  `CORRAL_MCP_TOKEN`.
+
 ## [0.0.53] - 2026-10-25
 
 ### Security

@@ -169,13 +169,21 @@ where the client posts its messages.
 `--http 127.0.0.1:7777` is the older spelling of `--transport streamable-http`
 and still works, with a notice on stderr.
 
-The address has to be on loopback. This server has no authentication and
-exposes every repository under its root — with mutations enabled, it can
-change them — so binding it to a routable interface publishes all of that.
-`--host 0.0.0.0`, or `--http :7777`, which is the form typed by somebody
-thinking about the port and not the host, binds every interface and is
-refused with an explanation. `--allow-remote` overrides the refusal, and is
-for the case where you have put your own authentication in front of it.
+The address has to be on loopback. This server exposes every repository
+under its root (with mutations enabled, it can change them), so binding it
+to a routable interface publishes all of that. `--host 0.0.0.0`, or
+`--http :7777`, which is the form typed by somebody thinking about the port
+and not the host, binds every interface and is refused with an explanation.
+`--allow-remote` overrides the refusal, and only together with a bearer
+token, read from `--token-file` or `CORRAL_MCP_TOKEN`. A request without the
+token, or with the wrong one, is answered `401` with a `WWW-Authenticate`
+challenge. `--token` still works but is deprecated, because anything on the
+command line is visible to every user on the machine through `ps`.
+
+The server speaks plain HTTP and has no TLS listener. On a routable address
+the token and every response cross the network unencrypted unless a
+TLS-terminating reverse proxy sits in front of it, and the server says so
+on stderr when it starts. There is no OAuth resource-server mode.
 
 A browser sends an `Origin` header with every request, and the server
 refuses one that is not listed in `--allowed-origins`. Loopback origins are

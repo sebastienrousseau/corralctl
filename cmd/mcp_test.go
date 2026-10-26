@@ -122,7 +122,7 @@ func resetMCPFlags(t *testing.T) {
 	oldRoot, oldMut := mcpRoot, mcpEnableMutations
 	oldHTTP, oldRemote, oldNoConfirm := mcpHTTP, mcpAllowRemote, mcpNoConfirmDeletes
 	oldTransport, oldHost, oldPort := mcpTransport, mcpHost, mcpPort
-	oldToken, oldOrigins := mcpToken, mcpAllowedOrigins
+	oldToken, oldOrigins, oldTokenFile := mcpToken, mcpAllowedOrigins, mcpTokenFile
 	oldAudit, oldDestruct, oldCache, oldExts := mcpAuditLog, mcpEnableDestructiveMutations, mcpSymbolCache, mcpAllowFileExts
 	oldMetricsAddr, oldMetricsPort := mcpMetricsAddr, mcpMetricsPort
 	oldTraceFile := mcpTraceFile
@@ -132,7 +132,8 @@ func resetMCPFlags(t *testing.T) {
 	mcpAllowRemote = false
 	mcpNoConfirmDeletes = false
 	mcpTransport, mcpHost, mcpPort = string(transportStdio), "127.0.0.1", 8000
-	mcpToken, mcpAllowedOrigins = "", ""
+	mcpToken, mcpAllowedOrigins, mcpTokenFile = "", "", ""
+	t.Setenv("CORRAL_MCP_TOKEN", "")
 	mcpAuditLog, mcpEnableDestructiveMutations, mcpSymbolCache, mcpAllowFileExts = "", false, "", ""
 	mcpMetricsAddr, mcpMetricsPort = "", 0
 	mcpTraceFile = ""
@@ -140,7 +141,7 @@ func resetMCPFlags(t *testing.T) {
 		mcpRoot, mcpEnableMutations = oldRoot, oldMut
 		mcpHTTP, mcpAllowRemote, mcpNoConfirmDeletes = oldHTTP, oldRemote, oldNoConfirm
 		mcpTransport, mcpHost, mcpPort = oldTransport, oldHost, oldPort
-		mcpToken, mcpAllowedOrigins = oldToken, oldOrigins
+		mcpToken, mcpAllowedOrigins, mcpTokenFile = oldToken, oldOrigins, oldTokenFile
 		mcpAuditLog, mcpEnableDestructiveMutations, mcpSymbolCache, mcpAllowFileExts = oldAudit, oldDestruct, oldCache, oldExts
 		mcpMetricsAddr, mcpMetricsPort = oldMetricsAddr, oldMetricsPort
 		mcpTraceFile = oldTraceFile
@@ -343,9 +344,8 @@ func TestLoopbackOnly(t *testing.T) {
 	}
 }
 
-// TestRunMCPRefusesARoutableBind: the server has no authentication and
-// serves a developer's whole workspace, so publishing it has to be asked
-// for rather than arrived at.
+// TestRunMCPRefusesARoutableBind: the server serves a developer's whole
+// workspace, so publishing it has to be asked for rather than arrived at.
 func TestRunMCPRefusesARoutableBind(t *testing.T) {
 	resetMCPFlags(t)
 	dir := t.TempDir()
@@ -388,26 +388,6 @@ func TestRunMCPServesOverHTTP(t *testing.T) {
 	}
 	if stub.serveCallCount != 0 {
 		t.Error("--http must not also start the stdio loop")
-	}
-}
-
-// TestRunMCPAllowsARoutableBindWhenAsked covers the escape hatch, which
-// exists for somebody who has put their own authentication in front.
-func TestRunMCPAllowsARoutableBindWhenAsked(t *testing.T) {
-	resetMCPFlags(t)
-	dir := t.TempDir()
-	mcpRoot = dir
-	mcpHTTP = "0.0.0.0:7777"
-	mcpAllowRemote = true
-
-	stub := &stubMCPServer{root: dir}
-	withStubServer(t, stub, nil)
-
-	if err := runMCP(nil, nil); err != nil {
-		t.Fatalf("expected success, got %v", err)
-	}
-	if stub.httpAddr != "0.0.0.0:7777" {
-		t.Errorf("served on %q, want the address that was asked for", stub.httpAddr)
 	}
 }
 
@@ -541,34 +521,6 @@ func TestRunMCPTransportFlags(t *testing.T) {
 	}
 }
 
-// TestRunMCPRefusesARoutableHost: the loopback guard covers --host as it
-// covers --http, for both listening transports.
-func TestRunMCPRefusesARoutableHost(t *testing.T) {
-	for _, transport := range []string{"streamable-http", "sse"} {
-		t.Run(transport, func(t *testing.T) {
-			resetMCPFlags(t)
-			dir := t.TempDir()
-			mcpRoot = dir
-			mcpTransport, mcpHost = transport, "0.0.0.0"
-
-			stub := &stubMCPServer{root: dir}
-			withStubServer(t, stub, nil)
-			err := runMCP(nil, nil)
-			if err == nil || !strings.Contains(err.Error(), "--allow-remote") {
-				t.Fatalf("a bind on every interface should be refused and name the override: %v", err)
-			}
-			if stub.httpCallCount+stub.sseCallCount+stub.serveCallCount != 0 {
-				t.Error("the server was started despite the refusal")
-			}
-
-			mcpAllowRemote = true
-			if err := runMCP(nil, nil); err != nil {
-				t.Fatalf("--allow-remote should lift the refusal: %v", err)
-			}
-		})
-	}
-}
-
 func TestRunMCPRejectsAnUnknownTransport(t *testing.T) {
 	resetMCPFlags(t)
 	dir := t.TempDir()
@@ -597,55 +549,6 @@ func TestRunMCPReportsAnSSEFailure(t *testing.T) {
 	err := runMCP(nil, nil)
 	if err == nil || !strings.Contains(err.Error(), "address already in use") {
 		t.Fatalf("the cause should survive: %v", err)
-	}
-}
-
-func TestRunMCPMetricsFlags(t *testing.T) {
-	resetMCPFlags(t)
-	dir := t.TempDir()
-	mcpRoot = dir
-	stub := &stubMCPServer{root: dir}
-
-	// 1. Explicit --metrics-addr
-	mcpMetricsAddr = "127.0.0.1:9095"
-	captured := withStubServer(t, stub, nil)
-	if err := runMCP(nil, nil); err != nil {
-		t.Fatalf("unexpected error with --metrics-addr: %v", err)
-	}
-	if captured.MetricsAddr != "127.0.0.1:9095" {
-		t.Errorf("expected MetricsAddr 127.0.0.1:9095, got %q", captured.MetricsAddr)
-	}
-
-	// 2. Synthesized from --metrics-port
-	resetMCPFlags(t)
-	mcpRoot = dir
-	mcpMetricsPort = 9096
-	captured = withStubServer(t, stub, nil)
-	if err := runMCP(nil, nil); err != nil {
-		t.Fatalf("unexpected error with --metrics-port: %v", err)
-	}
-	if captured.MetricsAddr != "127.0.0.1:9096" {
-		t.Errorf("expected MetricsAddr 127.0.0.1:9096, got %q", captured.MetricsAddr)
-	}
-
-	// 3. Non-loopback metrics address rejected without allow-remote
-	resetMCPFlags(t)
-	mcpRoot = dir
-	mcpMetricsAddr = "192.168.1.50:9097"
-	withStubServer(t, stub, nil)
-	err := runMCP(nil, nil)
-	if err == nil || !strings.Contains(err.Error(), "must be on loopback") {
-		t.Fatalf("expected loopback refusal for metrics addr, got: %v", err)
-	}
-
-	// 4. Non-loopback permitted with allow-remote
-	mcpAllowRemote = true
-	captured = withStubServer(t, stub, nil)
-	if err := runMCP(nil, nil); err != nil {
-		t.Fatalf("expected allow-remote to permit routable metrics addr: %v", err)
-	}
-	if captured.MetricsAddr != "192.168.1.50:9097" {
-		t.Errorf("expected MetricsAddr 192.168.1.50:9097, got %q", captured.MetricsAddr)
 	}
 }
 

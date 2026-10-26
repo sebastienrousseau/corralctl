@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 
 	"github.com/sebastienrousseau/corralctl/internal/mcp"
 	"github.com/sebastienrousseau/corralctl/internal/version"
@@ -30,6 +31,7 @@ var (
 	mcpAllowRemote                bool
 	mcpNoConfirmDeletes           bool
 	mcpToken                      string
+	mcpTokenFile                  string
 	mcpAllowedOrigins             string
 	mcpWatch                      bool
 	mcpMetricsAddr                string
@@ -115,11 +117,12 @@ Transport:
   --http HOST:PORT is the older spelling of --transport streamable-http
   and still works; --host and --port are the way to say it now.
 
-  The address must be on loopback. This server has no authentication
-  and exposes every repository under its root, so --host 0.0.0.0 - or
-  --http :7777, which binds every interface - is refused.
-  --allow-remote overrides that, for an operator who has put their own
-  authentication in front.
+  The address must be on loopback. This server exposes every repository
+  under its root, so --host 0.0.0.0 - or --http :7777, which binds
+  every interface - is refused. --allow-remote overrides that, and only
+  with a bearer token (--token-file FILE or CORRAL_MCP_TOKEN): a
+  request without it is answered 401. The server speaks plain HTTP, so
+  a remote listener needs a TLS-terminating proxy in front of it.
 
 Resources:
   corral://workspace/index
@@ -180,13 +183,13 @@ func runMCP(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	token := mcpToken
-	if token == "" {
-		token = os.Getenv("CORRAL_MCP_TOKEN")
+	token, err := resolveMCPToken()
+	if err != nil {
+		return err
 	}
 
 	metricsAddr := resolveMetricsAddr()
-	if err := checkBinds(kind, addr, metricsAddr, abs); err != nil {
+	if err := checkBinds(kind, addr, metricsAddr, abs, token); err != nil {
 		return err
 	}
 
@@ -217,21 +220,70 @@ func runMCP(cmd *cobra.Command, args []string) error {
 }
 
 // checkBinds refuses a listener on a routable address unless the operator
-// asked for one with --allow-remote.
-func checkBinds(kind transportKind, addr, metricsAddr, abs string) error {
-	if kind != transportStdio && !mcpAllowRemote && !loopbackOnly(addr) {
+// asked for one with --allow-remote and set a bearer token. Without the
+// token, --allow-remote would publish every repository under the root to
+// anyone who can reach the port. A routable listener that passes is still
+// plain HTTP, and says so on stderr.
+func checkBinds(kind transportKind, addr, metricsAddr, abs, token string) error {
+	var routable []string
+	if kind != transportStdio && !loopbackOnly(addr) {
+		if !mcpAllowRemote {
+			return fmt.Errorf(
+				"listening on %s would accept connections from other machines: the server "+
+					"exposes every repository under %s, and with mutations enabled it can "+
+					"change them.\n\n"+
+					"Use a loopback address (--host 127.0.0.1 or --host localhost), or pass "+
+					"--allow-remote with a bearer token and put a TLS-terminating proxy in front of it",
+				addr, abs)
+		}
+		routable = append(routable, addr)
+	}
+	if metricsAddr != "" && !loopbackOnly(metricsAddr) {
+		if !mcpAllowRemote {
+			return fmt.Errorf("metrics address %s must be on loopback (use --allow-remote with a bearer token to override)", metricsAddr)
+		}
+		routable = append(routable, metricsAddr)
+	}
+	if len(routable) == 0 {
+		return nil
+	}
+	if token == "" {
 		return fmt.Errorf(
-			"listening on %s would accept connections from other machines, and this server "+
-				"has no authentication: it exposes every repository under %s, and with "+
-				"mutations enabled it can change them.\n\n"+
-				"Use a loopback address (--host 127.0.0.1 or --host localhost), or pass "+
-				"--allow-remote if you have put your own authentication in front of it",
-			addr, abs)
+			"--allow-remote needs a bearer token: listening on %s without one lets anyone "+
+				"who can reach it read every repository under %s.\n\n"+
+				"Set CORRAL_MCP_TOKEN or pass --token-file with a path to a file holding the token",
+			strings.Join(routable, " and "), abs)
 	}
-	if metricsAddr != "" && !mcpAllowRemote && !loopbackOnly(metricsAddr) {
-		return fmt.Errorf("metrics address %s must be on loopback (use --allow-remote to override)", metricsAddr)
-	}
+	fmt.Fprintf(os.Stderr, "corral-mcp: %s is reachable from other machines over plain HTTP; "+
+		"the bearer token and every response cross the network unencrypted. "+
+		"Put a TLS-terminating proxy in front of it\n", strings.Join(routable, " and "))
 	return nil
+}
+
+// resolveMCPToken reads the bearer token from --token-file, then
+// CORRAL_MCP_TOKEN, then --token. --token still works, but anything on
+// argv is readable by every user on the machine through ps, so it warns.
+func resolveMCPToken() (string, error) {
+	if mcpTokenFile != "" {
+		if mcpToken != "" {
+			return "", fmt.Errorf("--token and --token-file both name a token; pass only --token-file")
+		}
+		b, err := os.ReadFile(filepath.Clean(mcpTokenFile))
+		if err != nil {
+			return "", fmt.Errorf("reading --token-file: %w", err)
+		}
+		token := strings.TrimSpace(string(b))
+		if token == "" {
+			return "", fmt.Errorf("--token-file %s is empty", mcpTokenFile)
+		}
+		return token, nil
+	}
+	if mcpToken != "" {
+		fmt.Fprintf(os.Stderr, "corral-mcp: --token is deprecated: other users can read it in the process list; "+
+			"use --token-file or CORRAL_MCP_TOKEN\n")
+		return mcpToken, nil
+	}
+	return os.Getenv("CORRAL_MCP_TOKEN"), nil
 }
 
 // resolveMCPRoot picks the directory the server sandboxes itself to
@@ -353,9 +405,10 @@ func resolveTransport(transport, httpAddr, host string, port int) (transportKind
 
 // loopbackOnly reports whether addr binds only to the local machine.
 //
-// The server has no authentication and exposes a developer's entire
-// workspace — and, with mutations on, writes to it. Binding that to a
-// routable interface publishes it, so a non-loopback address has to be
+// The server exposes a developer's entire workspace (and, with mutations
+// on, writes to it), and its only authentication is an optional bearer
+// token over plain HTTP. Binding that to a routable interface publishes
+// it, so a non-loopback address has to be
 // asked for rather than arrived at by typing ":7777" and not thinking
 // about the empty host.
 func loopbackOnly(addr string) bool {
@@ -388,7 +441,7 @@ func init() {
 	mcpCmd.Flags().StringVar(&mcpHTTP, "http", "",
 		"deprecated: serve Streamable HTTP on this HOST:PORT; the same as --transport streamable-http with --host and --port")
 	mcpCmd.Flags().BoolVar(&mcpAllowRemote, "allow-remote", false,
-		"permit a non-loopback --host or --http address. The server has no authentication; only use this behind your own")
+		"permit a non-loopback --host, --http or --metrics-addr address. Requires a bearer token (--token-file or CORRAL_MCP_TOKEN); serves plain HTTP, so put a TLS-terminating proxy in front")
 	mcpCmd.Flags().BoolVar(&mcpNoConfirmDeletes, "no-confirm-deletes", false,
 		"delete without asking a person to confirm. Only for an unattended workspace you are willing to lose")
 	mcpCmd.Flags().StringVar(&mcpAllowFileExts, "allow-file-ext", "",
@@ -397,7 +450,9 @@ func init() {
 		"where to persist the symbol index between runs (defaults to $XDG_CACHE_HOME/corral/symbols; \"off\" disables it)")
 	mcpCmd.Flags().StringVar(&mcpAuditLog, "audit-log", "", "path to the mutation audit log (defaults to $XDG_STATE_HOME/corral/mutations.log or ~/.local/state/corral/mutations.log)")
 	mcpCmd.Flags().StringVar(&mcpToken, "token", "",
-		"bearer token required for HTTP and SSE requests (or CORRAL_MCP_TOKEN env var)")
+		"deprecated: bearer token required for HTTP and SSE requests. Visible to other users in the process list; use --token-file or CORRAL_MCP_TOKEN")
+	mcpCmd.Flags().StringVar(&mcpTokenFile, "token-file", "",
+		"file holding the bearer token required for HTTP and SSE requests (or set CORRAL_MCP_TOKEN). Required with --allow-remote")
 	mcpCmd.Flags().StringVar(&mcpAllowedOrigins, "allowed-origins", "",
 		"comma-separated origins a browser client may connect from over HTTP and SSE (e.g. http://localhost:6274). No origin is allowed by default, loopback included")
 	mcpCmd.Flags().BoolVar(&mcpWatch, "watch", true,

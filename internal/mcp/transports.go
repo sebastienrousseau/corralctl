@@ -27,8 +27,10 @@ import (
 //   - The legacy HTTP+SSE transport (protocol 2024-11-05) at SSEEndpoint,
 //     for a host that has not moved on yet.
 //
-// None of them carries authentication. The cmd layer refuses a routable
-// bind without --allow-remote; the server itself only knows how to listen.
+// Authentication is a bearer token (ServerOptions.AuthToken), checked in
+// wrapAuth; there is no TLS here. The cmd layer refuses a routable bind
+// without --allow-remote and a token; the server itself only knows how to
+// listen.
 const (
 	// StreamableEndpoint is the path the Streamable HTTP transport serves.
 	StreamableEndpoint = "/mcp"
@@ -316,8 +318,12 @@ func (s *Server) checkBearer(w http.ResponseWriter, r *http.Request) (int, bool)
 	}
 	token := strings.TrimPrefix(authHeader, prefix)
 	if subtle.ConstantTimeCompare([]byte(token), []byte(s.opts.AuthToken)) != 1 {
-		http.Error(w, "Forbidden: invalid token", http.StatusForbidden)
-		return http.StatusForbidden, true
+		// RFC 6750 section 3.1: a token that does not authenticate is a
+		// 401 with a challenge, so a client knows to fetch a new one; 403
+		// is for a valid token that lacks the scope.
+		w.Header().Set("WWW-Authenticate", `Bearer realm="corral-mcp", error="invalid_token"`)
+		http.Error(w, "Unauthorized: invalid token", http.StatusUnauthorized)
+		return http.StatusUnauthorized, true
 	}
 	return 0, false
 }
@@ -361,7 +367,7 @@ func (s *Server) sseHandler() http.Handler {
 // ServeSSE runs the server on the legacy HTTP+SSE transport (protocol
 // 2024-11-05), for a host that still expects it. Blocks until the listener
 // fails or ctx is cancelled. Everything ServeHTTP says about binding applies
-// here too: no authentication, so stay on loopback.
+// here too: plain HTTP and an optional token, so stay on loopback.
 func (s *Server) ServeSSE(ctx context.Context, addr string) error {
 	return s.serve(ctx, addr, s.sseHandler())
 }

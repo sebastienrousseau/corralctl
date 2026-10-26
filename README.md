@@ -573,11 +573,25 @@ a server somebody else started.
 `--http 127.0.0.1:7777` is the older spelling of `--transport
 streamable-http` and still works.
 
-None of them carries authentication, so a listening transport binds
-loopback: `--host 0.0.0.0`, or `--http :7777`, which binds every interface,
-is refused because this server exposes every repository under its root.
-Pass `--allow-remote` if you have put your own authentication in front of
-it.
+Every listening transport binds loopback by default: `--host 0.0.0.0`, or
+`--http :7777`, which binds every interface, is refused because this server
+exposes every repository under its root. `--allow-remote` lifts that refusal
+only together with a bearer token, read from a file or the environment:
+
+```bash
+export CORRAL_MCP_TOKEN="$(cat ~/.config/corral/mcp-token)"
+corralctl mcp --transport streamable-http --host 0.0.0.0 --allow-remote
+# or: corralctl mcp ... --allow-remote --token-file ~/.config/corral/mcp-token
+```
+
+A request without `Authorization: Bearer <token>`, or with the wrong token,
+is answered `401` with a `WWW-Authenticate` challenge. `--token` still works
+but is deprecated: anything on the command line is visible to every user on
+the machine through `ps`. The server speaks plain HTTP and has no TLS
+listener, so the token and every response cross the network unencrypted
+unless a TLS-terminating reverse proxy sits in front of it; it says so on
+stderr when it starts on a routable address. There is no OAuth
+resource-server mode.
 
 A browser sends an `Origin` header with every request, and the server
 refuses one that is not listed in `--allowed-origins`. Loopback origins are
@@ -607,11 +621,12 @@ and is unaffected.
 - **stdio by default; loopback when not.** Without `--transport` the server
   has no endpoint and no listening port, and only ever speaks to the parent
   process that launched it. `--transport streamable-http` and `--transport
-  sse` listen on `--host`/`--port`, and because the server has no
-  authentication and exposes every repository under its root, a non-loopback
-  address is refused unless you also pass `--allow-remote` — the accidental
-  `--host 0.0.0.0`, or `--http :7777`, which binds every interface, does not
-  start.
+  sse` listen on `--host`/`--port`, and because the server exposes every
+  repository under its root, a non-loopback address is refused unless you
+  also pass `--allow-remote` and a bearer token (`--token-file` or
+  `CORRAL_MCP_TOKEN`). The accidental `--host 0.0.0.0`, or `--http :7777`,
+  which binds every interface, does not start. The server speaks plain HTTP;
+  a remote listener needs a TLS-terminating proxy in front of it.
 
 ---
 
