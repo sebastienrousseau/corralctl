@@ -38,7 +38,7 @@ LDFLAGS = -s -w \
 
 .PHONY: all build docs install uninstall install-smoke test test-race vet lint \
         clean format sbom-check sbom-fix example-check doc-check spdx-check pkg-check eval staticcheck race-hard bench claims-check \
-        docs-lint help demo vuln-check check
+        docs-lint help demo vuln-check check complexity-check complexity-update
 
 VHS ?= $(shell which vhs 2>/dev/null || echo /opt/homebrew/bin/vhs)
 
@@ -48,7 +48,7 @@ demo: build
 
 
 ## check: run all static analysis, security, documentation, and integrity gates
-check: format vet staticcheck vuln-check spdx-check doc-check sbom-check pkg-check claims-check example-check test-race
+check: format vet staticcheck vuln-check spdx-check doc-check sbom-check pkg-check claims-check example-check complexity-check test-race
 
 all: check build
 
@@ -143,16 +143,25 @@ vet:
 # honours //nolint directives; the standalone binary CI runs honours only
 # //lint:ignore. A suppression that satisfies one and not the other passes
 # locally and fails in CI, which has now happened twice.
+#
+# Pinned, not @latest, so a release of the linter cannot turn a local
+# `make check` red (or green) overnight. v0.8.2 is what CI's reusable
+# go-ci workflow resolves its own `staticcheck@latest` to today; bump the
+# two together.
+STATICCHECK_VERSION ?= v0.8.2
 staticcheck:
-	go run honnef.co/go/tools/cmd/staticcheck@latest ./...
+	go run honnef.co/go/tools/cmd/staticcheck@$(STATICCHECK_VERSION) ./...
 
 ## vuln-check: verify no known vulnerabilities in dependencies using govulncheck
+#
+# The same pinned version the Vulnerability Scan job in ci.yml installs.
+# A govulncheck already on PATH is deliberately not preferred: it could be
+# any version, so a local run and CI could disagree about the same tree.
+# The vulnerability database is fetched at run time, so the pin does not
+# stale the results.
+GOVULNCHECK_VERSION ?= v1.7.0
 vuln-check:
-	@if command -v govulncheck >/dev/null 2>&1; then \
-		govulncheck ./...; \
-	else \
-		go run golang.org/x/vuln/cmd/govulncheck@latest ./...; \
-	fi
+	go run golang.org/x/vuln/cmd/govulncheck@$(GOVULNCHECK_VERSION) ./...
 
 ## lint: run golangci-lint
 lint:
@@ -193,6 +202,24 @@ eval:
 # across twelve packages.
 claims-check:
 	go run scripts/claims_check.go
+
+## complexity-check: hold functions and files to the complexity ceilings
+#
+# Cyclomatic 10, cognitive 15, Halstead difficulty 30, 60 lines of code per
+# function and 500 per file. Code that was over a ceiling before the gate
+# existed is listed in scripts/complexity_baseline.tsv, which may only
+# shrink: a new offender or a worse one fails, and so does an improvement
+# the baseline has not recorded. gocyclo and gocognit versions are pinned
+# in the script.
+complexity-check:
+	go run scripts/complexity_check.go
+
+## complexity-update: record improvements in the complexity baseline
+#
+# Refuses while anything has got worse, so it can only lower or remove
+# entries.
+complexity-update:
+	go run scripts/complexity_check.go -update
 
 ## pkg-check: verify pkg/ documents every distribution format built
 pkg-check:

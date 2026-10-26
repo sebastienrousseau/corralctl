@@ -119,7 +119,9 @@ not apply. Use a release artefact if you need `--version` to be meaningful.
 
 ### Build from source
 
-Requires Go 1.26+ and Git:
+Requires Git and Go at or above the `go` directive in `go.mod`, but not
+Go 1.27.0 to 1.27.2, which carry a reachable `crypto/x509` advisory (see the
+[minimum toolchain policy](docs/packaging.md#minimum-toolchain-policy)):
 
 ```bash
 git clone https://github.com/sebastienrousseau/corralctl.git

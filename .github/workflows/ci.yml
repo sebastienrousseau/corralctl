@@ -128,6 +128,18 @@ jobs:
           version: v2.13.2
           args: ./...
 
+      # The complexity ceilings: cyclomatic 10, cognitive 15, Halstead
+      # difficulty 30, 60 lines of code per function and 500 per file.
+      # Functions already over one are recorded in
+      # scripts/complexity_baseline.tsv, which may only shrink; a new or
+      # worse offender fails here, and so does an improvement the baseline
+      # has not recorded, so the backlog cannot quietly grow back. gocyclo
+      # and gocognit are pinned inside the script, not taken at @latest.
+      - name: Complexity ceilings
+        env:
+          GOTOOLCHAIN: auto
+        run: go run scripts/complexity_check.go
+
   vulncheck:
     name: Vulnerability Scan
     runs-on: ubuntu-latest

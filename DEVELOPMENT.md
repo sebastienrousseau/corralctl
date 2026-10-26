@@ -22,7 +22,7 @@ bug in this file — please report it.
 
 | Tool | Version | Why |
 |---|---|---|
-| Go | as pinned by the `go` directive in `go.mod` | `GOTOOLCHAIN=auto` downloads it; CI never pins a version separately, so `go.mod` is the single source of truth |
+| Go | as pinned by the `go` directive in `go.mod`; not 1.27.0 to 1.27.2 | `GOTOOLCHAIN=auto` downloads it. Most CI jobs take it from `go.mod`; the reusable Go CI job (`ci.yml`) and the release workflow pass `go-version: '1.26.10'`, so bump those with the directive. See the [minimum toolchain policy](docs/packaging.md#minimum-toolchain-policy) for why 1.27.0 to 1.27.2 are excluded |
 | git | 2.30+ | corralctl shells out to `git` for every clone, pull and inspection |
 | make | any | Task runner for everything below |
 
@@ -100,7 +100,8 @@ is the cross-platform matrix.
 | Race & Shuffled Tests | `go test -race -shuffle=on ./...` |
 | Fixed shuffle seeds | `for s in 1 2 3; do go test -count=1 -shuffle=$s ./...; done` |
 | Benchmarks smoke | `go test -run '^$' -bench . -benchtime 1x ./...` |
-| Vulnerability Scan | `go run golang.org/x/vuln/cmd/govulncheck@latest ./...` |
+| Vulnerability Scan | `make vuln-check` (govulncheck v1.7.0, the version CI pins) |
+| Staticcheck (in Go CI) | `make staticcheck` (staticcheck v0.8.2) |
 | Documentation Coverage | `make doc-check` |
 | Licence headers (SPDX) | `make spdx-check` |
 | Manifest drift | `make sbom-check` |
@@ -109,6 +110,7 @@ is the cross-platform matrix.
 | Manpage rendering | `make docs && groff -man -Tutf8 -ww build/man/corralctl.1 >/dev/null` |
 | Docs Lint (markdown, spelling, links) | `make docs-lint` |
 | Lint | `make lint` |
+| Complexity ceilings (in Lint) | `make complexity-check` |
 
 Coverage is not a separate job — the suite reports it. The project runs at
 100% statement coverage across every package, and the rationale is in
@@ -208,6 +210,19 @@ exercised. It means no statement ships unexecuted.
 **Documentation coverage: 100% of exported declarations.** Enforced by
 `make doc-check`. The generated package reference is the public face of the
 library packages, and an undocumented export renders as an empty paragraph.
+
+**Complexity ceilings, per function: cyclomatic 10, cognitive 15,
+Halstead difficulty 30, 60 lines of code; 500 lines of code per file.**
+Enforced by `make complexity-check`, which runs pinned gocyclo and gocognit
+and measures length and Halstead difficulty itself. Blank and comment lines
+do not count, so explaining a function never pushes it over. Code that was
+over a ceiling before the gate existed is recorded in
+`scripts/complexity_baseline.tsv`. That file may only shrink: a new or worse
+offender fails the gate, and so does an improvement the file has not
+recorded, which you record with `make complexity-update`. That target
+refuses to run while anything has got worse, so the baseline never absorbs
+a regression. A function you touch that is in the baseline is a good
+candidate for bringing under the ceilings in the same change.
 
 **Licence headers on every file.** Enforced by `make spdx-check`. Run
 `go run scripts/spdx_sweep.go` to add missing ones.
