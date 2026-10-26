@@ -70,7 +70,8 @@ Tools:
 corral_find_symbol is the one a single-repository code index cannot
 offer: it resolves a function, method, type, interface, constant or
 variable across the whole workspace at once. Go, Python, TypeScript,
-JavaScript and Rust sources are indexed.
+JavaScript, Rust, C, C++, Java, Kotlin, Swift and Protocol Buffers
+sources are indexed.
 
 corral_search_code is its counterpart: find_symbol answers where
 something is declared, search_code answers where it is written - call
@@ -115,11 +116,13 @@ Transport:
   --http HOST:PORT is the older spelling of --transport streamable-http
   and still works; --host and --port are the way to say it now.
 
-  The address must be on loopback. This server has no authentication
-  and exposes every repository under its root, so --host 0.0.0.0 - or
-  --http :7777, which binds every interface - is refused.
-  --allow-remote overrides that, for an operator who has put their own
-  authentication in front.
+  The address must be on loopback. The server speaks plain HTTP, its
+  only authentication is an optional bearer token (--token or
+  CORRAL_MCP_TOKEN), and it exposes every repository under its root,
+  so --host 0.0.0.0 - or --http :7777, which binds every interface -
+  is refused, with or without a token. --allow-remote overrides that,
+  for an operator who has put their own authentication and TLS in
+  front.
 
 Resources:
   corral://workspace/index
@@ -195,8 +198,9 @@ func runMCP(cmd *cobra.Command, args []string) error {
 	}
 	if kind != transportStdio && !mcpAllowRemote && !loopbackOnly(addr) {
 		return fmt.Errorf(
-			"listening on %s would accept connections from other machines, and this server "+
-				"has no authentication: it exposes every repository under %s, and with "+
+			"listening on %s would accept connections from other machines. This server "+
+				"speaks plain HTTP with at most a bearer token (--token) for authentication, "+
+				"and it exposes every repository under %s; with "+
 				"mutations enabled it can change them.\n\n"+
 				"Use a loopback address (--host 127.0.0.1 or --host localhost), or pass "+
 				"--allow-remote if you have put your own authentication in front of it",
@@ -321,8 +325,9 @@ func resolveTransport(transport, httpAddr, host string, port int) (transportKind
 
 // loopbackOnly reports whether addr binds only to the local machine.
 //
-// The server has no authentication and exposes a developer's entire
-// workspace — and, with mutations on, writes to it. Binding that to a
+// The server's only authentication is an optional bearer token over plain
+// HTTP, and it exposes a developer's entire workspace and, with mutations
+// on, writes to it. Binding that to a
 // routable interface publishes it, so a non-loopback address has to be
 // asked for rather than arrived at by typing ":7777" and not thinking
 // about the empty host.
@@ -345,7 +350,7 @@ func loopbackOnly(addr string) bool {
 
 func init() {
 	mcpCmd.Flags().StringVar(&mcpRoot, "root", "", "absolute path the server sandboxes itself to (defaults to --base-dir, then $HOME/Code)")
-	mcpCmd.Flags().BoolVar(&mcpEnableMutations, "enable-mutations", false, "unlock write tools (corral_sync_repo, corral_clone_repo). Every mutation is logged to the audit trail")
+	mcpCmd.Flags().BoolVar(&mcpEnableMutations, "enable-mutations", false, "unlock the write tools (corral_sync_repo, corral_clone_repo, corral_adopt_repo, corral_create_worktree, corral_release_worktree, corral_prune_worktrees). Every mutation is logged to the audit trail")
 	mcpCmd.Flags().BoolVar(&mcpEnableDestructiveMutations, "enable-destructive-mutations", false, "additionally unlock corral_delete_repo. Refuses when uncommitted or unpushed changes exist. Requires --enable-mutations")
 	mcpCmd.Flags().StringVar(&mcpTransport, "transport", string(transportStdio),
 		"how clients reach the server: stdio, streamable-http (/mcp) or sse (/sse, the legacy HTTP+SSE transport)")
@@ -356,7 +361,7 @@ func init() {
 	mcpCmd.Flags().StringVar(&mcpHTTP, "http", "",
 		"deprecated: serve Streamable HTTP on this HOST:PORT; the same as --transport streamable-http with --host and --port")
 	mcpCmd.Flags().BoolVar(&mcpAllowRemote, "allow-remote", false,
-		"permit a non-loopback --host or --http address. The server has no authentication; only use this behind your own")
+		"permit a non-loopback --host or --http address. The server speaks plain HTTP with at most a bearer token (--token); only use this behind your own authentication and TLS")
 	mcpCmd.Flags().BoolVar(&mcpNoConfirmDeletes, "no-confirm-deletes", false,
 		"delete without asking a person to confirm. Only for an unattended workspace you are willing to lose")
 	mcpCmd.Flags().StringVar(&mcpAllowFileExts, "allow-file-ext", "",

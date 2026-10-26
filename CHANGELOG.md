@@ -45,6 +45,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `make check` and CI could run different scanners against the same tree.
   They now run staticcheck v0.8.2 and govulncheck v1.7.0 (the version CI
   pins), set by `STATICCHECK_VERSION` and `GOVULNCHECK_VERSION`.
+### Changed
+
+- **The MCP server no longer advertises the `logging` capability.** It never
+  sent a log message; the capability was the Go SDK's default. Logging is
+  Deprecated in protocol `2026-07-28` (SEP-2577), and diagnostics stay on
+  stderr. `initialize` and `server/discover` now list `prompts`, `resources`
+  and `tools` only.
+- **The MCP server no longer links the terminal UI.** Adoption moved from
+  `internal/engine` to a new `internal/adopt` package and the forge token
+  resolver to `internal/forge`, so `internal/mcp` no longer depends on
+  `internal/engine`, `internal/tui` or the Bubble Tea stack. A test keeps
+  that boundary.
+
+### Documentation
+
+- **The documented minimum git is now 2.31,** in the README,
+  `DEVELOPMENT.md`, the Debian package README and the security model, which
+  disagreed (2.20 and 2.30). Credentials reach git through
+  `GIT_CONFIG_COUNT`, which git reads from 2.31.0 on; an older git ignores
+  it and runs the clone or push without the token.
+- **Claims the code contradicted are corrected.** The MCP help, README, docs
+  site and ADR-0007 said the HTTP transports have no authentication; they
+  have an optional bearer token (`--token`, `CORRAL_MCP_TOKEN`), and the
+  loopback guard still applies with one. The security model said corralctl
+  never pushes; `sync` and `adopt` create repositories and push, within the
+  bounds C6 and C7 state. The architecture document listed seven read and
+  three write MCP tools (there are eleven and seven), Go as the only
+  indexed language (there are ten extractors), and a dependency diagram
+  that omitted most packages; it now carries the `go list` import table.
+  The `mcp` help named five indexed languages, and `--enable-mutations` and
+  the server's instructions to agents named two of the six write tools it
+  unlocks.
+
+### Added
+
+- **Trace context from `_meta`.** A request that carries a W3C `traceparent`
+  in its `_meta`, as protocol `2026-07-28` specifies (SEP-414), is recorded
+  under that trace in `--trace-file`, on stdio as well as HTTP. Over HTTP a
+  valid `_meta` value takes precedence over the `traceparent` header.
 
 ## [0.0.53] - 2026-10-25
 

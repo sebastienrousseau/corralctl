@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Sebastien Rousseau <sebastian.rousseau@gmail.com>
 // SPDX-License-Identifier: GPL-3.0-only
 
-package engine
+package adopt
 
 import (
 	"context"
@@ -45,12 +45,12 @@ func TestExecuteAdoptionValidation(t *testing.T) {
 	ctx := context.Background()
 
 	// Empty repo name
-	if _, err := ExecuteAdoption(ctx, AdoptOptions{LocalPath: "/tmp/repo"}); err == nil {
+	if _, err := Execute(ctx, Options{LocalPath: "/tmp/repo"}); err == nil {
 		t.Fatal("expected error for empty repo name")
 	}
 
 	// Empty local path
-	if _, err := ExecuteAdoption(ctx, AdoptOptions{RepoName: "repo"}); err == nil {
+	if _, err := Execute(ctx, Options{RepoName: "repo"}); err == nil {
 		t.Fatal("expected error for empty local path")
 	}
 }
@@ -65,7 +65,7 @@ func TestExecuteAdoptionRelocation(t *testing.T) {
 	}()
 
 	// Dry run relocation
-	res, err := ExecuteAdoption(ctx, AdoptOptions{
+	res, err := Execute(ctx, Options{
 		RepoName:      "testrepo",
 		LocalPath:     "/old/path",
 		NewTargetDir:  "/new/path",
@@ -80,7 +80,7 @@ func TestExecuteAdoptionRelocation(t *testing.T) {
 	adoptMkdirAll = func(path string, perm os.FileMode) error {
 		return errors.New("mkdir failed")
 	}
-	_, err = ExecuteAdoption(ctx, AdoptOptions{
+	_, err = Execute(ctx, Options{
 		RepoName:      "testrepo",
 		LocalPath:     "/old/path",
 		NewTargetDir:  "/new/path",
@@ -95,7 +95,7 @@ func TestExecuteAdoptionRelocation(t *testing.T) {
 	adoptRename = func(oldpath, newpath string) error {
 		return errors.New("rename failed")
 	}
-	_, err = ExecuteAdoption(ctx, AdoptOptions{
+	_, err = Execute(ctx, Options{
 		RepoName:      "testrepo",
 		LocalPath:     "/old/path",
 		NewTargetDir:  "/new/path",
@@ -107,7 +107,7 @@ func TestExecuteAdoptionRelocation(t *testing.T) {
 
 	// Successful relocation without remote
 	adoptRename = func(oldpath, newpath string) error { return nil }
-	res, err = ExecuteAdoption(ctx, AdoptOptions{
+	res, err = Execute(ctx, Options{
 		RepoName:      "testrepo",
 		LocalPath:     "/old/path",
 		NewTargetDir:  "/new/path",
@@ -126,7 +126,7 @@ func TestExecuteAdoptionRelocation(t *testing.T) {
 	}()
 	adoptRename = func(oldpath, newpath string) error { return syscall.EXDEV }
 	adoptCopyDir = func(src, dst string) error { return errors.New("copy failed") }
-	_, err = ExecuteAdoption(ctx, AdoptOptions{
+	_, err = Execute(ctx, Options{
 		RepoName:      "testrepo",
 		LocalPath:     "/old/path",
 		NewTargetDir:  "/new/path",
@@ -143,7 +143,7 @@ func TestExecuteAdoptionRelocation(t *testing.T) {
 		removed = true
 		return nil
 	}
-	res, err = ExecuteAdoption(ctx, AdoptOptions{
+	res, err = Execute(ctx, Options{
 		RepoName:      "testrepo",
 		LocalPath:     "/old/path",
 		NewTargetDir:  "/new/path",
@@ -160,7 +160,7 @@ func TestExecuteAdoptionForgeProvisioning(t *testing.T) {
 	mockTgt := &mockAdoptTarget{}
 
 	// Dry run with forge
-	res, err := ExecuteAdoption(ctx, AdoptOptions{
+	res, err := Execute(ctx, Options{
 		RepoName:     "dryrepo",
 		LocalPath:    "/tmp/dryrepo",
 		Forge:        mockTgt,
@@ -176,7 +176,7 @@ func TestExecuteAdoptionForgeProvisioning(t *testing.T) {
 	mockTgt.ensureFn = func(ctx context.Context, owner string, spec forge.RepoSpec, opts forge.TargetOptions) (forge.Remote, error) {
 		return forge.Remote{}, errors.New("remote error")
 	}
-	_, err = ExecuteAdoption(ctx, AdoptOptions{
+	_, err = Execute(ctx, Options{
 		RepoName:  "failrepo",
 		LocalPath: "/tmp/failrepo",
 		Forge:     mockTgt,
@@ -192,7 +192,7 @@ func TestExecuteAdoptionForgeProvisioning(t *testing.T) {
 	adoptAddRemote = func(ctx context.Context, targetDir, name, url string) error {
 		return errors.New("remote add failure")
 	}
-	_, err = ExecuteAdoption(ctx, AdoptOptions{
+	_, err = Execute(ctx, Options{
 		RepoName:  "remotefail",
 		LocalPath: "/tmp/remotefail",
 		Forge:     mockTgt,
@@ -221,7 +221,7 @@ func TestExecuteAdoptionPushFlow(t *testing.T) {
 
 	// Empty repository skips push
 	adoptIsEmpty = func(ctx context.Context, dir string) bool { return true }
-	res, err := ExecuteAdoption(ctx, AdoptOptions{
+	res, err := Execute(ctx, Options{
 		RepoName:  "emptyrepo",
 		LocalPath: "/tmp/emptyrepo",
 		Forge:     mockTgt,
@@ -238,7 +238,7 @@ func TestExecuteAdoptionPushFlow(t *testing.T) {
 	adoptPushUpstream = func(ctx context.Context, dir, remote, branch, pushURL string, cred *git.PushCredential) error {
 		return errors.New("push rejected")
 	}
-	_, err = ExecuteAdoption(ctx, AdoptOptions{
+	_, err = Execute(ctx, Options{
 		RepoName:  "pushfail",
 		LocalPath: "/tmp/pushfail",
 		Forge:     mockTgt,
@@ -255,7 +255,7 @@ func TestExecuteAdoptionPushFlow(t *testing.T) {
 		return nil
 	}
 	adoptCurrentBranch = func(ctx context.Context, dir string) (string, error) { return "trunk", nil }
-	res, err = ExecuteAdoption(ctx, AdoptOptions{
+	res, err = Execute(ctx, Options{
 		RepoName:     "successepoch",
 		LocalPath:    "/tmp/successepoch",
 		Forge:        mockTgt,
@@ -276,7 +276,7 @@ func TestExecuteAdoptionPushFlow(t *testing.T) {
 		}
 		return nil
 	}
-	res, err = ExecuteAdoption(ctx, AdoptOptions{
+	res, err = Execute(ctx, Options{
 		RepoName:  "sshsuccess",
 		LocalPath: "/tmp/sshsuccess",
 		Forge:     mockTgt,

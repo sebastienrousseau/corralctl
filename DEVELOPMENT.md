@@ -23,7 +23,7 @@ bug in this file — please report it.
 | Tool | Version | Why |
 |---|---|---|
 | Go | as pinned by the `go` directive in `go.mod`; not 1.27.0 to 1.27.2 | `GOTOOLCHAIN=auto` downloads it. Most CI jobs take it from `go.mod`; the reusable Go CI job (`ci.yml`) and the release workflow pass `go-version: '1.26.10'`, so bump those with the directive. See the [minimum toolchain policy](docs/packaging.md#minimum-toolchain-policy) for why 1.27.0 to 1.27.2 are excluded |
-| git | 2.30+ | corralctl shells out to `git` for every clone, pull and inspection |
+| git | 2.31+ | corralctl shells out to `git` for every clone, pull and inspection, and hands it credentials through `GIT_CONFIG_COUNT`, which 2.31 introduced |
 | make | any | Task runner for everything below |
 
 Optional, only needed for the gate that uses them:

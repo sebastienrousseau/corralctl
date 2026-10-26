@@ -36,7 +36,7 @@ func TestCmdSeamsBindToRealImplementations(t *testing.T) {
 		{"userHomeDir", userHomeDir, os.UserHomeDir},
 		{"syncWalk", syncWalk, mirror.Walk},
 		{"syncRun", syncRun, mirror.Run},
-		{"syncToken", syncToken, engine.ForgeToken},
+		{"syncToken", syncToken, forge.Token},
 		{"asTarget", asTarget, forge.AsTarget},
 		{"doctorRefreshFinderTags", doctorRefreshFinderTags, engine.RefreshRepoFinderTags},
 	}

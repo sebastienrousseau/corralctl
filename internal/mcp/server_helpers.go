@@ -127,7 +127,7 @@ func serverInstructions(opts ServerOptions) string {
 				"so do not treat a delete as something you can perform unattended.")
 		}
 	case opts.EnableMutations:
-		b.WriteString("Write tools (corral_sync_repo, corral_clone_repo) are enabled and audited. " +
+		b.WriteString("Write tools (corral_sync_repo, corral_clone_repo, corral_adopt_repo, corral_create_worktree, corral_release_worktree, corral_prune_worktrees) are enabled and audited. " +
 			"Deletion is not available.")
 	default:
 		b.WriteString("This server is read-only: no tool here modifies the filesystem.")

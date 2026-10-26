@@ -77,8 +77,8 @@ So the honest cost of adopting tree-sitter is not "it cannot be built". It is:
   becomes a matrix plus an artifact merge — on machinery this project had
   just added a dry-run for, precisely because it is under-exercised.
 - **Dependency surface.** tree-sitter plus a grammar per language, against
-  a module that holds eleven direct dependencies and a hand-maintained
-  SBOM that CI checks.
+  a module that keeps its direct dependencies few, each with a row in a
+  hand-maintained SBOM that CI checks.
 
 Those are real and they still point the same way for this change, because
 none of them had to be paid to ship the symbol index. But they are a

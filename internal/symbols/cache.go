@@ -31,7 +31,7 @@ import (
 // # Why a file per repository, and not a database
 //
 // The obvious answer is SQLite, and it is the wrong one here. corral holds
-// eleven direct dependencies and a hand-maintained SBOM that CI checks;
+// few direct dependencies and a hand-maintained SBOM that CI checks;
 // the pure-Go SQLite driver is an order of magnitude larger than corral
 // itself, and the fast one is CGO, which ADR-0006 already rules out. None
 // of what a database offers is needed: there are no joins, no

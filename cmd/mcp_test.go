@@ -343,7 +343,7 @@ func TestLoopbackOnly(t *testing.T) {
 	}
 }
 
-// TestRunMCPRefusesARoutableBind: the server has no authentication and
+// TestRunMCPRefusesARoutableBind: the server has at most a bearer token and
 // serves a developer's whole workspace, so publishing it has to be asked
 // for rather than arrived at.
 func TestRunMCPRefusesARoutableBind(t *testing.T) {

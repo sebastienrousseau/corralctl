@@ -9,7 +9,7 @@ import (
 	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	"github.com/sebastienrousseau/corralctl/internal/engine"
+	"github.com/sebastienrousseau/corralctl/internal/adopt"
 	"github.com/sebastienrousseau/corralctl/internal/forge"
 	"github.com/sebastienrousseau/corralctl/internal/github"
 )
@@ -49,7 +49,7 @@ func (s *Server) handleAdoptRepo(ctx context.Context, _ *mcp.CallToolRequest, in
 		cleanTarget = targetResolved
 	}
 
-	opts := engine.AdoptOptions{
+	opts := adopt.Options{
 		LocalPath:     cleanLocal,
 		NewTargetDir:  cleanTarget,
 		Owner:         input.Owner,

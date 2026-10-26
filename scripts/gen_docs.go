@@ -14,8 +14,8 @@
 //
 // The roff is emitted directly rather than via cobra/doc's GenManTree,
 // which would pull cpuguy83/go-md2man into go.mod for a build-time concern.
-// This module keeps eleven direct dependencies and a hand-maintained
-// SBOM.md that CI checks against go.mod, so a new dependency is not free.
+// Every direct dependency in go.mod has a row in a hand-maintained SBOM.md
+// that CI checks against it, so a new dependency is not free.
 //
 // The output directory must not be goreleaser's dist/: goreleaser cleans that
 // directory *after* running its before-hooks, so anything generated into it is

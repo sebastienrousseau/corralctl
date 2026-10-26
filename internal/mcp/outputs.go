@@ -182,8 +182,8 @@ type RepoOverviewOutput struct {
 // MutationOutput is the result of a write tool.
 //
 // Sync names the repository it acted on; clone and delete name the target
-// path. One type with both optional keeps the three write tools reporting the
-// same shape rather than three near-identical ones.
+// path. One type with both optional keeps the write tools reporting the
+// same shape rather than near-identical ones per tool.
 type MutationOutput struct {
 	Tool   string `json:"tool"`
 	Result string `json:"result"`

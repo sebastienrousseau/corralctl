@@ -13,6 +13,7 @@ import (
 	"runtime"
 	"strings"
 
+	"github.com/sebastienrousseau/corralctl/internal/adopt"
 	"github.com/sebastienrousseau/corralctl/internal/diag"
 	"github.com/sebastienrousseau/corralctl/internal/discover"
 	"github.com/sebastienrousseau/corralctl/internal/engine"
@@ -41,10 +42,10 @@ var (
 
 	// Seams for testing
 	adoptDiscoverRun        = discover.Discover
-	adoptExecute            = engine.ExecuteAdoption
+	adoptExecute            = adopt.Execute
 	adoptResolveForge       = forge.Resolve
 	adoptAsTarget           = forge.AsTarget
-	adoptForgeToken         = engine.ForgeToken
+	adoptForgeToken         = forge.Token
 	adoptFilepathAbs        = filepath.Abs
 	adoptWizardRun          = tui.RunAdoptWizard
 	adoptApplyCandidateTags = engine.ApplyCandidateFinderTags
@@ -165,7 +166,7 @@ func processAdoption(ctx context.Context, candidates []discover.Candidate) error
 
 	encoder := json.NewEncoder(os.Stdout)
 	encoder.SetEscapeHTML(false)
-	var aggregateResults []engine.AdoptResult
+	var aggregateResults []adopt.Result
 
 	for _, cand := range candidates {
 		newPath := cand.Path
@@ -181,7 +182,7 @@ func processAdoption(ctx context.Context, candidates []discover.Candidate) error
 			newPath = adoptResolveLayout(adoptTargetDir, col, cand.DetectedLang, cand.Name)
 		}
 
-		opts := engine.AdoptOptions{
+		opts := adopt.Options{
 			LocalPath:     cand.Path,
 			NewTargetDir:  newPath,
 			Forge:         targetForge,

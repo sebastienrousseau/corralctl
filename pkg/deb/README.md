@@ -21,7 +21,7 @@ Not duplicated here; see [`../README.md`](../README.md) for why.
 
 ## Runtime dependencies
 
-`git` (≥ 2.20). Nothing else: the binary is statically linked, built
+`git` (≥ 2.31, which reads the `GIT_CONFIG_COUNT` credentials corralctl passes). Nothing else: the binary is statically linked, built
 `CGO_ENABLED=0`.
 
 ## Install

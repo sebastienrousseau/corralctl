@@ -29,11 +29,20 @@ mirror without network access.
 
 It is:
 
-- A **read-mostly** tool from GitHub's perspective (clones, fetches).
+- A **read-only** tool toward the forge it clones from: `corralctl clone`
+  lists repositories through the API, then clones and fetches.
 - A **write** tool from the local-filesystem perspective (creates
   directories, `git clone`, `git pull`).
-- **Never** a tool that pushes, force-updates, deletes remote content, or
-  modifies GitHub state via the API.
+- A **write** tool toward a destination forge only when asked to be one:
+  - `corralctl sync` creates repositories on the destination, pushes every
+    local branch and tag with `--prune` (deleting destination branches and
+    tags that do not exist locally, and force-updating tags), and on Gitea, Forgejo
+    and Codeberg can repoint the destination's default branch. C6 and C7
+    bound what it pushes and where its credentials go.
+  - `corralctl adopt`, and the MCP `corral_adopt_repo` tool behind
+    `--enable-mutations`, create one repository and push the current
+    branch to it.
+- **Never** a tool that force-pushes a branch.
 
 ## 2. Trust boundaries
 
@@ -285,8 +294,11 @@ via embedded hooks.
 
 - The user's `GITHUB_TOKEN` has only the scopes corralctl needs
   (`repo`, `read:user`). corralctl does not need `write:*` scopes.
-- `git` is installed and version ≥ 2.20 (for `-C`, `-c`, and modern
-  transports).
+- `git` is installed and version ≥ 2.31. Credentials reach git as
+  `GIT_CONFIG_COUNT`/`GIT_CONFIG_KEY_0` environment entries
+  (`internal/git/clone_pull.go`, `internal/git/mirror.go`), which git
+  reads from 2.31.0 on; an older git ignores them, so a clone or push
+  that needs the token runs without it.
 - The user's clock is roughly correct (needed for TLS validation and
   Rekor entry timestamps).
 - The user runs a supported OS: recent Linux, macOS ≥ 14, or Windows 11.
