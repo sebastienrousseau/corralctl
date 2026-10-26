@@ -6,6 +6,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- **Metrics labels come from fixed sets.** `mcp_requests_total` keyed its
+  `endpoint` label on the raw decoded request path, and
+  `mcp_tool_calls_total` its `tool` label on the name the client sent. Both
+  are counted before authentication, so anyone who could reach the socket
+  could add a series per request without bound, and a path holding `"` and
+  a newline wrote forged lines into `/metrics`. The endpoint is now one of
+  `/`, `/mcp`, `/sse`, `/metrics` or `other`, the method one of the five
+  the transports answer or `OTHER`, the tool a registered name or
+  `unknown`, and every label value is escaped.
+
 ## [0.0.53] - 2026-10-25
 
 ### Security
