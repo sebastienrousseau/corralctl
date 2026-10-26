@@ -27,7 +27,6 @@ cognitive	25	internal/engine/migration.go	normalizeLayoutDirCase
 cognitive	18	internal/engine/worker.go	startWorkers
 cognitive	18	internal/forge/forge.go	Filter
 cognitive	16	internal/forge/forge.go	OwnerPrefixes
-cognitive	16	internal/forge/rest.go	(*restClient).getPage
 cognitive	21	internal/git/direct_reader.go	RemoteOriginFromConfig
 cognitive	18	internal/git/direct_reader.go	directIsEmpty
 cognitive	19	internal/git/direct_reader.go	readDirectHeadCommit
