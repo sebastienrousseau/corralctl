@@ -35,44 +35,60 @@ var (
 // original is ordinary, and the other two hundred repositories should not
 // wait on it.
 func Walk(baseDir string) ([]Repo, error) {
-	var repos []Repo
-	seen := map[string]int{}
-	err := walkDir(baseDir, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			if filepath.Clean(path) == filepath.Clean(baseDir) {
-				return err
-			}
-			return nil //nolint:nilerr // deliberate: skip this entry, keep walking
-		}
-		if !d.IsDir() {
-			return nil
-		}
-		if d.Name() == ".git" {
-			return fs.SkipDir
-		}
-		if path == baseDir || !isRepository(path) {
-			return nil
-		}
-		name := filepath.Base(path)
-		key := strings.ToLower(name)
-		repo := Repo{Name: name, Path: path, Private: privateFromPath(baseDir, path)}
-		if i, dup := seen[key]; dup {
-			first := &repos[i]
-			if first.Conflict == "" {
-				first.Conflict = fmt.Sprintf("not mirrored: shares the name %q with %s; two repositories cannot land on one destination path", name, path)
-			}
-			repo.Conflict = fmt.Sprintf("not mirrored: shares the name %q with %s; two repositories cannot land on one destination path", name, first.Path)
-		} else {
-			seen[key] = len(repos)
-		}
-		repos = append(repos, repo)
-		return fs.SkipDir
-	})
-	if err != nil {
+	w := &walker{baseDir: baseDir, seen: map[string]int{}}
+	if err := walkDir(baseDir, w.visit); err != nil {
 		return nil, err
 	}
+	repos := w.repos
 	sort.Slice(repos, func(i, j int) bool { return repos[i].Path < repos[j].Path })
 	return repos, nil
+}
+
+// walker is Walk's state: the repositories found so far and the index of
+// the first one seen under each case-folded name.
+type walker struct {
+	baseDir string
+	repos   []Repo
+	seen    map[string]int
+}
+
+// visit is the WalkDir callback.
+func (w *walker) visit(path string, d fs.DirEntry, err error) error {
+	if err != nil {
+		if filepath.Clean(path) == filepath.Clean(w.baseDir) {
+			return err
+		}
+		return nil //nolint:nilerr // deliberate: skip this entry, keep walking
+	}
+	if !d.IsDir() {
+		return nil
+	}
+	if d.Name() == ".git" {
+		return fs.SkipDir
+	}
+	if path == w.baseDir || !isRepository(path) {
+		return nil
+	}
+	w.add(path)
+	return fs.SkipDir
+}
+
+// add records the repository at path, marking it and any earlier one with
+// the same case-folded name as a conflict.
+func (w *walker) add(path string) {
+	name := filepath.Base(path)
+	key := strings.ToLower(name)
+	repo := Repo{Name: name, Path: path, Private: privateFromPath(w.baseDir, path)}
+	if i, dup := w.seen[key]; dup {
+		first := &w.repos[i]
+		if first.Conflict == "" {
+			first.Conflict = fmt.Sprintf("not mirrored: shares the name %q with %s; two repositories cannot land on one destination path", name, path)
+		}
+		repo.Conflict = fmt.Sprintf("not mirrored: shares the name %q with %s; two repositories cannot land on one destination path", name, first.Path)
+	} else {
+		w.seen[key] = len(w.repos)
+	}
+	w.repos = append(w.repos, repo)
 }
 
 // privateFromPath reads visibility from the directory segments between
