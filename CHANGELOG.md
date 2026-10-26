@@ -6,6 +6,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **The MCP server no longer advertises the `logging` capability.** It never
+  sent a log message; the capability was the Go SDK's default. Logging is
+  Deprecated in protocol `2026-07-28` (SEP-2577), and diagnostics stay on
+  stderr. `initialize` and `server/discover` now list `prompts`, `resources`
+  and `tools` only.
+- **The MCP server no longer links the terminal UI.** Adoption moved from
+  `internal/engine` to a new `internal/adopt` package and the forge token
+  resolver to `internal/forge`, so `internal/mcp` no longer depends on
+  `internal/engine`, `internal/tui` or the Bubble Tea stack. A test keeps
+  that boundary.
+
+### Added
+
+- **Trace context from `_meta`.** A request that carries a W3C `traceparent`
+  in its `_meta`, as protocol `2026-07-28` specifies (SEP-414), is recorded
+  under that trace in `--trace-file`, on stdio as well as HTTP. Over HTTP a
+  valid `_meta` value takes precedence over the `traceparent` header.
+
 ## [0.0.53] - 2026-10-25
 
 ### Security

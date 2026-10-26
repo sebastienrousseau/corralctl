@@ -221,6 +221,12 @@ func NewServer(opts ServerOptions) (*Server, error) {
 		},
 		&mcp.ServerOptions{
 			Instructions: serverInstructions(opts),
+			// A non-nil, empty value replaces the SDK's default, which
+			// advertises "logging". The server never emits
+			// notifications/message, and Logging is Deprecated in protocol
+			// 2026-07-28 (SEP-2577). Tools, resources and prompts are still
+			// inferred from what is registered.
+			Capabilities: &mcp.ServerCapabilities{},
 		},
 	)
 
@@ -258,6 +264,9 @@ func NewServer(opts ServerOptions) (*Server, error) {
 		s.registerDestructiveTools()
 	}
 	s.mcp.AddReceivingMiddleware(s.unknownToolMiddleware())
+	// Added last so it wraps every middleware above: instrumentation has
+	// to see the trace a request names.
+	s.mcp.AddReceivingMiddleware(metaTraceMiddleware())
 	return s, nil
 }
 
