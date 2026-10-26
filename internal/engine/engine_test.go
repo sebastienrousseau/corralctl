@@ -1810,3 +1810,15 @@ func TestParseLayoutTemplateRejectsOversizedInput(t *testing.T) {
 		t.Fatal("expected oversized layout error")
 	}
 }
+
+func TestCollectionsReturnsCopy(t *testing.T) {
+	got := Collections()
+	want := []string{"Public", "Private", "Work", "Forks"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("Collections() = %v, want %v", got, want)
+	}
+	got[0] = "Mutated"
+	if Collections()[0] != "Public" {
+		t.Fatal("Collections() exposed the package slice")
+	}
+}

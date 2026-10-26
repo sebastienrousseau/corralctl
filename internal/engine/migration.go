@@ -33,7 +33,7 @@ func prepareWorkspace(opts RunOptions, repos []github.Repo) error {
 }
 
 func ensureAppleCollections(baseDir string) error {
-	for _, collection := range []string{"Public", "Private", "Work", "Forks"} {
+	for _, collection := range collections {
 		if err := mkdirAll(filepath.Join(baseDir, collection), 0o750); err != nil {
 			return err
 		}

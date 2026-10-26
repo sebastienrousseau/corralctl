@@ -119,8 +119,19 @@ func ResolveLayoutPath(baseDir, collection, language, repoName string) string {
 	return target
 }
 
+// collections are the top-level directories of the default layout, in
+// the order a migration creates them.
+var collections = []string{"Public", "Private", "Work", "Forks"}
+
+// Collections returns the top-level directories of the default layout:
+// Public, Private, Work and Forks. The returned slice is a copy, so a
+// caller may modify it.
+func Collections() []string {
+	return append([]string(nil), collections...)
+}
+
 func canonicalCollectionName(name string) string {
-	for _, collection := range []string{"Public", "Private", "Forks", "Work"} {
+	for _, collection := range collections {
 		if strings.EqualFold(name, collection) {
 			return collection
 		}
