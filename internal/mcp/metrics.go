@@ -8,7 +8,9 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"slices"
 	"sort"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -36,9 +38,60 @@ func newMetrics() *Metrics {
 	}
 }
 
+// Every label value below is chosen from a fixed set, never copied from the
+// request. The counters are bumped before authentication, so a value taken
+// from the client would let anyone who can reach the socket add a series per
+// request (memory that is never freed) and, through a decoded `"` or newline
+// in the path, write arbitrary lines into the exposition.
+
+// otherLabel is the bucket for a path or method outside the fixed sets.
+const otherLabel = "other"
+
+// unknownToolLabel is the bucket for a tool name this server never registered.
+const unknownToolLabel = "unknown"
+
+// routeLabel maps a request path to one of the routes this server serves.
+func routeLabel(path string) string {
+	switch path {
+	case "/", StreamableEndpoint, SSEEndpoint, MetricsEndpoint:
+		return path
+	}
+	return otherLabel
+}
+
+// methodLabel maps an HTTP method to the ones the transports answer.
+func methodLabel(method string) string {
+	switch method {
+	case http.MethodGet, http.MethodPost, http.MethodDelete, http.MethodOptions, http.MethodHead:
+		return method
+	}
+	return strings.ToUpper(otherLabel)
+}
+
+// labelEscaper applies the exposition format's escaping for label values.
+var labelEscaper = strings.NewReplacer(`\`, `\\`, `"`, `\"`, "\n", `\n`)
+
+// escapeLabel escapes a label value. The values here come from fixed sets,
+// so this is the second line, not the first: a future label fed from
+// somewhere less careful still cannot close the quote.
+func escapeLabel(v string) string {
+	return labelEscaper.Replace(v)
+}
+
+// toolLabel returns name when this server registered a tool by that name,
+// and unknownToolLabel otherwise.
+func (s *Server) toolLabel(name string) string {
+	if slices.Contains(s.toolNames, name) {
+		return name
+	}
+	return unknownToolLabel
+}
+
 // incRequest increments the request counter for the specified HTTP method, endpoint, and status code.
+// Method and endpoint are folded into fixed label sets; see routeLabel.
 func (m *Metrics) incRequest(method, endpoint string, status int) {
-	key := fmt.Sprintf(`endpoint="%s",method="%s",status="%d"`, endpoint, method, status)
+	key := fmt.Sprintf(`endpoint="%s",method="%s",status="%d"`,
+		escapeLabel(routeLabel(endpoint)), escapeLabel(methodLabel(method)), status)
 	m.mu.RLock()
 	c, ok := m.requestsTotal[key]
 	m.mu.RUnlock()
@@ -55,8 +108,9 @@ func (m *Metrics) incRequest(method, endpoint string, status int) {
 }
 
 // incToolCall increments the invocation counter for a specific MCP tool name and execution status.
+// The caller passes a name from toolLabel, never the client's raw one.
 func (m *Metrics) incToolCall(tool, status string) {
-	key := fmt.Sprintf(`status="%s",tool="%s"`, status, tool)
+	key := fmt.Sprintf(`status="%s",tool="%s"`, escapeLabel(status), escapeLabel(tool))
 	m.mu.RLock()
 	c, ok := m.toolCallsTotal[key]
 	m.mu.RUnlock()
@@ -146,44 +200,60 @@ func (s *Server) toolInstrumentationMiddleware() mcp.Middleware {
 			res, err := next(ctx, method, req)
 			dur := float64(time.Since(start).Microseconds()) / 1000.0
 
-			if method == "tools/call" {
-				if call, ok := req.(*mcp.CallToolRequest); ok {
-					status := "ok"
-					errMsg := ""
-					if err != nil {
-						status = "error"
-						errMsg = err.Error()
-					} else if callRes, ok := res.(*mcp.CallToolResult); ok && callRes != nil && callRes.IsError {
-						status = "error"
-						errMsg = "tool returned error result"
-					}
-					if s.metrics != nil {
-						s.metrics.incToolCall(call.Params.Name, status)
-					}
-					if s.tracer != nil {
-						_ = s.tracer.Record(ctx, TraceEvent{
-							Type:       EventToolCall,
-							Name:       call.Params.Name,
-							DurationMs: dur,
-							Success:    status == "ok",
-							Error:      errMsg,
-						})
-					}
-				}
-			} else if s.tracer != nil {
-				errMsg := ""
-				if err != nil {
-					errMsg = err.Error()
-				}
-				_ = s.tracer.Record(ctx, TraceEvent{
-					Type:       EventRequest,
-					Name:       method,
-					DurationMs: dur,
-					Success:    err == nil,
-					Error:      errMsg,
-				})
+			if method != "tools/call" {
+				s.recordRequest(ctx, method, dur, err)
+			} else if call, ok := req.(*mcp.CallToolRequest); ok {
+				s.recordToolCall(ctx, call.Params.Name, dur, res, err)
 			}
 			return res, err
 		}
 	}
+}
+
+// toolOutcome classifies a tool call as "ok" or "error", with the reason
+// for an error.
+func toolOutcome(res mcp.Result, err error) (status, errMsg string) {
+	if err != nil {
+		return "error", err.Error()
+	}
+	if callRes, ok := res.(*mcp.CallToolResult); ok && callRes != nil && callRes.IsError {
+		return "error", "tool returned error result"
+	}
+	return "ok", ""
+}
+
+// recordToolCall counts one tool call and traces it. The counter is keyed
+// on toolLabel, so a name the client invented shares the unknown series.
+func (s *Server) recordToolCall(ctx context.Context, name string, dur float64, res mcp.Result, err error) {
+	status, errMsg := toolOutcome(res, err)
+	if s.metrics != nil {
+		s.metrics.incToolCall(s.toolLabel(name), status)
+	}
+	if s.tracer != nil {
+		_ = s.tracer.Record(ctx, TraceEvent{
+			Type:       EventToolCall,
+			Name:       name,
+			DurationMs: dur,
+			Success:    status == "ok",
+			Error:      errMsg,
+		})
+	}
+}
+
+// recordRequest traces a JSON-RPC request that is not a tool call.
+func (s *Server) recordRequest(ctx context.Context, method string, dur float64, err error) {
+	if s.tracer == nil {
+		return
+	}
+	errMsg := ""
+	if err != nil {
+		errMsg = err.Error()
+	}
+	_ = s.tracer.Record(ctx, TraceEvent{
+		Type:       EventRequest,
+		Name:       method,
+		DurationMs: dur,
+		Success:    err == nil,
+		Error:      errMsg,
+	})
 }

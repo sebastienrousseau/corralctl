@@ -126,6 +126,61 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   warmer could scan the whole workspace at once. The watcher now waits for its
   pass before reporting itself stopped, and a pass requested while another runs
   returns at once.
+### Security
+
+- **Metrics labels come from fixed sets.** `mcp_requests_total` keyed its
+  `endpoint` label on the raw decoded request path, and
+  `mcp_tool_calls_total` its `tool` label on the name the client sent. Both
+  are counted before authentication, so anyone who could reach the socket
+  could add a series per request without bound, and a path holding `"` and
+  a newline wrote forged lines into `/metrics`. The endpoint is now one of
+  `/`, `/mcp`, `/sse`, `/metrics` or `other`, the method one of the five
+  the transports answer or `OTHER`, the tool a registered name or
+  `unknown`, and every label value is escaped.
+
+- **`example.com` is no longer an allowed `Host`.** The HTTP transports
+  accepted `Host: example.com` alongside loopback, a leftover from the
+  default host of Go's `httptest.NewRequest`. It was reachable only by
+  whoever controls that domain's DNS, but test behaviour should not ship.
+
+- **A loopback `Origin` is no longer trusted by default, and responses
+  carry `Vary: Origin`.** The HTTP transports let in, and echoed back in
+  `Access-Control-Allow-Origin`, any `localhost` or loopback origin on any
+  port, so any page served by a local dev server could drive the server,
+  mutations included when they were enabled and no token was set. Only
+  origins listed in `--allowed-origins` now pass. **Breaking:** a browser
+  client connecting directly from a loopback page must be listed, for
+  example `--allowed-origins http://localhost:6274`. Clients that are not
+  browsers send no `Origin` and are unaffected.
+
+- **`--allow-remote` requires a bearer token.** A routable `--host`,
+  `--http` or `--metrics-addr` was allowed with `--allow-remote` alone, which
+  published every repository under the root to anyone who could reach the
+  port. It is now refused unless a token is set. **Breaking:** an operator
+  who relied on a proxy's own authentication must also set
+  `CORRAL_MCP_TOKEN` or `--token-file`.
+
+- **A wrong bearer token is answered `401` with a challenge.** It was a
+  `403` without `WWW-Authenticate`, which tells a client the token is
+  valid but lacks permission. It now carries
+  `WWW-Authenticate: Bearer realm="corral-mcp", error="invalid_token"`, as
+  RFC 6750 asks.
+
+- **The plain-HTTP limit is stated.** The server has no TLS listener. On a
+  routable address it now warns on stderr that the token and every response
+  cross the network unencrypted, and the README and security model say a
+  TLS-terminating proxy is required.
+
+### Added
+
+- **`--token-file`** reads the bearer token from a file, so it stays out of
+  the process list.
+
+### Deprecated
+
+- **`--token`** prints a warning: anything on the command line is visible
+  to every user on the machine through `ps`. Use `--token-file` or
+  `CORRAL_MCP_TOKEN`.
 
 ## [0.0.53] - 2026-10-25
 

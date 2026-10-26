@@ -11,6 +11,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 	"time"
 
@@ -26,8 +27,10 @@ import (
 //   - The legacy HTTP+SSE transport (protocol 2024-11-05) at SSEEndpoint,
 //     for a host that has not moved on yet.
 //
-// None of them carries authentication. The cmd layer refuses a routable
-// bind without --allow-remote; the server itself only knows how to listen.
+// Authentication is a bearer token (ServerOptions.AuthToken), checked in
+// wrapAuth; there is no TLS here. The cmd layer refuses a routable bind
+// without --allow-remote and a token; the server itself only knows how to
+// listen.
 const (
 	// StreamableEndpoint is the path the Streamable HTTP transport serves.
 	StreamableEndpoint = "/mcp"
@@ -163,29 +166,26 @@ func (s *Server) streamableHandler() http.Handler {
 }
 
 // isAllowedOrigin reports whether an Origin header is permitted to access the
-// server. Origins from loopback are permitted by default; non-loopback origins
-// must match an entry in ServerOptions.AllowedOrigins.
+// server: only an origin listed in ServerOptions.AllowedOrigins is.
+//
+// A loopback origin is not let in by default. Every local dev server is
+// one, so trusting loopback would let any page a developer happens to have
+// open on localhost drive this server, mutations included. A client that
+// is not a browser sends no Origin and is not affected; a browser client
+// is listed with --allowed-origins.
 func (s *Server) isAllowedOrigin(origin string) bool {
-	for _, allowed := range s.opts.AllowedOrigins {
-		if strings.EqualFold(origin, allowed) {
-			return true
-		}
-	}
-	u, err := url.Parse(origin)
-	if err != nil {
-		return false
-	}
-	host := u.Hostname()
-	if host == "localhost" {
-		return true
-	}
-	ip := net.ParseIP(host)
-	return ip != nil && ip.IsLoopback()
+	return slices.ContainsFunc(s.opts.AllowedOrigins, func(allowed string) bool {
+		return strings.EqualFold(origin, allowed)
+	})
 }
 
 // isAllowedHost reports whether Host is loopback or matches an allowed origin host.
+//
+// An empty Host is let through: only an HTTP/1.0 client omits it, and a
+// browser, which is what DNS rebinding drives, always sends one. No other
+// name is special here; a test that needs a host sets one.
 func (s *Server) isAllowedHost(host string) bool {
-	if host == "" || host == "example.com" {
+	if host == "" {
 		return true
 	}
 	h := host
@@ -193,24 +193,32 @@ func (s *Server) isAllowedHost(host string) bool {
 		h = parsedHost
 	}
 	h = strings.ToLower(strings.TrimSpace(h))
+	if isLoopbackName(h) {
+		return true
+	}
+	return slices.ContainsFunc(s.opts.AllowedOrigins, func(allowed string) bool {
+		return hostMatches(h, host, allowed)
+	})
+}
+
+// isLoopbackName reports whether a bare, lower-cased host names loopback.
+func isLoopbackName(h string) bool {
 	if h == "localhost" {
 		return true
 	}
 	ip := net.ParseIP(h)
-	if ip != nil && ip.IsLoopback() {
+	return ip != nil && ip.IsLoopback()
+}
+
+// hostMatches reports whether a Host header, as h without its port or as
+// the raw host with it, names the host of one --allowed-origins entry. The
+// entry may be a bare host or a full origin.
+func hostMatches(h, host, allowed string) bool {
+	if strings.EqualFold(h, allowed) || strings.EqualFold(host, allowed) {
 		return true
 	}
-	for _, allowed := range s.opts.AllowedOrigins {
-		if strings.EqualFold(h, allowed) || strings.EqualFold(host, allowed) {
-			return true
-		}
-		if u, err := url.Parse(allowed); err == nil {
-			if strings.EqualFold(h, u.Hostname()) || strings.EqualFold(host, u.Host) {
-				return true
-			}
-		}
-	}
-	return false
+	u, err := url.Parse(allowed)
+	return err == nil && (strings.EqualFold(h, u.Hostname()) || strings.EqualFold(host, u.Host))
 }
 
 type statusRecorder struct {
@@ -234,71 +242,97 @@ func (rec *statusRecorder) Flush() {
 // transport handler.
 func (s *Server) wrapAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Propagate or generate W3C traceparent distributed tracing context.
-		rawTP := r.Header.Get("traceparent")
-		tc, ok := ParseTraceParent(rawTP)
-		if !ok {
-			tc = NewTraceContext()
-		}
-		w.Header().Set("traceparent", tc.String())
-		r = r.WithContext(ContextWithTrace(r.Context(), tc))
-
-		if !s.isAllowedHost(r.Host) {
-			http.Error(w, "Forbidden: invalid Host header", http.StatusForbidden)
-			if s.metrics != nil {
-				s.metrics.incRequest(r.Method, r.URL.Path, http.StatusForbidden)
-			}
+		r = withTraceContext(w, r)
+		if status, answered := s.gate(w, r); answered {
+			s.countRequest(r, status)
 			return
 		}
-
-		if origin := r.Header.Get("Origin"); origin != "" {
-			if !s.isAllowedOrigin(origin) {
-				http.Error(w, "Forbidden: cross-origin request rejected", http.StatusForbidden)
-				if s.metrics != nil {
-					s.metrics.incRequest(r.Method, r.URL.Path, http.StatusForbidden)
-				}
-				return
-			}
-			w.Header().Set("Access-Control-Allow-Origin", origin)
-			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
-			w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type, Mcp-Session-Id, Mcp-Method, Mcp-Name, io.modelcontextprotocol.protocol-version, traceparent")
-			w.Header().Set("Access-Control-Expose-Headers", "Mcp-Session-Id, WWW-Authenticate, traceparent")
-			if r.Method == http.MethodOptions {
-				w.WriteHeader(http.StatusNoContent)
-				if s.metrics != nil {
-					s.metrics.incRequest(r.Method, r.URL.Path, http.StatusNoContent)
-				}
-				return
-			}
-		}
-
-		if s.opts.AuthToken != "" {
-			authHeader := r.Header.Get("Authorization")
-			const prefix = "Bearer "
-			if !strings.HasPrefix(authHeader, prefix) {
-				w.Header().Set("WWW-Authenticate", `Bearer realm="corral-mcp"`)
-				http.Error(w, "Unauthorized: missing Bearer token", http.StatusUnauthorized)
-				if s.metrics != nil {
-					s.metrics.incRequest(r.Method, r.URL.Path, http.StatusUnauthorized)
-				}
-				return
-			}
-			token := strings.TrimPrefix(authHeader, prefix)
-			if subtle.ConstantTimeCompare([]byte(token), []byte(s.opts.AuthToken)) != 1 {
-				http.Error(w, "Forbidden: invalid token", http.StatusForbidden)
-				if s.metrics != nil {
-					s.metrics.incRequest(r.Method, r.URL.Path, http.StatusForbidden)
-				}
-				return
-			}
-		}
-
 		rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
 		next.ServeHTTP(rec, r)
-		if s.metrics != nil {
-			s.metrics.incRequest(r.Method, r.URL.Path, rec.status)
-		}
+		s.countRequest(r, rec.status)
 	})
+}
+
+// withTraceContext propagates the request's W3C traceparent, or starts a
+// new trace, echoes it on the response and carries it in the context.
+func withTraceContext(w http.ResponseWriter, r *http.Request) *http.Request {
+	tc, ok := ParseTraceParent(r.Header.Get("traceparent"))
+	if !ok {
+		tc = NewTraceContext()
+	}
+	w.Header().Set("traceparent", tc.String())
+	// Whether the CORS headers are sent, and whether the request is
+	// refused, depends on Origin; a shared cache has to key on it.
+	w.Header().Add("Vary", "Origin")
+	return r.WithContext(ContextWithTrace(r.Context(), tc))
+}
+
+// gate runs the checks a request passes before it reaches a transport, in
+// order: Host, then Origin and CORS, then the bearer token. When one of
+// them answers the request itself, gate returns the status it wrote and
+// true.
+func (s *Server) gate(w http.ResponseWriter, r *http.Request) (int, bool) {
+	if !s.isAllowedHost(r.Host) {
+		http.Error(w, "Forbidden: invalid Host header", http.StatusForbidden)
+		return http.StatusForbidden, true
+	}
+	if status, answered := s.applyCORS(w, r); answered {
+		return status, true
+	}
+	return s.checkBearer(w, r)
+}
+
+// applyCORS refuses a disallowed Origin, sets the CORS headers for an
+// allowed one, and answers a preflight.
+func (s *Server) applyCORS(w http.ResponseWriter, r *http.Request) (int, bool) {
+	origin := r.Header.Get("Origin")
+	if origin == "" {
+		return 0, false
+	}
+	if !s.isAllowedOrigin(origin) {
+		http.Error(w, "Forbidden: cross-origin request rejected", http.StatusForbidden)
+		return http.StatusForbidden, true
+	}
+	w.Header().Set("Access-Control-Allow-Origin", origin)
+	w.Header().Set("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
+	w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type, Mcp-Session-Id, Mcp-Method, Mcp-Name, io.modelcontextprotocol.protocol-version, traceparent")
+	w.Header().Set("Access-Control-Expose-Headers", "Mcp-Session-Id, WWW-Authenticate, traceparent")
+	if r.Method == http.MethodOptions {
+		w.WriteHeader(http.StatusNoContent)
+		return http.StatusNoContent, true
+	}
+	return 0, false
+}
+
+// checkBearer enforces ServerOptions.AuthToken when one is set.
+func (s *Server) checkBearer(w http.ResponseWriter, r *http.Request) (int, bool) {
+	if s.opts.AuthToken == "" {
+		return 0, false
+	}
+	authHeader := r.Header.Get("Authorization")
+	const prefix = "Bearer "
+	if !strings.HasPrefix(authHeader, prefix) {
+		w.Header().Set("WWW-Authenticate", `Bearer realm="corral-mcp"`)
+		http.Error(w, "Unauthorized: missing Bearer token", http.StatusUnauthorized)
+		return http.StatusUnauthorized, true
+	}
+	token := strings.TrimPrefix(authHeader, prefix)
+	if subtle.ConstantTimeCompare([]byte(token), []byte(s.opts.AuthToken)) != 1 {
+		// RFC 6750 section 3.1: a token that does not authenticate is a
+		// 401 with a challenge, so a client knows to fetch a new one; 403
+		// is for a valid token that lacks the scope.
+		w.Header().Set("WWW-Authenticate", `Bearer realm="corral-mcp", error="invalid_token"`)
+		http.Error(w, "Unauthorized: invalid token", http.StatusUnauthorized)
+		return http.StatusUnauthorized, true
+	}
+	return 0, false
+}
+
+// countRequest records a served or refused request in the metrics.
+func (s *Server) countRequest(r *http.Request, status int) {
+	if s.metrics != nil {
+		s.metrics.incRequest(r.Method, r.URL.Path, status)
+	}
 }
 
 // httpHandler is the mux ServeHTTP serves: the Streamable HTTP transport at
@@ -333,7 +367,7 @@ func (s *Server) sseHandler() http.Handler {
 // ServeSSE runs the server on the legacy HTTP+SSE transport (protocol
 // 2024-11-05), for a host that still expects it. Blocks until the listener
 // fails or ctx is cancelled. Everything ServeHTTP says about binding applies
-// here too: no authentication, so stay on loopback.
+// here too: plain HTTP and an optional token, so stay on loopback.
 func (s *Server) ServeSSE(ctx context.Context, addr string) error {
 	return s.serve(ctx, addr, s.sseHandler())
 }

@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -134,7 +135,7 @@ func TestToolInstrumentationMiddleware(t *testing.T) {
 		return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: "ok"}}}, nil
 	})
 	_, _ = nextOK(context.Background(), "tools/call", &mcp.CallToolRequest{
-		Params: &mcp.CallToolParamsRaw{Name: "my_tool"},
+		Params: &mcp.CallToolParamsRaw{Name: "corral_list_repos"},
 	})
 
 	// 2. IsError tool result case
@@ -142,7 +143,7 @@ func TestToolInstrumentationMiddleware(t *testing.T) {
 		return &mcp.CallToolResult{IsError: true}, nil
 	})
 	_, _ = nextIsError(context.Background(), "tools/call", &mcp.CallToolRequest{
-		Params: &mcp.CallToolParamsRaw{Name: "my_tool"},
+		Params: &mcp.CallToolParamsRaw{Name: "corral_list_repos"},
 	})
 
 	// 3. Error return case
@@ -150,7 +151,7 @@ func TestToolInstrumentationMiddleware(t *testing.T) {
 		return nil, errors.New("boom")
 	})
 	_, _ = nextErr(context.Background(), "tools/call", &mcp.CallToolRequest{
-		Params: &mcp.CallToolParamsRaw{Name: "my_tool"},
+		Params: &mcp.CallToolParamsRaw{Name: "corral_list_repos"},
 	})
 
 	// 4. Non-tools/call method success
@@ -169,10 +170,10 @@ func TestToolInstrumentationMiddleware(t *testing.T) {
 	srv.metrics.WritePrometheus(&buf, srv)
 	out := buf.String()
 
-	if !strings.Contains(out, `mcp_tool_calls_total{status="ok",tool="my_tool"} 1`) {
+	if !strings.Contains(out, `mcp_tool_calls_total{status="ok",tool="corral_list_repos"} 1`) {
 		t.Errorf("missing ok status in:\n%s", out)
 	}
-	if !strings.Contains(out, `mcp_tool_calls_total{status="error",tool="my_tool"} 2`) {
+	if !strings.Contains(out, `mcp_tool_calls_total{status="error",tool="corral_list_repos"} 2`) {
 		t.Errorf("missing error status in:\n%s", out)
 	}
 }
@@ -180,4 +181,98 @@ func TestToolInstrumentationMiddleware(t *testing.T) {
 func TestStatusRecorderFlush(t *testing.T) {
 	rec := &statusRecorder{ResponseWriter: httptest.NewRecorder(), status: http.StatusOK}
 	rec.Flush()
+}
+
+// TestMetricsRefuseLabelInjection drives the real handler chain with the
+// path that forged a series before the labels were bounded: a decoded
+// path carrying `"`, `}` and a newline must not reach the exposition.
+func TestMetricsRefuseLabelInjection(t *testing.T) {
+	srv, err := NewServer(ServerOptions{Root: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := srv.httpHandler()
+	const forged = "/x%22,injected=%22y%22%7D%201%0Acorral_fake_metric%7Ba=%22b"
+	req := httptest.NewRequest(http.MethodGet, forged, nil)
+	req.Host = "127.0.0.1"
+	h.ServeHTTP(httptest.NewRecorder(), req)
+
+	var buf bytes.Buffer
+	srv.metrics.WritePrometheus(&buf, srv)
+	out := buf.String()
+	if strings.Contains(out, "corral_fake_metric") || strings.Contains(out, "injected=") {
+		t.Fatalf("a request path forged a series:\n%s", out)
+	}
+	if !strings.Contains(out, `mcp_requests_total{endpoint="other",method="GET",status="`) {
+		t.Errorf("an unknown path should count under endpoint=\"other\":\n%s", out)
+	}
+}
+
+// TestMetricsCardinalityIsBounded checks that distinct paths, methods and
+// tool names chosen by a client cannot each add a series.
+func TestMetricsCardinalityIsBounded(t *testing.T) {
+	srv, err := NewServer(ServerOptions{Root: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := srv.httpHandler()
+	for i := range 200 {
+		req := httptest.NewRequest(http.MethodGet, fmt.Sprintf("/probe-%d", i), nil)
+		req.Host = "127.0.0.1"
+		h.ServeHTTP(httptest.NewRecorder(), req)
+		req = httptest.NewRequest(fmt.Sprintf("VERB%d", i), MetricsEndpoint, nil)
+		req.Host = "127.0.0.1"
+		h.ServeHTTP(httptest.NewRecorder(), req)
+	}
+	if n := len(srv.metrics.requestsTotal); n > 4 {
+		t.Errorf("200 distinct paths and methods made %d request series, want a fixed handful", n)
+	}
+
+	mw := srv.toolInstrumentationMiddleware()
+	next := mw(func(context.Context, string, mcp.Request) (mcp.Result, error) {
+		return &mcp.CallToolResult{}, nil
+	})
+	for i := range 200 {
+		_, _ = next(context.Background(), "tools/call", &mcp.CallToolRequest{
+			Params: &mcp.CallToolParamsRaw{Name: fmt.Sprintf(`nope-%d"}`, i)},
+		})
+	}
+	_, _ = next(context.Background(), "tools/call", &mcp.CallToolRequest{
+		Params: &mcp.CallToolParamsRaw{Name: "corral_list_repos"},
+	})
+	var buf bytes.Buffer
+	srv.metrics.WritePrometheus(&buf, srv)
+	out := buf.String()
+	if n := len(srv.metrics.toolCallsTotal); n != 2 {
+		t.Errorf("tool series = %d, want 2 (one known tool, one unknown bucket):\n%s", n, out)
+	}
+	if !strings.Contains(out, `mcp_tool_calls_total{status="ok",tool="unknown"} 200`) {
+		t.Errorf("unregistered tool names should count as unknown:\n%s", out)
+	}
+	if !strings.Contains(out, `mcp_tool_calls_total{status="ok",tool="corral_list_repos"} 1`) {
+		t.Errorf("a registered tool keeps its own series:\n%s", out)
+	}
+}
+
+func TestMetricLabelHelpers(t *testing.T) {
+	routes := map[string]string{
+		"/": "/", StreamableEndpoint: StreamableEndpoint, SSEEndpoint: SSEEndpoint,
+		MetricsEndpoint: MetricsEndpoint, "/mcp/../etc": "other", "": "other",
+	}
+	for in, want := range routes {
+		if got := routeLabel(in); got != want {
+			t.Errorf("routeLabel(%q) = %q, want %q", in, got, want)
+		}
+	}
+	for _, m := range []string{"GET", "POST", "DELETE", "OPTIONS", "HEAD"} {
+		if got := methodLabel(m); got != m {
+			t.Errorf("methodLabel(%q) = %q", m, got)
+		}
+	}
+	if got := methodLabel("PROPFIND"); got != "OTHER" {
+		t.Errorf("methodLabel(PROPFIND) = %q, want OTHER", got)
+	}
+	if got := escapeLabel("a\\b\"c\nd"); got != `a\\b\"c\nd` {
+		t.Errorf("escapeLabel = %q", got)
+	}
 }

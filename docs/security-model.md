@@ -60,13 +60,24 @@ Boundary 2 also includes `git clone` traffic to `github.com` over HTTPS.
 Boundary 4 is a pipe by default: the client launches the server as a
 subprocess and nothing else can reach it. `--transport streamable-http` or
 `--transport sse` (and the older `--http`) turns it into a socket.
-The server supports `--token` (or `CORRAL_MCP_TOKEN`) to enforce Bearer
-token authentication, and validates `Origin` headers (restricting requests
-to loopback origins by default, with `--allowed-origins` for external/web
-origins) to protect against CSRF and DNS rebinding attacks. A routable bind
-is refused unless the operator also passes `--allow-remote`, which asserts
-that they have configured authentication. Anyone who can reach the socket
-has the server's capability according to configured flags.
+The server supports a bearer token (`--token-file` or `CORRAL_MCP_TOKEN`;
+`--token` is deprecated because argv is visible through `ps`). A missing or
+wrong token is answered `401` with a `WWW-Authenticate` challenge. It also
+validates `Host` and `Origin` headers to protect against CSRF and DNS
+rebinding attacks. `Host` must name loopback or an `--allowed-origins`
+entry. A request that carries an `Origin` (which every browser request
+does) is refused unless that origin is listed in `--allowed-origins`; a
+loopback origin is not trusted by default, because any local dev server is
+one. Every response carries `Vary: Origin`.
+
+A routable bind, for a transport or for `--metrics-addr`, is refused unless
+the operator passes `--allow-remote` and sets a token; `--allow-remote`
+without a token is refused too. The server has no TLS listener: on a
+routable address the token and every response travel in clear text unless
+a TLS-terminating proxy sits in front, and the server prints that warning
+when it starts. There is no OAuth resource-server mode. Anyone who holds
+the token, or can reach a loopback socket that has none, has the server's
+capability according to configured flags.
 
 ## 3. Security properties (claims)
 
@@ -273,8 +284,10 @@ via embedded hooks.
   enforcing `-c core.hooksPath=/dev/null` and `-c protocol.ext.allow=never`
   on all automated git subprocess invocations (C8).
 - **Cross-origin attacks and unauthorized MCP access**: mitigated by
-  `--token` bearer authentication, strict `Origin` header validation, and
-  loopback binding enforcement (Boundary 4).
+  bearer-token authentication (required for any routable bind), an `Origin`
+  allowlist that trusts nothing by default, and loopback binding
+  enforcement (Boundary 4). Transport encryption is not: a remote listener
+  needs a TLS-terminating proxy.
 
 ### Out of scope
 
