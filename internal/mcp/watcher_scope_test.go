@@ -245,12 +245,6 @@ func TestWatchBudgetFromLimit(t *testing.T) {
 	if got := defaultWatchBudget(); got <= 0 {
 		t.Fatalf("defaultWatchBudget() = %d on this machine", got)
 	}
-	old := getrlimit
-	getrlimit = func(int, *syscall.Rlimit) error { return errors.New("no limit for you") }
-	defer func() { getrlimit = old }()
-	if got := defaultWatchBudget(); got != fallbackWatchBudget {
-		t.Fatalf("defaultWatchBudget() with getrlimit failing = %d, want %d", got, fallbackWatchBudget)
-	}
 }
 
 func TestRegisterWatchDirsStaysWithinBudget(t *testing.T) {

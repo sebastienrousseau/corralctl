@@ -52,7 +52,8 @@ func TestChildEnvIgnoresRepositoryRedirects(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got, want := strings.TrimSpace(out), realPath(t, filepath.Join(target, ".git")); got != want {
+	// git prints forward slashes on Windows too.
+	if got, want := filepath.FromSlash(strings.TrimSpace(out)), realPath(t, filepath.Join(target, ".git")); got != want {
 		t.Errorf("gitOutput inspected %s, want %s", got, want)
 	}
 	if origin, err := RemoteOrigin(ctx, target); err != nil || !strings.Contains(origin, "target.git") {
