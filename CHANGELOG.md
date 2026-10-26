@@ -6,6 +6,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- **Dependabot no longer auto-merges Go module updates.** Patch and minor
+  bumps of Go modules used to merge on green CI with no one reading them,
+  so a compromised upstream release would have reached `main` on its own.
+  Auto-merge now covers only GitHub Actions and Docker digest updates; every
+  Go module update waits for a person.
+
 ## [0.0.53] - 2026-10-25
 
 ### Security

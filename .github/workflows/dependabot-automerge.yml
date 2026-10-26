@@ -21,9 +21,14 @@ name: Dependabot Auto-merge
 #
 # What is deliberately NOT auto-merged
 #
-#   - Major version bumps of Go modules. A major bump is a breaking change by
-#     definition; a green test suite is evidence, not proof, and this is the
-#     one class where reading the changelog is the point.
+#   - Go module updates of any size. A module bump changes code that is
+#     compiled into the binary and runs with the user's forge tokens. A
+#     compromised minor or patch release would pass every check CI runs (it
+#     is the same code those checks were written against, plus the payload),
+#     so a green suite is not a reason to skip reading it. This used to allow
+#     patch and minor bumps; that was narrowed after the 2026 engineering
+#     audit (S-13), which noted it also contradicts AGENTS.md's rule that a
+#     dependency change is never free.
 #   - Anything from an actor other than Dependabot.
 #
 # What is
@@ -32,14 +37,9 @@ name: Dependabot Auto-merge
 #     pinned by SHA or digest here, the diff is a single reference, and
 #     Scorecard's Pinned-Dependencies, hadolint and the Trivy image scan all
 #     gate them.
-#   - Go module patch and minor bumps, which go through CodeQL, gosec,
-#     govulncheck, Dependency Review, gitleaks and a 100%-coverage suite on
-#     Linux, macOS and Windows before this can act.
 #
-# The trade-off, stated plainly: a dependency that passes all of that would
-# merge without a human reading it. On a repository with no second reviewer
-# the alternative is not review — it is the same maintainer clicking merge
-# without reading it either. Delete this file to go back to that.
+# Go module pull requests wait for a person to read the upstream changelog
+# and merge them.
 #
 # Security note on the trigger
 #
@@ -82,18 +82,9 @@ jobs:
             github_actions|docker)
               eligible=true
               ;;
-            go_modules)
-              # An allowlist, not a denylist. fetch-metadata leaves
-              # update-type empty for a grouped pull request, and a group can
-              # contain a major bump — so "not major" would fail open on
-              # exactly the case that most needs a human. Name what is
-              # allowed and let everything else fall through to review.
-              case "${UPDATE_TYPE}" in
-                version-update:semver-patch|version-update:semver-minor)
-                  eligible=true
-                  ;;
-              esac
-              ;;
+            # An allowlist, not a denylist: go_modules and any ecosystem
+            # added later fall through to review rather than merging by
+            # default.
           esac
           echo "eligible=${eligible}" >> "$GITHUB_OUTPUT"
           echo "ecosystem=${ECOSYSTEM} update=${UPDATE_TYPE} eligible=${eligible}"
