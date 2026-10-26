@@ -213,7 +213,12 @@ push is a single
 `git push --prune --no-verify <remote> refs/heads/*:refs/heads/*
 +refs/tags/*:refs/tags/*`: branches carry no force marker, so a
 non-fast-forward is refused by git and surfaced as an error, while tags are
-forced because the local tag namespace is authoritative for a mirror. Before
+forced because the local tag namespace is authoritative for a mirror. The
+claim is about rewriting, not deleting: `--prune` deletes every destination
+branch and tag with no local counterpart, and "local" is the clone's
+`refs/heads`, so an upstream branch the clone holds only as
+`refs/remotes/origin/<name>` is neither pushed nor kept on the destination
+(`TestPushMirrorCarriesOnlyLocalBranches`). Before
 any push, `internal/mirror` compares the destination's host with every host
 `origin` may reach: as written, as git rewrites it (`insteadOf`), as ssh
 resolves it (`ssh -G`), and with a forge's port-443 SSH host folded to the

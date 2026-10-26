@@ -273,3 +273,41 @@ func TestValidateRemoteNameForMirrors(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// TestPushMirrorCarriesOnlyLocalBranches pins what the README and
+// security model say a mirror is: the clone's refs/heads, not origin. An
+// upstream branch the clone holds only as origin/<name> is not pushed,
+// and the prune deletes it from a destination that already had it.
+func TestPushMirrorCarriesOnlyLocalBranches(t *testing.T) {
+	ctx := context.Background()
+	upstream := mirrorRepo(t)
+	mirrorGit(t, upstream, "branch", "other")
+	clone := filepath.Join(t.TempDir(), "clone")
+	mirrorGit(t, upstream, "clone", "-q", upstream, clone)
+	if refs := mirrorGit(t, clone, "for-each-ref", "--format=%(refname)", "refs/heads"); refs != "refs/heads/main" {
+		t.Fatalf("a fresh clone should hold only the default branch locally, got %q", refs)
+	}
+	if mirrorGit(t, clone, "rev-parse", "--verify", "refs/remotes/origin/other") == "" {
+		t.Fatal("origin/other missing from the clone")
+	}
+
+	bare := t.TempDir()
+	mirrorGit(t, bare, "init", "-q", "--bare")
+	mirrorGit(t, upstream, "push", "-q", bare, "main", "other")
+	mirrorGit(t, clone, "remote", "add", "mirror", bare)
+	if err := PushMirror(ctx, clone, "mirror", bare, nil); err != nil {
+		t.Fatal(err)
+	}
+	refs := bareRefs(t, bare)
+	if _, ok := refs["refs/heads/main"]; !ok {
+		t.Fatalf("main was not mirrored: %v", refs)
+	}
+	if _, ok := refs["refs/heads/other"]; ok {
+		t.Fatalf("an upstream branch not checked out survived the prune: %v", refs)
+	}
+	for ref := range refs {
+		if strings.HasPrefix(ref, "refs/remotes/") {
+			t.Fatalf("a remote-tracking ref was pushed: %v", refs)
+		}
+	}
+}

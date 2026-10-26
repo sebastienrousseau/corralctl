@@ -31,6 +31,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   than trusted). Every refusal is audited, and the pull holds the
   per-repository lock deletion takes.
 
+### Documentation
+
+- **What `sync` mirrors is stated plainly.** A destination mirrors the
+  clone's own branches (`refs/heads`), not its origin: an upstream branch the
+  clone holds only as `origin/<name>` is not pushed, and the pruning push
+  deletes it from a destination that has it. The README, `corralctl sync
+  --help`, the `internal/mirror` package comment and security-model claim C6
+  now say so, and `TestPushMirrorCarriesOnlyLocalBranches` pins the
+  behaviour. The push semantics are unchanged.
+
 ## [0.0.53] - 2026-10-25
 
 ### Security

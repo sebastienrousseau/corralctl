@@ -3,7 +3,9 @@
 
 // Package mirror pushes a corral-organised tree out to other forges with
 // parity semantics: every local branch and tag exists on the destination,
-// and nothing else does.
+// and nothing else does. Local means refs/heads and refs/tags; a
+// remote-tracking branch (origin/<name>) is not local, so it is neither
+// pushed nor kept on the destination.
 //
 // It is the engine behind `corralctl sync`, and the successor to the
 // standalone corral-sync tool, whose crawler, orchestrator and safety

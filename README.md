@@ -426,6 +426,15 @@ Every local branch and tag exists on the destination afterwards, and nothing
 else does. Branches are never forced: a destination that has moved on is
 refused and reported, not overwritten. Tags follow the local namespace.
 
+"Local" means the clone's own branches (`refs/heads/*`), so a destination
+mirrors your clone, not its origin. A clone made by `corralctl clone` or
+`git clone` holds only the default branch locally; every other upstream
+branch exists only as a remote-tracking ref (`origin/<name>`) and is not
+pushed. Because the push prunes, such a branch is also deleted from a
+destination that already has it, as is any branch created directly on the
+destination. To carry a branch, check it out locally (`git switch <name>`)
+before running `sync`.
+
 A new destination is created public only when two things agree: the source
 forge reported the repository as public the last time `corralctl clone`
 listed it (the answer is recorded in the clone's state sidecar), and the
