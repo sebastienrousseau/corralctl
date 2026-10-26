@@ -6,8 +6,8 @@ package engine
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
-	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -21,10 +21,19 @@ import (
 
 // runOutcome is everything the worker phase produced.
 type runOutcome struct {
+	// results holds every result, but only for --output json, the one
+	// format that needs the aggregate. The streaming formats have already
+	// written each result by the time the run ends.
 	results   []RepoResult
 	summary   Summary
 	outputErr error
+	// aborted is set when the user quit the progress view mid-run.
+	aborted error
 }
+
+// errProgressViewQuit is the cancellation cause recorded when the user
+// quits the progress view (q or ctrl+c) before the run has finished.
+var errProgressViewQuit = errors.New("progress view closed by the user")
 
 // executeJobs runs the whole worker phase: it starts the pool, enqueues one
 // job per repository, streams results to the selected output, and returns
@@ -37,6 +46,10 @@ func executeJobs(
 	isTTY bool,
 	encoder *json.Encoder,
 ) runOutcome {
+	// Derived so that quitting the progress view can stop the workers and
+	// any git process they started, not only the view.
+	ctx, cancel := context.WithCancelCause(ctx)
+	defer cancel(nil)
 	existingByRemote := discoverExistingRepos(opts.BaseDir)
 
 	jobs := make(chan Job, len(repos))
@@ -61,19 +74,41 @@ func executeJobs(
 		consumeResults(opts, results, program, encoder, &outcome)
 	}()
 
-	if program != nil {
-		if _, err := runProgram(program); err != nil {
-			fmt.Fprintf(os.Stderr, "Error running TUI: %v\n", err)
-		}
-		// Ensure Send unblocks if an injected runner or an early TUI failure
-		// returns without shutting down Bubble Tea's context.
-		program.Kill()
+	var aborted error
+	if program != nil && runProgressView(program) {
+		aborted = errProgressViewQuit
+		cancel(aborted)
 	}
 
 	workers.Wait()
 	close(results)
 	consumer.Wait()
+	outcome.aborted = aborted
 	return outcome
+}
+
+// runProgressView drives the progress TUI until it exits, and reports
+// whether the user quit it before every result arrived.
+func runProgressView(program *tea.Program) bool {
+	final, err := runProgram(program)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error running TUI: %v\n", err)
+	}
+	// Ensure Send unblocks if an injected runner or an early TUI failure
+	// returns without shutting down Bubble Tea's context.
+	program.Kill()
+	view, ok := final.(interface{ Aborted() bool })
+	return ok && view.Aborted()
+}
+
+// runCancellation reports why the run stopped early: the caller's context
+// (SIGINT, SIGTERM or a parent cancel) or the user quitting the progress
+// view. It returns nil for a run that was allowed to finish.
+func runCancellation(ctx context.Context, outcome *runOutcome) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return outcome.aborted
 }
 
 // startWorkers launches opts.Concurrency goroutines draining jobs into
@@ -168,13 +203,12 @@ func consumeResults(
 	outcome *runOutcome,
 ) {
 	for msg := range results {
-		outcome.results = append(outcome.results, msg)
-		outcome.summary.add(msg)
+		outcome.record(opts.Output, msg)
 		switch {
 		case program != nil:
 			program.Send(toLogMsg(msg))
 		case opts.Output == OutputText:
-			log.Printf("%s [%s] %s: %s", resultIcon(msg), msg.Action, msg.RepoName, msg.Message)
+			logger.Printf("%s [%s] %s: %s", resultIcon(msg), msg.Action, msg.RepoName, msg.Message)
 		case opts.Output == OutputNDJSON:
 			if err := encoder.Encode(msg); err != nil {
 				fmt.Fprintf(os.Stderr, "ERROR: failed to encode ndjson result: %v\n", err)
@@ -270,8 +304,18 @@ func emitCancellation(output OutputFormat, isTTY bool, encoder *json.Encoder, ca
 		if !isTTY {
 			// Non-TTY text path: scripted log consumers get a single line.
 			// TTY users get nothing — the TUI handles its own signal display.
-			log.Printf("%s", msg)
+			logger.Printf("%s", msg)
 		}
+	}
+}
+
+// record counts msg in the summary and keeps it only when the output
+// format needs the aggregate, so a streamed run's memory does not grow
+// with the number of repositories.
+func (o *runOutcome) record(output OutputFormat, msg RepoResult) {
+	o.summary.add(msg)
+	if output == OutputJSON {
+		o.results = append(o.results, msg)
 	}
 }
 

@@ -26,7 +26,11 @@ func FetchReposWithOptions(ctx context.Context, owner string, opts FetchOptions)
 	}
 
 	opts = normalizeFetchOptions(opts)
-	token, err := resolveToken(ctx, opts.AuthMode)
+	base, host, err := enterpriseBase(opts.BaseURL)
+	if err != nil {
+		return nil, err
+	}
+	token, err := resolveTokenFor(ctx, opts.AuthMode, host)
 	if err != nil {
 		return nil, err
 	}
@@ -47,7 +51,13 @@ func FetchReposWithOptions(ctx context.Context, owner string, opts FetchOptions)
 		},
 	}
 
-	client, err := newGitHubClient(gh.WithHTTPClient(httpClient), gh.WithAuthToken(token))
+	clientOpts := []gh.ClientOptionsFunc{gh.WithHTTPClient(httpClient), gh.WithAuthToken(token)}
+	if base != "" {
+		// WithEnterpriseURLs appends api/v3/ (and api/uploads/), which is
+		// where an Enterprise Server serves its REST API.
+		clientOpts = append(clientOpts, gh.WithEnterpriseURLs(base, base))
+	}
+	client, err := newGitHubClient(clientOpts...)
 	if err != nil {
 		return nil, fmt.Errorf("construct GitHub client: %w", err)
 	}

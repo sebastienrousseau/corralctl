@@ -24,6 +24,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"syscall"
 
 	"github.com/sebastienrousseau/corralctl/internal/git"
 	"github.com/sebastienrousseau/corralctl/internal/sanitize"
@@ -51,9 +52,13 @@ var (
 // nested submodules or vendor trees) and respects maxIndexDepth.
 //
 // Per-entry errors are tolerated: a single unreadable directory does
-// not abort the whole scan. The function only returns an error when
-// the root itself is unreadable, so a caller can distinguish a
-// misconfigured root from an empty workspace.
+// not abort the whole scan. The function returns an error when the
+// root itself is unreadable, so a caller can distinguish a
+// misconfigured root from an empty workspace, and when the process has
+// run out of file descriptors part-way through: that is not one
+// directory failing but every later one, and an index missing an
+// arbitrary part of the workspace would be reported to a client as a
+// complete answer.
 func Scan(root string) (*Index, error) {
 	absRoot, err := absIndex(root)
 	if err != nil {
@@ -68,88 +73,138 @@ func Scan(root string) (*Index, error) {
 	}
 
 	idx := &Index{Root: absRoot}
-
-	work := make(chan string, scanQueueDepth)
-	var (
-		mu      sync.Mutex
-		wg      sync.WaitGroup
-		maxPool = scanWorkers()
-		pool    int
-	)
-	spawn := func() {
-		pool++
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			var local []RepoEntry
-			for path := range work {
-				local = append(local, buildEntry(absRoot, path))
-			}
-			if len(local) == 0 {
-				return
-			}
-			mu.Lock()
-			idx.Repos = append(idx.Repos, local...)
-			mu.Unlock()
-		}()
+	pool := newScanPool(absRoot)
+	walk := &scanWalk{root: absRoot, idx: idx, emit: pool.submit}
+	walkErr := walkIndex(absRoot, walk.visit)
+	idx.Repos = pool.finish()
+	if walkErr != nil {
+		return nil, fmt.Errorf("reading workspace: %w", walkErr)
 	}
-
-	for i := 0; i < initialScanWorkers && i < maxPool; i++ {
-		spawn()
-	}
-
-	found := 0
-
-	_ = walkIndex(absRoot, func(path string, d fs.DirEntry, walkErr error) error {
-		if found >= maxIndexRepos {
-			idx.Truncated = true
-			return fs.SkipAll
-		}
-		if walkErr != nil {
-			if d != nil && d.IsDir() {
-				return fs.SkipDir
-			}
-			return nil
-		}
-		if !d.IsDir() {
-			return nil
-		}
-		rel, err := relIndex(absRoot, path)
-		if err != nil {
-			return fs.SkipDir
-		}
-		depth := 0
-		if rel != "." {
-			depth = strings.Count(rel, string(filepath.Separator)) + 1
-		}
-		if depth > maxIndexDepth {
-			return fs.SkipDir
-		}
-		if path == absRoot {
-			return nil
-		}
-		if git.IsRepository(path) {
-			found++
-			select {
-			case work <- path:
-			default:
-				if pool < maxPool {
-					spawn()
-				}
-				work <- path
-			}
-			return fs.SkipDir
-		}
-		return nil
-	})
-
-	close(work)
-	wg.Wait()
 
 	sort.Slice(idx.Repos, func(i, j int) bool {
 		return idx.Repos[i].RelPath < idx.Repos[j].RelPath
 	})
 	return idx, nil
+}
+
+// scanWalk is the per-directory decision Scan makes while walking.
+type scanWalk struct {
+	root  string
+	idx   *Index
+	found int
+	emit  func(string)
+}
+
+// visit is the fs.WalkDirFunc behind Scan.
+func (w *scanWalk) visit(path string, d fs.DirEntry, walkErr error) error {
+	if w.found >= maxIndexRepos {
+		w.idx.Truncated = true
+		return fs.SkipAll
+	}
+	if walkErr != nil {
+		return w.walkError(path, d, walkErr)
+	}
+	if !d.IsDir() {
+		return nil
+	}
+	rel, err := relIndex(w.root, path)
+	if err != nil {
+		return fs.SkipDir
+	}
+	if scanDepth(rel) > maxIndexDepth {
+		return fs.SkipDir
+	}
+	if path == w.root || !git.IsRepository(path) {
+		return nil
+	}
+	w.found++
+	w.emit(path)
+	return fs.SkipDir
+}
+
+// walkError decides whether an error from the walk is tolerated. The root
+// and descriptor exhaustion are fatal (see Scan); anything else skips the
+// one entry it happened on.
+func (w *scanWalk) walkError(path string, d fs.DirEntry, err error) error {
+	if path == w.root || descriptorsExhausted(err) {
+		return err
+	}
+	if d != nil && d.IsDir() {
+		return fs.SkipDir
+	}
+	return nil
+}
+
+// descriptorsExhausted reports an error that means the process, not the
+// directory, is the problem.
+func descriptorsExhausted(err error) bool {
+	return errors.Is(err, syscall.EMFILE) || errors.Is(err, syscall.ENFILE)
+}
+
+// scanDepth is how many path segments rel has below the root.
+func scanDepth(rel string) int {
+	if rel == "." {
+		return 0
+	}
+	return strings.Count(rel, string(filepath.Separator)) + 1
+}
+
+// scanPool enriches discovered repositories concurrently with the walk.
+type scanPool struct {
+	root    string
+	work    chan string
+	mu      sync.Mutex
+	wg      sync.WaitGroup
+	maxPool int
+	size    int
+	repos   []RepoEntry
+}
+
+// newScanPool starts the initial workers.
+func newScanPool(root string) *scanPool {
+	p := &scanPool{root: root, work: make(chan string, scanQueueDepth), maxPool: scanWorkers()}
+	for i := 0; i < initialScanWorkers && i < p.maxPool; i++ {
+		p.spawn()
+	}
+	return p
+}
+
+// spawn adds one worker. Called only from the walking goroutine.
+func (p *scanPool) spawn() {
+	p.size++
+	p.wg.Add(1)
+	go func() {
+		defer p.wg.Done()
+		var local []RepoEntry
+		for path := range p.work {
+			local = append(local, buildEntry(p.root, path))
+		}
+		if len(local) == 0 {
+			return
+		}
+		p.mu.Lock()
+		p.repos = append(p.repos, local...)
+		p.mu.Unlock()
+	}()
+}
+
+// submit hands one repository to the pool, growing it under backpressure.
+func (p *scanPool) submit(path string) {
+	select {
+	case p.work <- path:
+	default:
+		if p.size < p.maxPool {
+			p.spawn()
+		}
+		p.work <- path
+	}
+}
+
+// finish waits for every worker and returns what they built.
+func (p *scanPool) finish() []RepoEntry {
+	close(p.work)
+	p.wg.Wait()
+	return p.repos
 }
 
 // initialScanWorkers is the pool the walk starts with, before any

@@ -28,7 +28,7 @@ import (
 func noSleep(t *testing.T) {
 	t.Helper()
 	old := sleep
-	sleep = func(time.Duration) {}
+	sleep = func(context.Context, time.Duration) error { return nil }
 	t.Cleanup(func() { sleep = old })
 }
 

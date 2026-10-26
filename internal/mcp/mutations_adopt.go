@@ -11,7 +11,7 @@ import (
 	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	"github.com/sebastienrousseau/corralctl/internal/engine"
+	"github.com/sebastienrousseau/corralctl/internal/adopt"
 	"github.com/sebastienrousseau/corralctl/internal/forge"
 	"github.com/sebastienrousseau/corralctl/internal/github"
 )
@@ -39,7 +39,7 @@ func (s *Server) handleAdoptRepo(ctx context.Context, _ *mcp.CallToolRequest, in
 		return nil, MutationOutput{}, err
 	}
 
-	opts := engine.AdoptOptions{
+	opts := adopt.Options{
 		LocalPath:     cleanLocal,
 		NewTargetDir:  cleanTarget,
 		Owner:         input.Owner,
@@ -114,7 +114,7 @@ func (s *Server) adoptPaths(input adoptRepoInput) (local, target string, err err
 // caller choose the host would let it collect that token: only a forge's
 // public instance (no forge_url) or an instance the operator named with
 // `corralctl mcp --forge-url` is accepted, and a refusal is audited.
-func (s *Server) adoptForge(ctx context.Context, input adoptRepoInput, target string, opts *engine.AdoptOptions) error {
+func (s *Server) adoptForge(ctx context.Context, input adoptRepoInput, target string, opts *adopt.Options) error {
 	if input.Forge == "" {
 		return nil
 	}
@@ -139,7 +139,7 @@ func (s *Server) adoptForge(ctx context.Context, input adoptRepoInput, target st
 	}
 	opts.Forge = tf
 	opts.ForgeOptions = forge.TargetOptions{
-		Token:   adoptForgeToken(ctx, f.Name(), github.AuthModeAuto),
+		Token:   adoptForgeToken(ctx, f.Name(), github.AuthModeAuto, input.ForgeURL),
 		BaseURL: input.ForgeURL,
 	}
 	return nil

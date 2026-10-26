@@ -64,9 +64,6 @@ var httpClient = func(timeout time.Duration) *http.Client {
 	return &http.Client{Timeout: timeout}
 }
 
-// sleep is indirected so a retry test does not actually wait.
-var sleep = time.Sleep
-
 // restClient issues paginated GET requests against one forge instance.
 type restClient struct {
 	base  *url.URL
@@ -140,35 +137,52 @@ func (c *restClient) getPage(ctx context.Context, path string, query url.Values,
 	u.Path = strings.TrimRight(u.Path, "/") + path
 	u.RawQuery = query.Encode()
 
+	body, err := c.fetchWithRetry(ctx, u.String())
+	if err != nil {
+		return err
+	}
+	if err := json.Unmarshal(body, out); err != nil {
+		// A body that does not parse is not retryable: the same
+		// request will return the same thing.
+		return fmt.Errorf("decoding %s: %w", u.Redacted(), err)
+	}
+	return nil
+}
+
+// fetchWithRetry performs one GET, retrying a transient failure up to
+// maxRetries times inside the total deadline.
+func (c *restClient) fetchWithRetry(ctx context.Context, rawURL string) ([]byte, error) {
 	var lastErr error
 	for attempt := 0; attempt <= maxRetries; attempt++ {
 		if attempt > 0 {
-			wait := backoff(attempt)
-			if time.Now().Add(wait).After(c.deadline) {
-				return fmt.Errorf("%w (no budget left to retry)", lastErr)
+			if err := c.waitToRetry(ctx, attempt, lastErr); err != nil {
+				return nil, err
 			}
-			sleep(wait)
 		}
 		if err := ctx.Err(); err != nil {
-			return err
+			return nil, err
 		}
-
-		body, err := c.do(ctx, u.String())
-		if err != nil {
-			lastErr = err
-			if retryable(err) {
-				continue
-			}
-			return err
+		body, err := c.do(ctx, rawURL)
+		if err == nil || !retryable(err) {
+			return body, err
 		}
-		if err := json.Unmarshal(body, out); err != nil {
-			// A body that does not parse is not retryable: the same
-			// request will return the same thing.
-			return fmt.Errorf("decoding %s: %w", u.Redacted(), err)
-		}
-		return nil
+		lastErr = err
 	}
-	return fmt.Errorf("%s: %w", u.Redacted(), lastErr)
+	return nil, fmt.Errorf("%s: %w", redact(rawURL), lastErr)
+}
+
+// waitToRetry waits before attempt, or says why it will not: the wait
+// would end past the total deadline, or ctx ended while waiting.
+func (c *restClient) waitToRetry(ctx context.Context, attempt int, lastErr error) error {
+	wait, asked := retryWait(attempt, lastErr)
+	if time.Now().Add(wait).After(c.deadline) {
+		if asked {
+			return fmt.Errorf("%w (the server asked to wait %s, past the total budget; "+
+				"raise --api-total-timeout to wait it out)", lastErr, wait.Round(time.Second))
+		}
+		return fmt.Errorf("%w (no budget left to retry)", lastErr)
+	}
+	return sleep(ctx, wait)
 }
 
 // do performs one request and returns its body.
@@ -204,9 +218,9 @@ func (c *restClient) do(ctx context.Context, rawURL string) ([]byte, error) {
 	case resp.StatusCode == http.StatusUnauthorized, resp.StatusCode == http.StatusForbidden:
 		return nil, &AuthError{Status: resp.StatusCode, URL: redact(rawURL), Body: snippet(body)}
 	case resp.StatusCode == http.StatusTooManyRequests:
-		return nil, &transientError{err: fmt.Errorf("rate limited (HTTP 429)")}
+		return nil, newTransient(resp, fmt.Errorf("rate limited (HTTP 429)"))
 	case resp.StatusCode >= 500:
-		return nil, &transientError{err: fmt.Errorf("HTTP %d from %s", resp.StatusCode, redact(rawURL))}
+		return nil, newTransient(resp, fmt.Errorf("HTTP %d from %s", resp.StatusCode, redact(rawURL)))
 	case resp.StatusCode != http.StatusOK:
 		return nil, fmt.Errorf("HTTP %d from %s: %s", resp.StatusCode, redact(rawURL), snippet(body))
 	}
@@ -244,8 +258,18 @@ func (e *AuthError) Error() string {
 		e.Status, e.URL, e.Body)
 }
 
-// transientError marks a failure worth retrying.
-type transientError struct{ err error }
+// transientError marks a failure worth retrying. retryAfter is the wait
+// the server asked for, or zero when it did not say.
+type transientError struct {
+	err        error
+	retryAfter time.Duration
+}
+
+// newTransient wraps err as retryable, carrying resp's Retry-After.
+func newTransient(resp *http.Response, err error) *transientError {
+	d, _ := retryAfter(resp.Header, time.Now())
+	return &transientError{err: err, retryAfter: d}
+}
 
 func (e *transientError) Error() string { return e.err.Error() }
 func (e *transientError) Unwrap() error { return e.err }

@@ -15,6 +15,7 @@ import (
 	"github.com/sebastienrousseau/corralctl/internal/forge"
 	"github.com/sebastienrousseau/corralctl/internal/git"
 	"github.com/sebastienrousseau/corralctl/internal/github"
+	"github.com/sebastienrousseau/corralctl/internal/syncguard"
 )
 
 // prepareWorkspace performs the one-off layout work a classic-layout run
@@ -33,7 +34,7 @@ func prepareWorkspace(opts RunOptions, repos []github.Repo) error {
 }
 
 func ensureAppleCollections(baseDir string) error {
-	for _, collection := range []string{"Public", "Private", "Work", "Forks"} {
+	for _, collection := range collections {
 		if err := mkdirAll(filepath.Join(baseDir, collection), 0o750); err != nil {
 			return err
 		}
@@ -41,30 +42,9 @@ func ensureAppleCollections(baseDir string) error {
 	return nil
 }
 
-// repoRemoteIdentity is the canonical identity of a listed repository, for
-// comparison against a local clone's remote.
-//
-// Derived from the clone URL the forge returned, and through the same
-// function the local side goes through, so the two are comparable by
-// construction.
-func repoRemoteIdentity(repo github.Repo) string {
-	// The URL first, always: it is the only field that carries the host,
-	// and every forge adapter populates it.
-	if repo.CloneURL != "" {
-		if id := git.CanonicalRemote(repo.CloneURL); id != "" {
-			return id
-		}
-	}
-	// Fallbacks for a repository with no clone URL, which no forge here
-	// produces.
-	if repo.FullName != "" {
-		return strings.ToLower("github.com/" + repo.FullName)
-	}
-	if repo.Owner != "" && repo.Name != "" {
-		return strings.ToLower("github.com/" + repo.Owner + "/" + repo.Name)
-	}
-	return ""
-}
+// repoRemoteIdentity is syncguard.RemoteIdentity: the canonical identity
+// of a listed repository, for comparison against a local clone's remote.
+var repoRemoteIdentity = syncguard.RemoteIdentity
 
 func firstPath(paths []string) string {
 	if len(paths) == 0 {
@@ -255,11 +235,8 @@ func repoNameFromURL(url string) string {
 	return url
 }
 
-func findOrphans(owner, baseDir string, repos []github.Repo) []string {
-	return findOrphansOn(owner, baseDir, repos, fetchForgeName, fetchForgeURL)
-}
-
-// findOrphansOn is findOrphans with the forge named explicitly.
+// findOrphansOn lists the clones under baseDir that belong to owner on the
+// named forge and are absent from repos.
 //
 // The host is derived rather than assumed. It used to be the literal
 // "github.com", which silently made orphan detection a no-op for every
@@ -323,10 +300,6 @@ func emitOrphans(owner string, orphans []string) {
 	}
 }
 
-func detectOrphans(owner, baseDir string, repos []github.Repo) {
-	emitOrphans(owner, findOrphans(owner, baseDir, repos))
-}
-
 // emitOrphanReport finds and reports local clones that no longer exist
 // upstream, returning the paths so the aggregate JSON document can carry
 // them. Orphan detection is skipped on cancellation: the local tree may be
@@ -335,7 +308,7 @@ func emitOrphanReport(opts RunOptions, repos []github.Repo, outcome *runOutcome,
 	if !opts.Orphans || outcome.summary.Canceled {
 		return nil
 	}
-	orphanPaths := findOrphans(opts.Owner, opts.BaseDir, repos)
+	orphanPaths := findOrphansOn(opts.Owner, opts.BaseDir, repos, opts.Forge, opts.ForgeURL)
 	switch opts.Output {
 	case OutputText:
 		emitOrphans(opts.Owner, orphanPaths)

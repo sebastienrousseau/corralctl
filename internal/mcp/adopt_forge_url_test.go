@@ -13,7 +13,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/sebastienrousseau/corralctl/internal/engine"
+	"github.com/sebastienrousseau/corralctl/internal/adopt"
 	"github.com/sebastienrousseau/corralctl/internal/github"
 )
 
@@ -109,11 +109,11 @@ func TestAdoptRepoAcceptsAnOperatorConfiguredForgeURL(t *testing.T) {
 		AuditLogPath:    filepath.Join(t.TempDir(), "audit.log"),
 		ForgeURLs:       []string{"not a url", "https://Git.Example.com:8443/forge/"},
 	})
-	var got engine.AdoptOptions
-	stubSeam(t, &adoptForgeToken, func(context.Context, string, github.AuthMode) string { return "tok" })
-	stubSeam(t, &adoptExecFunc, func(_ context.Context, o engine.AdoptOptions) (engine.AdoptResult, error) {
+	var got adopt.Options
+	stubSeam(t, &adoptForgeToken, func(context.Context, string, github.AuthMode, string) string { return "tok" })
+	stubSeam(t, &adoptExecFunc, func(_ context.Context, o adopt.Options) (adopt.Result, error) {
 		got = o
-		return engine.AdoptResult{RepoName: o.RepoName, Action: "ADOPTED"}, nil
+		return adopt.Result{RepoName: o.RepoName, Action: "ADOPTED"}, nil
 	})
 	res, isErr := h.callTool("corral_adopt_repo", map[string]any{
 		"repo_name": "r", "local_path": "repo1", "forge": "gitea",

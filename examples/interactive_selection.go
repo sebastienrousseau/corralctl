@@ -49,7 +49,7 @@ func main() {
 	fmt.Println("Starting interactive repository selector...")
 	ctx := context.Background()
 
-	selected, ok, err := tui.RunSelector(ctx, "sebastienrousseau", opts, mockFetch)
+	selected, ok, err := tui.RunSelector(ctx, "sebastienrousseau", "", opts, mockFetch)
 	if err != nil {
 		log.Fatalf("Selector error: %v", err)
 	}

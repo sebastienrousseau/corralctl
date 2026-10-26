@@ -119,7 +119,9 @@ not apply. Use a release artefact if you need `--version` to be meaningful.
 
 ### Build from source
 
-Requires Go 1.26+ and Git:
+Requires Git and Go at or above the `go` directive in `go.mod`, but not
+Go 1.27.0 to 1.27.2, which carry a reachable `crypto/x509` advisory (see the
+[minimum toolchain policy](docs/packaging.md#minimum-toolchain-policy)):
 
 ```bash
 git clone https://github.com/sebastienrousseau/corralctl.git
@@ -251,10 +253,12 @@ graph TD
     I -- "Yes (--no-sync)" --> K[SKIP]
     I -- Yes --> L{Smart sync:<br/>pushed_at advanced?}
     L -- No --> M[SKIP up-to-date]
-    L -- "Yes (or --force-sync)" --> N[git pull --rebase --autostash]
+    L -- "Yes (or --force-sync)" --> LG{"Operation in progress,<br/>local commits ahead,<br/>or no upstream?"}
+    LG -- Yes --> LR[ERROR: pull refused]
+    LG -- No --> N[git pull --rebase --autostash]
     N --> N1["+ optional submodule update<br/>(--ignore-submodule-failures)"]
     J & N1 --> O[Stamp .corral-state.json]
-    O & K & M --> P{All workers done?}
+    O & K & M & LR --> P{All workers done?}
     P -- No --> H
     P -- Yes --> Q[Cleanup empty legacy dirs]
     Q --> R{--orphans?}
@@ -398,6 +402,18 @@ Execute arbitrary shell commands concurrently across your organized repositories
 ./corralctl exec "git status -s" --languages go,rust --visibility private
 ```
 
+- **Shell:** the command runs through `/bin/sh -c` on Unix and `cmd.exe /C`
+  on Windows, whatever `$SHELL` names. To use another shell, name it in the
+  command.
+- **Deadline:** `--timeout 2m` gives each repository its own deadline (default
+  `0`, none). A command that overruns is killed with its children and counted
+  as failed.
+- **Collections:** `--visibility` takes `all` or any top-level collection:
+  `public`, `private`, `work` or `forks`.
+- **Machine output:** `--output json` or `--output ndjson` writes one record
+  per repository (`repo`, `exit_code`, `duration_ms`, `stdout`, `stderr`,
+  `timed_out`).
+
 ---
 
 ## Mirror to other forges
@@ -415,8 +431,7 @@ corralctl sync --to gitlab --to gitea@https://git.example.com
 ```
 
 For every repository under the base directory, on every destination, `sync`
-creates the destination repository if it does not exist — with the
-visibility the local layout says, `Public/` or `Private/` — points a remote
+creates the destination repository if it does not exist, points a remote
 named after the forge at it, and pushes in one round trip:
 
 ```text
@@ -426,6 +441,25 @@ git push --prune --no-verify <forge> refs/heads/*:refs/heads/* +refs/tags/*:refs
 Every local branch and tag exists on the destination afterwards, and nothing
 else does. Branches are never forced: a destination that has moved on is
 refused and reported, not overwritten. Tags follow the local namespace.
+
+"Local" means the clone's own branches (`refs/heads/*`), so a destination
+mirrors your clone, not its origin. A clone made by `corralctl clone` or
+`git clone` holds only the default branch locally; every other upstream
+branch exists only as a remote-tracking ref (`origin/<name>`) and is not
+pushed. Because the push prunes, such a branch is also deleted from a
+destination that already has it, as is any branch created directly on the
+destination. To carry a branch, check it out locally (`git switch <name>`)
+before running `sync`.
+
+A new destination is created public only when two things agree: the source
+forge reported the repository as public the last time `corralctl clone`
+listed it (the answer is recorded in the clone's state sidecar), and the
+clone sits under a `Public/` directory. Anything else is created private,
+including a clone corral did not make and one cloned before 0.0.54. The
+directory name alone is a guess, and a repository made private upstream can
+still sit under `Public/`. Run `corralctl clone` for the owner before `sync`
+so the record is current; `--dry-run` shows the visibility each destination
+would get.
 
 A destination is `<forge>[:<owner>][@<url>]`:
 
@@ -479,7 +513,7 @@ Where GitHub's own MCP server covers the remote API surface (issues, PRs, search
 
 **Write tools (v0.0.12, opt-in via `--enable-mutations`):**
 
-- `corral_sync_repo` — Runs `git pull --rebase --autostash` against one clone
+- `corral_sync_repo` — Runs `git pull --rebase --autostash` against one clone, with the checks `corralctl clone` makes before a pull: it refuses a clone with no origin or whose origin changed since the index was read, one with no commits, and one that is not on the default branch `origin/HEAD` names, so an agent cannot rebase a feature branch. It holds the same per-clone lock as `corral_delete_repo`. Like `sync`, it also refuses when a rebase, merge, cherry-pick, revert or bisect is in progress, when the branch has commits its upstream lacks, or when it has no upstream.
 - `corral_clone_repo` — Clones a URL into a sandboxed target path
 - `corral_adopt_repo` — Adopts a local repository with optional relocation and remote creation. A self-hosted `forge_url` must be one the operator passed to `corralctl mcp --forge-url`
 - `corral_delete_repo` — Removes a clone. Requires `--enable-destructive-mutations`. Refuses on uncommitted/unpushed changes, and asks a person to approve each deletion
@@ -573,11 +607,32 @@ a server somebody else started.
 `--http 127.0.0.1:7777` is the older spelling of `--transport
 streamable-http` and still works.
 
-None of them carries authentication, so a listening transport binds
-loopback: `--host 0.0.0.0`, or `--http :7777`, which binds every interface,
-is refused because this server exposes every repository under its root.
-Pass `--allow-remote` if you have put your own authentication in front of
-it.
+Every listening transport binds loopback by default: `--host 0.0.0.0`, or
+`--http :7777`, which binds every interface, is refused because this server
+exposes every repository under its root. `--allow-remote` lifts that refusal
+only together with a bearer token, read from a file or the environment:
+
+```bash
+export CORRAL_MCP_TOKEN="$(cat ~/.config/corral/mcp-token)"
+corralctl mcp --transport streamable-http --host 0.0.0.0 --allow-remote
+# or: corralctl mcp ... --allow-remote --token-file ~/.config/corral/mcp-token
+```
+
+A request without `Authorization: Bearer <token>`, or with the wrong token,
+is answered `401` with a `WWW-Authenticate` challenge. `--token` still works
+but is deprecated: anything on the command line is visible to every user on
+the machine through `ps`. The server speaks plain HTTP and has no TLS
+listener, so the token and every response cross the network unencrypted
+unless a TLS-terminating reverse proxy sits in front of it; it says so on
+stderr when it starts on a routable address. There is no OAuth
+resource-server mode.
+
+A browser sends an `Origin` header with every request, and the server
+refuses one that is not listed in `--allowed-origins`. Loopback origins are
+not trusted by default, because every local dev server is one; list the
+page a browser client runs on, for example `--allowed-origins
+http://localhost:6274`. A client that is not a browser sends no `Origin`
+and is unaffected.
 
 ### Safety
 
@@ -600,11 +655,12 @@ it.
 - **stdio by default; loopback when not.** Without `--transport` the server
   has no endpoint and no listening port, and only ever speaks to the parent
   process that launched it. `--transport streamable-http` and `--transport
-  sse` listen on `--host`/`--port`, and because the server has no
-  authentication and exposes every repository under its root, a non-loopback
-  address is refused unless you also pass `--allow-remote` — the accidental
-  `--host 0.0.0.0`, or `--http :7777`, which binds every interface, does not
-  start.
+  sse` listen on `--host`/`--port`, and because the server exposes every
+  repository under its root, a non-loopback address is refused unless you
+  also pass `--allow-remote` and a bearer token (`--token-file` or
+  `CORRAL_MCP_TOKEN`). The accidental `--host 0.0.0.0`, or `--http :7777`,
+  which binds every interface, does not start. The server speaks plain HTTP;
+  a remote listener needs a TLS-terminating proxy in front of it.
 
 ---
 
@@ -614,6 +670,7 @@ Cloning works against six hosting services:
 
 ```bash
 corralctl <owner>                                    # GitHub (default)
+corralctl <owner> --forge github --forge-url https://ghe.example.com  # GitHub Enterprise Server
 corralctl <group> --forge gitlab                     # GitLab
 corralctl <owner> --forge codeberg                   # Codeberg
 corralctl <owner> --forge gitea --forge-url https://git.example.com
@@ -626,6 +683,13 @@ Gitea and Forgejo have no single public instance, so they need
 is enough when the host is recognisable — `--forge-url
 https://codeberg.org` implies Codeberg.
 
+For GitHub, `--forge-url` names a GitHub Enterprise Server instance: the
+listing goes to its `/api/v3` API, and a URL that is not http or https
+with a host is refused rather than replaced with github.com. Its token
+comes from `GH_ENTERPRISE_TOKEN` (or `GITHUB_ENTERPRISE_TOKEN`), then
+`gh auth token --hostname <host>`, the same names the `gh` CLI uses. A
+github.com token is never sent to an Enterprise Server.
+
 Credentials come from the environment, under the names each forge's own
 tooling already uses: `GITLAB_TOKEN` (or `CI_JOB_TOKEN`), and
 `GITEA_TOKEN` / `FORGEJO_TOKEN` / `CODEBERG_TOKEN`, and
@@ -633,6 +697,12 @@ tooling already uses: `GITLAB_TOKEN` (or `CI_JOB_TOKEN`), and
 `CORRAL_GITLAB_TOKEN` or `CORRAL_FORGE_TOKEN` wins where both are set.
 GitHub keeps its existing ladder — explicit token, then the environment,
 then the `gh` CLI.
+
+The same token authenticates HTTPS clones and pulls of private
+repositories, on every forge, presented the way each forge expects it
+(`oauth2` for GitLab, `x-token-auth` for Bitbucket, the token as the
+password for the Gitea family). It is sent only to the forge's own HTTPS
+origin, never over plain `http://`.
 
 `--forge` applies to everything that talks to a hosting service:
 `corralctl <owner>`, `plan`, `profile` and `prune`. Orphan detection and
@@ -843,7 +913,9 @@ corralctl adopt ~/Projects --forge github --owner sebastienrousseau
 ```
 
 `status` inventories local clones, `doctor` audits workspace hygiene, worktrees,
-disk budget, exclusions, and Finder tags, `plan` emits a non-mutating reconciliation,
+disk budget, exclusions, and Finder tags, and lists any `.corral-deleting-*`
+directory an interrupted `corral_delete_repo` left behind (it never removes
+one; inspect it, then delete it or rename it back), `plan` emits a non-mutating reconciliation,
 `prune` removes only upstream-orphaned clones that pass the unpublished-work
 checks, and `adopt` discovers untracked local repositories to relocate and link
 to remote forges. JSON output is available on each command.
@@ -956,7 +1028,7 @@ corralctl is opinionated, and the opinions do not suit everyone.
 | | |
 |---|---|
 | **Go** | The `go` directive in [`go.mod`](go.mod) — currently **1.26.10** |
-| **git** | 2.30 or newer, on `PATH` |
+| **git** | 2.31 or newer, on `PATH` (credentials reach git through `GIT_CONFIG_COUNT`, which 2.31 introduced) |
 | **gh** | Optional; only for `--auth gh` |
 
 The Go floor is stated in exactly one place, `go.mod`, and CI sets
@@ -1008,9 +1080,10 @@ own machine, so the threat model is about *limiting blast radius*, not
 crossing a privilege boundary. Full detail in
 [docs/security-model.md](docs/security-model.md).
 
-- **Credentials never reach `argv` or `.git/config`.** The GitHub token is
-  handed to git as an `http.extraheader` scoped to `https://github.com/`,
-  so a submodule on another host cannot see it. Clone errors deliberately
+- **Credentials never reach `argv` or `.git/config`.** The forge's token is
+  handed to git as an `http.extraheader` scoped to that forge's HTTPS origin
+  (`https://github.com/`, `https://gitlab.com/`, your instance), so a
+  submodule on another host cannot see it. Clone errors deliberately
   omit their arguments so a URL-embedded credential cannot reach a log.
 - **Git runs non-interactively, always.** `GIT_TERMINAL_PROMPT=0` and
   friends, so an unattended run fails rather than hanging on a prompt.

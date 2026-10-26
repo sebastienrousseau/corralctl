@@ -80,6 +80,12 @@ func IsTestFile(rel string) bool {
 	return false
 }
 
+// IgnoredDir reports whether a directory named name is one the search walk
+// never descends into. Exported so other walkers over the same workspace
+// (the MCP server's filesystem watcher) skip the same trees rather than
+// keeping a list of their own that drifts from this one.
+func IgnoredDir(name string) bool { return skipDir(name) }
+
 // skipDir reports directories never worth descending into: build output
 // and dependency trees, which dwarf hand-written source and are never what
 // somebody is looking for in their own workspace.

@@ -30,7 +30,7 @@ func TestSeamsBindToRealImplementations(t *testing.T) {
 		got  any
 		want any
 	}{
-		{"fetchRepos", fetchRepos, fetchFromForge},
+		{"fetchRepos", fetchRepos, FetchRepos},
 		{"osExit", osExit, os.Exit},
 		{"gitPull", gitPull, git.Pull},
 		{"gitClone", gitClone, git.Clone},

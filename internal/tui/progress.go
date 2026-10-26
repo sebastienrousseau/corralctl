@@ -103,6 +103,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// Aborted reports whether the view was closed by the user (q or ctrl+c)
+// before every expected result arrived. The engine reads it from the final
+// model to cancel the run: in raw mode ctrl+c reaches the view as a key,
+// not as SIGINT, so quitting the view is the only signal the user gave.
+func (m model) Aborted() bool {
+	return m.quitting && m.done < m.total
+}
+
 var (
 	titleStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("205")).MarginBottom(1)
 	logStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("241"))

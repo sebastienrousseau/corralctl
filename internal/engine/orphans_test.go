@@ -54,7 +54,7 @@ func TestFindOrphansUsesCanonicalIdentity(t *testing.T) {
 		{Name: "api", Owner: "acme", FullName: "acme/api"},
 	}
 
-	got := findOrphans("acme", root, repos)
+	got := findOrphansOn("acme", root, repos, "", "")
 
 	if len(got) != 1 || got[0] != gone {
 		t.Fatalf("findOrphans = %v, want exactly [%s]", got, gone)
@@ -69,7 +69,7 @@ func TestFindOrphansMatchesRenamedDirectory(t *testing.T) {
 	makeClone(t, root, "Public/Go/renamed-locally", "https://github.com/acme/api.git")
 
 	repos := []github.Repo{{Name: "api", Owner: "acme", FullName: "acme/api"}}
-	if got := findOrphans("acme", root, repos); len(got) != 0 {
+	if got := findOrphansOn("acme", root, repos, "", ""); len(got) != 0 {
 		t.Fatalf("findOrphans = %v, want none: the remote still identifies a known repo", got)
 	}
 }

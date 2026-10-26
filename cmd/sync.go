@@ -5,13 +5,10 @@ package cmd
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/url"
-	"os"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/sebastienrousseau/corralctl/internal/diag"
@@ -30,7 +27,7 @@ var (
 	syncOutput      string
 	syncWalk        = mirror.Walk
 	syncRun         = mirror.Run
-	syncToken       = engine.ForgeToken
+	syncToken       = forge.Token
 	// asTarget is a seam: every registered forge is a Target today, so the
 	// refusal below is unreachable without one, and an unreachable error
 	// path is an untested error path.
@@ -52,9 +49,18 @@ creating the destination repository when it does not exist and bringing its
 branches and tags to parity with the local clone: everything local exists
 there, and nothing else does. Branches are never forced.
 
+Local means the clone's own branches (refs/heads). An upstream branch the
+clone holds only as origin/<name> is not pushed, and the prune deletes it
+from a destination that has it; check a branch out locally to carry it.
+
 A repository is never pushed to the forge its origin lives on, and a
 destination that already holds a same-named repository with the wrong
 visibility is refused rather than reused.
+
+A destination is created public only when the source forge reported the
+repository as public at the last 'corralctl clone' and the clone sits under
+a Public directory. Anything else, including a clone with no recorded
+visibility, is created private.
 
 Destinations are named as <forge>[:<owner>][@<url>]:
 
@@ -213,7 +219,7 @@ func parseDestination(raw string) (destinationSpec, error) {
 func buildDestinations(ctx context.Context, specs []destinationSpec) ([]mirror.Destination, error) {
 	out := make([]mirror.Destination, 0, len(specs))
 	for _, s := range specs {
-		token := syncToken(ctx, s.name, github.AuthMode(authMode))
+		token := syncToken(ctx, s.name, github.AuthMode(authMode), s.baseURL)
 		if token == "" {
 			return nil, fmt.Errorf("no credential for %s: set %s", s.name, tokenHint(s.name))
 		}
@@ -245,57 +251,18 @@ func tokenHint(name string) string {
 	}
 }
 
-// syncPrinter renders results in the selected output format. Results
-// arrive from worker goroutines, so writes are serialised.
-type syncPrinter struct {
-	format  string
-	mu      sync.Mutex
-	results []mirror.Result
+// newSyncPrinter renders mirror results in the selected output format.
+func newSyncPrinter(format string) *resultPrinter[mirror.Result, mirror.Summary] {
+	return newResultPrinter[mirror.Result, mirror.Summary](format, printSyncText)
 }
 
-func newSyncPrinter(format string) *syncPrinter {
-	return &syncPrinter{format: format}
-}
-
-func (p *syncPrinter) report(r mirror.Result) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	switch p.format {
-	case string(engine.OutputNDJSON):
-		_ = writeNDJSON(os.Stdout, r)
-	case string(engine.OutputJSON):
-		p.results = append(p.results, r)
-	default:
-		repo := r.Repo
-		if repo == "" {
-			repo = "-"
-		}
-		fmt.Printf("%-8s %-10s %-32s %s\n", r.Action, r.Destination, repo, r.Message)
+// printSyncText writes one mirror result as an aligned text line.
+func printSyncText(r mirror.Result) {
+	repo := r.Repo
+	if repo == "" {
+		repo = "-"
 	}
-}
-
-// finish writes the JSON document, which needs every result and the
-// summary, and is a no-op for the streaming formats.
-func (p *syncPrinter) finish(summary mirror.Summary) error {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	if p.format != string(engine.OutputJSON) {
-		return nil
-	}
-	if p.results == nil {
-		p.results = []mirror.Result{}
-	}
-	return writeJSON(os.Stdout, struct {
-		Results []mirror.Result `json:"results"`
-		Summary mirror.Summary  `json:"summary"`
-	}{p.results, summary})
-}
-
-// writeNDJSON writes one value as a single JSON line.
-func writeNDJSON(target *os.File, value any) error {
-	encoder := json.NewEncoder(target)
-	encoder.SetEscapeHTML(false)
-	return encoder.Encode(value)
+	fmt.Printf("%-8s %-10s %-32s %s\n", r.Action, r.Destination, repo, r.Message)
 }
 
 func init() {

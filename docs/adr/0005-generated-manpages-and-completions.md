@@ -27,8 +27,8 @@ before a release rather than inside a tarball.
 
 The roff is emitted directly rather than via cobra's `GenManTree`, which
 would pull `cpuguy83/go-md2man` into `go.mod` for a build-time concern.
-This module keeps eleven direct dependencies and a hand-maintained
-`SBOM.md` that CI checks against `go.mod`; a dependency is not free.
+Every direct dependency in `go.mod` has a row in a hand-maintained
+`SBOM.md` that CI checks against it; a dependency is not free.
 
 Output goes to `build/`, deliberately not `dist/`: goreleaser owns that
 directory and cleans it *after* running its before-hooks, which silently

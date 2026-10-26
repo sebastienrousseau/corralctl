@@ -3,7 +3,9 @@
 
 // Package mirror pushes a corral-organised tree out to other forges with
 // parity semantics: every local branch and tag exists on the destination,
-// and nothing else does.
+// and nothing else does. Local means refs/heads and refs/tags; a
+// remote-tracking branch (origin/<name>) is not local, so it is neither
+// pushed nor kept on the destination.
 //
 // It is the engine behind `corralctl sync`, and the successor to the
 // standalone corral-sync tool, whose crawler, orchestrator and safety
@@ -61,8 +63,15 @@ type Repo struct {
 	Name string
 	// Path is the absolute path of the working tree.
 	Path string
-	// Private is the visibility the destination is created with.
+	// Private is the visibility the destination is created with. It is
+	// false only when the source forge's visibility was recorded as
+	// public and the directory does not say private; see Walk.
 	Private bool
+	// VisibilityKnown reports that the source forge's visibility was
+	// recorded for this clone. When it is false, Private is true by
+	// default rather than by evidence, which the wrong-visibility
+	// refusal says so the user knows how to clear it.
+	VisibilityKnown bool
 	// Conflict, when set, says why this repository cannot be mirrored at
 	// all: another repository in the tree would land at the same
 	// destination path. It is reported on every destination and never
@@ -272,7 +281,7 @@ func processOne(ctx context.Context, r Repo, dests []resolved, opts Options, c *
 		}
 		if opts.DryRun {
 			c.emit(Result{Repo: r.Name, Destination: d.Name, Action: ActionDryRun,
-				Message: fmt.Sprintf("would ensure %s/%s and push every branch and tag", d.Owner, r.Name)})
+				Message: fmt.Sprintf("would ensure %s/%s (%s) and push every local branch and tag", d.Owner, r.Name, visibilityWord(r.Private))})
 			continue
 		}
 		opCtx, cancel := context.WithTimeout(ctx, opts.Timeout)
@@ -280,6 +289,14 @@ func processOne(ctx context.Context, r Repo, dests []resolved, opts Options, c *
 		cancel()
 		c.emit(res)
 	}
+}
+
+// visibilityWord is how a dry run names the visibility it would create.
+func visibilityWord(private bool) string {
+	if private {
+		return "private"
+	}
+	return "public"
 }
 
 // mirrorOne is the unit of work: ensure the destination repository,
@@ -293,8 +310,8 @@ func mirrorOne(ctx context.Context, r Repo, d resolved) Result {
 		return fail(err)
 	}
 	if remote.Private != r.Private {
-		return fail(fmt.Errorf("%s/%s exists with the wrong visibility (private=%t, local is private=%t); refusing to push into it",
-			d.Owner, r.Name, remote.Private, r.Private))
+		return fail(fmt.Errorf("%s/%s exists with the wrong visibility (private=%t, local is private=%t); refusing to push into it%s",
+			d.Owner, r.Name, remote.Private, r.Private, unknownVisibilityHint(r)))
 	}
 	pushURL, cred := d.pushTarget(remote)
 	if err := forge.ValidatePushURL(pushURL); err != nil {
@@ -318,6 +335,15 @@ func mirrorOne(ctx context.Context, r Repo, d resolved) Result {
 		msg += "; default branch " + remote.DefaultBranch + " -> " + moved
 	}
 	return Result{Repo: r.Name, Destination: d.Name, Action: ActionMirror, Message: msg, URL: pushURL, Created: remote.Created}
+}
+
+// unknownVisibilityHint explains a private-by-default repository, so a
+// refusal it causes says how to clear it.
+func unknownVisibilityHint(r Repo) string {
+	if r.VisibilityKnown {
+		return ""
+	}
+	return "; no visibility is recorded for this clone, so it is treated as private: run `corralctl clone` for its owner to record the forge's answer"
 }
 
 // alignDefault repoints the destination's default branch when the mirror

@@ -29,11 +29,20 @@ mirror without network access.
 
 It is:
 
-- A **read-mostly** tool from GitHub's perspective (clones, fetches).
+- A **read-only** tool toward the forge it clones from: `corralctl clone`
+  lists repositories through the API, then clones and fetches.
 - A **write** tool from the local-filesystem perspective (creates
   directories, `git clone`, `git pull`).
-- **Never** a tool that pushes, force-updates, deletes remote content, or
-  modifies GitHub state via the API.
+- A **write** tool toward a destination forge only when asked to be one:
+  - `corralctl sync` creates repositories on the destination, pushes every
+    local branch and tag with `--prune` (deleting destination branches and
+    tags that do not exist locally, and force-updating tags), and on Gitea, Forgejo
+    and Codeberg can repoint the destination's default branch. C6 and C7
+    bound what it pushes and where its credentials go.
+  - `corralctl adopt`, and the MCP `corral_adopt_repo` tool behind
+    `--enable-mutations`, create one repository and push the current
+    branch to it.
+- **Never** a tool that force-pushes a branch.
 
 ## 2. Trust boundaries
 
@@ -51,13 +60,24 @@ Boundary 2 also includes `git clone` traffic to `github.com` over HTTPS.
 Boundary 4 is a pipe by default: the client launches the server as a
 subprocess and nothing else can reach it. `--transport streamable-http` or
 `--transport sse` (and the older `--http`) turns it into a socket.
-The server supports `--token` (or `CORRAL_MCP_TOKEN`) to enforce Bearer
-token authentication, and validates `Origin` headers (restricting requests
-to loopback origins by default, with `--allowed-origins` for external/web
-origins) to protect against CSRF and DNS rebinding attacks. A routable bind
-is refused unless the operator also passes `--allow-remote`, which asserts
-that they have configured authentication. Anyone who can reach the socket
-has the server's capability according to configured flags.
+The server supports a bearer token (`--token-file` or `CORRAL_MCP_TOKEN`;
+`--token` is deprecated because argv is visible through `ps`). A missing or
+wrong token is answered `401` with a `WWW-Authenticate` challenge. It also
+validates `Host` and `Origin` headers to protect against CSRF and DNS
+rebinding attacks. `Host` must name loopback or an `--allowed-origins`
+entry. A request that carries an `Origin` (which every browser request
+does) is refused unless that origin is listed in `--allowed-origins`; a
+loopback origin is not trusted by default, because any local dev server is
+one. Every response carries `Vary: Origin`.
+
+A routable bind, for a transport or for `--metrics-addr`, is refused unless
+the operator passes `--allow-remote` and sets a token; `--allow-remote`
+without a token is refused too. The server has no TLS listener: on a
+routable address the token and every response travel in clear text unless
+a TLS-terminating proxy sits in front, and the server prints that warning
+when it starts. There is no OAuth resource-server mode. Anyone who holds
+the token, or can reach a loopback socket that has none, has the server's
+capability according to configured flags.
 
 ## 3. Security properties (claims)
 
@@ -213,17 +233,28 @@ push is a single
 `git push --prune --no-verify <remote> refs/heads/*:refs/heads/*
 +refs/tags/*:refs/tags/*`: branches carry no force marker, so a
 non-fast-forward is refused by git and surfaced as an error, while tags are
-forced because the local tag namespace is authoritative for a mirror. Before
+forced because the local tag namespace is authoritative for a mirror. The
+claim is about rewriting, not deleting: `--prune` deletes every destination
+branch and tag with no local counterpart, and "local" is the clone's
+`refs/heads`, so an upstream branch the clone holds only as
+`refs/remotes/origin/<name>` is neither pushed nor kept on the destination
+(`TestPushMirrorCarriesOnlyLocalBranches`). Before
 any push, `internal/mirror` compares the destination's host with every host
 `origin` may reach: as written, as git rewrites it (`insteadOf`), as ssh
 resolves it (`ssh -G`), and with a forge's port-443 SSH host folded to the
 forge. It skips the pair when any matches, so a clone taken *from* a forge is
 never pruned against that forge. A destination repository
 that already exists with the other visibility is refused rather than reused.
+A destination is created public only when the visibility the source forge
+reported at the last `corralctl clone` (recorded in the clone's state
+sidecar) is public and the clone's directory says public; a clone with no
+record is private wherever it sits.
 
 **Evidence.** `internal/git/mirror_test.go` pushes to a real bare repository
 and asserts all three properties; `internal/mirror/mirror_test.go` covers the
 origin guard in real and dry runs and the visibility refusal;
+`internal/mirror/visibility_test.go` and `internal/engine/visibility_test.go`
+cover the recorded visibility;
 `internal/mirror/origin_guard_test.go` covers `insteadOf`, ssh aliases and
 `ssh.github.com` (GHSA-mmpx-r9vh-gjxv).
 
@@ -233,8 +264,8 @@ origin guard in real and dry runs and the visibility refusal;
 `http.<scheme>://<host>/.extraheader` config entry in the process
 environment, scoped to that destination's origin, and is never written to
 `.git/config` or placed in a URL. The push path deliberately does not use
-the helper that attaches the GitHub token to every git invocation, so a push
-to GitLab carries the GitLab credential and nothing else.
+the helper that attaches the clone credential to every clone and pull, so a
+push to GitLab carries the GitLab credential and nothing else.
 
 **Evidence.** `pushAuthEnv` in `internal/git/mirror.go`, and
 `TestPushMirrorScopesTheCredential`.
@@ -243,12 +274,19 @@ to GitLab carries the GitLab credential and nothing else.
 
 **Argument.** Automated operations (clone, pull, mirror, submodule updates) run
 with explicit configuration disarming git hooks (`-c core.hooksPath=/dev/null`)
-and disallowing external protocol helper execution (`-c protocol.ext.allow=never`).
+and any fsmonitor command a clone's config names (`-c core.fsmonitor=false`),
+disallowing external protocol helper execution (`-c protocol.ext.allow=never`),
+and refusing local-path submodule URLs (`-c protocol.file.allow=user`,
+CVE-2022-39253), whatever the user's or the repository's config says.
 Cloning or updating an untrusted repository cannot trigger local code execution
-via embedded hooks.
+via embedded hooks. The child environment also drops `GIT_DIR`,
+`GIT_WORK_TREE`, `GIT_INDEX_FILE` and the other variables that would point git
+at a different repository than the one named with `-C`.
 
-**Evidence.** `internal/git/git.go`, `internal/git/mirror.go`, and
-`TestGitHooksAreDisarmedDuringOperations` in `internal/git/hardening_test.go`.
+**Evidence.** `hardeningArgs` and `childEnv` in `internal/git/env.go`,
+`TestGitHooksAreDisarmedDuringOperations` in `internal/git/hardening_test.go`,
+and `TestFsmonitorHookIsDisarmed`, `TestFileProtocolSubmodulesStayRefused` and
+`TestChildEnvIgnoresRepositoryRedirects` in `internal/git/env_test.go`.
 
 ## 4. Threats considered and out of scope
 
@@ -261,11 +299,14 @@ via embedded hooks.
 - **Dependency compromise**: mitigated by Dependabot on `go.mod` and by
   `govulncheck` in CI; `go.sum` locks transitive hashes.
 - **Execution of untrusted git hooks or external helpers**: mitigated by
-  enforcing `-c core.hooksPath=/dev/null` and `-c protocol.ext.allow=never`
-  on all automated git subprocess invocations (C8).
+  enforcing `-c core.hooksPath=/dev/null`, `-c core.fsmonitor=false`,
+  `-c protocol.ext.allow=never` and `-c protocol.file.allow=user` on all
+  automated git subprocess invocations (C8).
 - **Cross-origin attacks and unauthorized MCP access**: mitigated by
-  `--token` bearer authentication, strict `Origin` header validation, and
-  loopback binding enforcement (Boundary 4).
+  bearer-token authentication (required for any routable bind), an `Origin`
+  allowlist that trusts nothing by default, and loopback binding
+  enforcement (Boundary 4). Transport encryption is not: a remote listener
+  needs a TLS-terminating proxy.
 
 ### Out of scope
 
@@ -285,8 +326,13 @@ via embedded hooks.
 
 - The user's `GITHUB_TOKEN` has only the scopes corralctl needs
   (`repo`, `read:user`). corralctl does not need `write:*` scopes.
-- `git` is installed and version ≥ 2.20 (for `-C`, `-c`, and modern
-  transports).
+- `git` is installed and version ≥ 2.31. Credentials reach git as
+  `GIT_CONFIG_COUNT`/`GIT_CONFIG_KEY_0` environment entries
+  (`internal/git/clone_pull.go`, `internal/git/mirror.go`), which git
+  reads from 2.31.0 on; an older git ignores them, so a clone or push
+  that needs the token runs without it. git 2.31 to 2.35
+  read `core.fsmonitor=false` as a hook named `false`, which runs the
+  `false` command and disarms a repository's own fsmonitor all the same.
 - The user's clock is roughly correct (needed for TLS validation and
   Rekor entry timestamps).
 - The user runs a supported OS: recent Linux, macOS ≥ 14, or Windows 11.

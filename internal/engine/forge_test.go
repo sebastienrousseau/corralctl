@@ -15,17 +15,6 @@ import (
 	"github.com/sebastienrousseau/corralctl/internal/github"
 )
 
-// withForgeSelection sets the run's forge and restores it afterwards. The
-// seam carries the selection in package state rather than in fetchRepos's
-// signature, so that widening it would not have rewritten every test that
-// replaces that seam.
-func withForgeSelection(t *testing.T, name, url string) {
-	t.Helper()
-	oldName, oldURL := fetchForgeName, fetchForgeURL
-	fetchForgeName, fetchForgeURL = name, url
-	t.Cleanup(func() { fetchForgeName, fetchForgeURL = oldName, oldURL })
-}
-
 // TestFetchFromForgeConvertsEveryFieldTheEngineReads is the seam's real
 // job: a forge.Repo has to arrive as the shape the engine, the layout and
 // the TUI all read, with nothing quietly dropped.
@@ -53,13 +42,11 @@ func TestFetchFromForgeConvertsEveryFieldTheEngineReads(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	withForgeSelection(t, "gitea", srv.URL)
-
-	repos, err := fetchFromForge(context.Background(), "acme", github.FetchOptions{
+	repos, err := FetchRepos(context.Background(), "acme", github.FetchOptions{
 		Limit: 7, Visibility: "all",
-	})
+	}, "gitea", srv.URL)
 	if err != nil {
-		t.Fatalf("fetchFromForge: %v", err)
+		t.Fatalf("FetchRepos: %v", err)
 	}
 	if len(repos) != 1 {
 		t.Fatalf("got %d repositories, want 1", len(repos))
@@ -90,19 +77,17 @@ func TestFetchFromForgeConvertsEveryFieldTheEngineReads(t *testing.T) {
 // TestFetchFromForgeDefaultsToGitHub: the selection is empty when nothing
 // asked for a forge, and the default must not have moved.
 func TestFetchFromForgeDefaultsToGitHub(t *testing.T) {
-	withForgeSelection(t, "", "")
 	// Resolving is all this asserts — actually listing would reach the
 	// network. An unknown forge fails before any request, which is what
 	// distinguishes the two outcomes here.
-	_, err := fetchFromForge(context.Background(), "", github.FetchOptions{Limit: 1})
+	_, err := FetchRepos(context.Background(), "", github.FetchOptions{Limit: 1}, "", "")
 	if err != nil && strings.Contains(err.Error(), "unknown forge") {
 		t.Errorf("an empty selection should resolve to github, got %v", err)
 	}
 }
 
 func TestFetchFromForgeReportsAnUnknownForge(t *testing.T) {
-	withForgeSelection(t, "gitub", "")
-	_, err := fetchFromForge(context.Background(), "acme", github.FetchOptions{})
+	_, err := FetchRepos(context.Background(), "acme", github.FetchOptions{}, "gitub", "")
 	if err == nil {
 		t.Fatal("an unknown forge should be an error, not a silent GitHub fetch")
 	}
@@ -117,82 +102,8 @@ func TestFetchFromForgePropagatesAListingError(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	withForgeSelection(t, "gitea", srv.URL)
-	if _, err := fetchFromForge(context.Background(), "nobody", github.FetchOptions{}); err == nil {
+	if _, err := FetchRepos(context.Background(), "nobody", github.FetchOptions{}, "gitea", srv.URL); err == nil {
 		t.Error("an owner that does not exist should be an error, not an empty list")
-	}
-}
-
-func TestForgeTokenForSync(t *testing.T) {
-	// The exported resolver is what `corralctl sync` uses. It differs from
-	// the listing path in one way: GitHub's token is resolved here, because
-	// the target does not carry the listing client's auth ladder.
-	t.Setenv("GITHUB_TOKEN", "gh-env")
-	t.Setenv("GH_TOKEN", "")
-	if got := ForgeToken(context.Background(), "github", github.AuthModeToken); got != "gh-env" {
-		t.Errorf("github sync token = %q", got)
-	}
-	t.Setenv("CORRAL_GITLAB_TOKEN", "")
-	t.Setenv("GITLAB_TOKEN", "gl-env")
-	if got := ForgeToken(context.Background(), "gitlab", github.AuthModeAuto); got != "gl-env" {
-		t.Errorf("gitlab sync token = %q", got)
-	}
-}
-
-func TestForgeTokenSources(t *testing.T) {
-	// GitHub's credential is resolved inside its own client, which knows
-	// the ladder from an explicit token through the environment to the gh
-	// CLI. Supplying one here would bypass all of that.
-	if got := forgeToken(context.Background(), "github", github.AuthModeAuto); got != "" {
-		t.Errorf("github token = %q, want empty — its client resolves its own", got)
-	}
-
-	t.Setenv("CORRAL_GITLAB_TOKEN", "")
-	t.Setenv("GITLAB_TOKEN", "from-gitlab-env")
-	t.Setenv("CI_JOB_TOKEN", "")
-	if got := forgeToken(context.Background(), "gitlab", github.AuthModeAuto); got != "from-gitlab-env" {
-		t.Errorf("gitlab token = %q", got)
-	}
-	// A corral-specific name wins, so somebody can point corral at a
-	// different instance than their shell is already configured for.
-	t.Setenv("CORRAL_GITLAB_TOKEN", "from-corral")
-	if got := forgeToken(context.Background(), "gitlab", github.AuthModeAuto); got != "from-corral" {
-		t.Errorf("gitlab token = %q, want the corral-specific variable to win", got)
-	}
-
-	t.Setenv("CORRAL_BITBUCKET_TOKEN", "")
-	t.Setenv("BITBUCKET_TOKEN", "bb-env")
-	if got := forgeToken(context.Background(), "bitbucket", github.AuthModeAuto); got != "bb-env" {
-		t.Errorf("bitbucket token = %q", got)
-	}
-	t.Setenv("CORRAL_BITBUCKET_TOKEN", "bb-corral")
-	if got := forgeToken(context.Background(), "bitbucket", github.AuthModeAuto); got != "bb-corral" {
-		t.Errorf("bitbucket token = %q, want the corral-specific variable to win", got)
-	}
-
-	t.Setenv("CORRAL_FORGE_TOKEN", "")
-	t.Setenv("FORGEJO_TOKEN", "")
-	t.Setenv("CODEBERG_TOKEN", "")
-	t.Setenv("GITEA_TOKEN", "gitea-env")
-	for _, name := range []string{"gitea", "forgejo", "codeberg"} {
-		if got := forgeToken(context.Background(), name, github.AuthModeAuto); got != "gitea-env" {
-			t.Errorf("%s token = %q", name, got)
-		}
-	}
-}
-
-func TestFirstEnv(t *testing.T) {
-	t.Setenv("CORRAL_TEST_A", "")
-	t.Setenv("CORRAL_TEST_B", "   ")
-	t.Setenv("CORRAL_TEST_C", "value")
-	if got := firstEnv("CORRAL_TEST_A", "CORRAL_TEST_B", "CORRAL_TEST_C"); got != "value" {
-		t.Errorf("firstEnv = %q, want value — empty and blank should be skipped", got)
-	}
-	if got := firstEnv("CORRAL_TEST_MISSING"); got != "" {
-		t.Errorf("firstEnv = %q, want empty", got)
-	}
-	if got := firstEnv(); got != "" {
-		t.Errorf("firstEnv() = %q, want empty", got)
 	}
 }
 
@@ -202,7 +113,7 @@ func TestFirstEnv(t *testing.T) {
 func TestRunEFailsFastOnAnUnknownForge(t *testing.T) {
 	called := false
 	old := fetchRepos
-	fetchRepos = func(context.Context, string, github.FetchOptions) ([]github.Repo, error) {
+	fetchRepos = func(context.Context, string, github.FetchOptions, string, string) ([]github.Repo, error) {
 		called = true
 		return nil, nil
 	}
@@ -356,7 +267,7 @@ func TestFetchAnnouncementNamesTheForge(t *testing.T) {
 // syncs it exercises the origin check rather than skipping it.
 //
 // Fixtures used to create a bare ".git" directory with no config. That
-// silently disabled originMismatch — the guard against pulling one
+// silently disabled OriginMismatch — the guard against pulling one
 // project's history into another project's directory — so tests asserting
 // "dry run pull" were asserting it without the check having run.
 func makeCloneAt(t *testing.T, dir, remote string) {
@@ -374,7 +285,7 @@ func makeCloneAt(t *testing.T, dir, remote string) {
 // identity was "github.com/" + FullName, which only ever agreed with a
 // real remote because GitHub's clone URLs happen to take that shape.
 //
-// On any other forge it disagreed with every clone, and originMismatch
+// On any other forge it disagreed with every clone, and OriginMismatch
 // reads a disagreement as an origin collision — so cloning worked and the
 // second run failed with "expected github.com/...".
 func TestOriginIdentityUsesTheCloneURL(t *testing.T) {

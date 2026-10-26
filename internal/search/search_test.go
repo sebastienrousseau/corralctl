@@ -519,6 +519,12 @@ func TestSkipDir(t *testing.T) {
 	}
 }
 
+func TestIgnoredDirMatchesSkipDir(t *testing.T) {
+	if !IgnoredDir("node_modules") || IgnoredDir("internal") {
+		t.Error("IgnoredDir must agree with the search walk's own skip list")
+	}
+}
+
 // TestSearchAcceptsANilContext covers the caller that has no context to
 // give — an embedder, or a test.
 func TestSearchAcceptsANilContext(t *testing.T) {

@@ -37,6 +37,7 @@ func (GitHub) List(ctx context.Context, owner string, opts Options) ([]Repo, err
 		Visibility:      opts.Visibility,
 		IncludeForks:    opts.IncludeForks,
 		IncludeArchived: opts.IncludeArchived,
+		BaseURL:         opts.BaseURL,
 		RequestTimeout:  opts.RequestTimeout,
 		TotalTimeout:    opts.TotalTimeout,
 	})

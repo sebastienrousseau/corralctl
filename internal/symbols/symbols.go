@@ -27,8 +27,9 @@
 // release targets fail to cross-compile with it. `go/ast` is the standard
 // library, needs no CGO, and is the same parser the Go compiler uses.
 //
-// The cost is that Go is the only language indexed. The Extractor interface
-// exists so that is a new file rather than a rewrite.
+// Other languages (Python, TypeScript and JavaScript, Rust, C, C++, Java,
+// Kotlin, Swift, Protocol Buffers) each register a line scanner behind the
+// same Extractor interface; see ADR-0006 and its amendments.
 package symbols
 
 import (

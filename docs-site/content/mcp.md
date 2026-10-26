@@ -147,6 +147,28 @@ JSON-RPC request, tool invocation, and error with nanosecond timestamps:
 corralctl mcp --trace-file /tmp/corral-trace.jsonl
 ```
 
+## Workspace watcher
+
+`--watch` (on by default) drops the cached workspace index as soon as a
+repository is cloned, moved, removed or re-pointed, instead of waiting for the
+index's five-second expiry. It watches only what that index is built from: the
+layout directories down to the scan depth and each clone's `.git` directory.
+It does not watch a clone's working tree, hidden directories, or dependency and
+build trees such as `node_modules`, `vendor` and `target`.
+Inside a `.git` directory only `config`, `HEAD` and the corral state file
+count, so git's own bookkeeping (`git status` rewriting `.git/index`, a fetch
+writing `FETCH_HEAD`) does not drop the index.
+
+On macOS and the BSDs every watched directory, and every entry in it, holds a
+file descriptor, so the watcher uses at most half of the process's open-file
+limit. If it reaches that budget, or the system refuses a watch, it says so
+once on stderr and stops adding watches; changes in the directories left
+unwatched are seen when the index expires. Registration runs in the background
+and does not delay the MCP handshake. `--watch=false` turns the watcher off.
+
+A workspace scan that runs out of file descriptors is reported as an error
+rather than as a workspace with fewer (or no) repositories in it.
+
 ## Transport
 
 By default the server speaks stdio: the client launches `corralctl mcp` as a
@@ -176,10 +198,25 @@ where the client posts its messages.
 `--http 127.0.0.1:7777` is the older spelling of `--transport streamable-http`
 and still works, with a notice on stderr.
 
-The address has to be on loopback. This server has no authentication and
-exposes every repository under its root — with mutations enabled, it can
-change them — so binding it to a routable interface publishes all of that.
-`--host 0.0.0.0`, or `--http :7777`, which is the form typed by somebody
-thinking about the port and not the host, binds every interface and is
-refused with an explanation. `--allow-remote` overrides the refusal, and is
-for the case where you have put your own authentication in front of it.
+The address has to be on loopback. This server exposes every repository
+under its root (with mutations enabled, it can change them), so binding it
+to a routable interface publishes all of that. `--host 0.0.0.0`, or
+`--http :7777`, which is the form typed by somebody thinking about the port
+and not the host, binds every interface and is refused with an explanation.
+`--allow-remote` overrides the refusal, and only together with a bearer
+token, read from `--token-file` or `CORRAL_MCP_TOKEN`. A request without the
+token, or with the wrong one, is answered `401` with a `WWW-Authenticate`
+challenge. `--token` still works but is deprecated, because anything on the
+command line is visible to every user on the machine through `ps`.
+
+The server speaks plain HTTP and has no TLS listener. On a routable address
+the token and every response cross the network unencrypted unless a
+TLS-terminating reverse proxy sits in front of it, and the server says so
+on stderr when it starts. There is no OAuth resource-server mode.
+
+A browser sends an `Origin` header with every request, and the server
+refuses one that is not listed in `--allowed-origins`. Loopback origins are
+not trusted by default, because every local dev server is one; list the
+page a browser client runs on, for example `--allowed-origins
+http://localhost:6274`. A client that is not a browser sends no `Origin`
+and is unaffected.

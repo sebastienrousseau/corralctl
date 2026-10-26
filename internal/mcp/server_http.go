@@ -117,9 +117,10 @@ var listenAndServe = func(srv *http.Server) error { return srv.ListenAndServe() 
 //
 // The address should stay on loopback unless the caller has thought about it.
 // This server reads a developer's whole workspace and, when mutations are
-// enabled, writes to it; there is no authentication here, so binding it to a
-// routable interface publishes that. The cmd layer refuses a non-loopback bind
-// without an explicit flag, and this logs what it is listening on so an
+// enabled, writes to it. Its only authentication is the optional bearer token
+// checked in wrapAuth, over plain HTTP, so binding it to a routable interface
+// publishes that. The cmd layer refuses a non-loopback bind without
+// --allow-remote and a token, and this logs what it is listening on so an
 // operator can see which it got.
 func (s *Server) ServeHTTP(ctx context.Context, addr string) error {
 	return s.serve(ctx, addr, s.httpHandler())
@@ -156,9 +157,10 @@ func (s *Server) serve(ctx context.Context, addr string, handler http.Handler) e
 		}
 		stopWarm()
 		<-warmDone
-		// After the warmer has stopped and every request has finished, no
-		// reference to a mapping can remain, so this is the one safe point
-		// to release them.
+		// After the warmer has stopped, the watcher has stopped (which it
+		// does only once any warm pass it started has returned) and every
+		// request has finished, no reference to a mapping can remain, so
+		// this is the one safe point to release them.
 		s.indexCache.closeAll()
 	}()
 

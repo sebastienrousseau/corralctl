@@ -15,6 +15,7 @@ import (
 	"github.com/sebastienrousseau/corralctl/internal/diag"
 	"github.com/sebastienrousseau/corralctl/internal/git"
 	"github.com/sebastienrousseau/corralctl/internal/github"
+	"github.com/sebastienrousseau/corralctl/internal/syncguard"
 )
 
 // processRepo brings one repository to its desired state: relocating an
@@ -137,6 +138,9 @@ func processExistingClone(
 		result.Message = msg
 		return result
 	}
+	if !dryRun {
+		recordVisibility(targetDir, repo)
+	}
 	if doSync {
 		return syncExistingClone(ctx, result, repo, targetDir, dryRun, cloneOpts, syncOpts)
 	}
@@ -149,23 +153,16 @@ func processExistingClone(
 	return result
 }
 
-// originMismatch reports whether the clone at targetDir points somewhere
-// other than the repository we intend to sync, which would otherwise mean
-// pulling one project's history into another project's directory.
+// guards is the shared pre-pull checks, reading through this package's
+// git seams so a test that stubs them drives the guards too.
+func guards() syncguard.Reader {
+	return syncguard.Reader{RemoteOrigin: gitRemoteOrigin, IsEmpty: gitIsEmpty, CurrentBranch: gitCurrentBranch}
+}
+
+// originMismatch is syncguard's origin check, the one the MCP sync tool
+// also refuses on.
 func originMismatch(repo github.Repo, targetDir string) (string, bool) {
-	wantIdentity := repoRemoteIdentity(repo)
-	if wantIdentity == "" {
-		return "", false
-	}
-	remote, remoteErr := gitRemoteOrigin(targetDir)
-	if remoteErr != nil {
-		return fmt.Sprintf("cannot verify existing repository origin: %v", remoteErr), true
-	}
-	gotIdentity := git.CanonicalRemote(remote)
-	if gotIdentity != wantIdentity {
-		return fmt.Sprintf("origin collision: target has %s, expected %s", gotIdentity, wantIdentity), true
-	}
-	return "", false
+	return guards().OriginMismatch(repo, targetDir)
 }
 
 // syncExistingClone pulls an existing clone, skipping the network round-trip
@@ -193,6 +190,7 @@ func syncExistingClone(
 	err := gitPull(ctx, targetDir, git.PullOptions{
 		RecurseSubmodules:       cloneOpts.RecurseSubmodules,
 		IgnoreSubmoduleFailures: syncOpts.IgnoreSubmoduleFailures,
+		Credential:              cloneOpts.Credential,
 	})
 	if err != nil {
 		result.Action = "ERROR"
@@ -208,19 +206,12 @@ func syncExistingClone(
 // syncSkipReason reports why a pull should be skipped, if it should. Each
 // case is a state where pulling is either impossible or provably pointless.
 func syncSkipReason(ctx context.Context, repo github.Repo, targetDir string, syncOpts SyncOptions) (string, bool) {
-	// An empty upstream repo (created but never pushed to) results in an
-	// unborn HEAD locally, and `git pull` would fail with "no such ref was
-	// fetched". Detect that state cheaply and SKIP with a specific reason
-	// instead of surfacing the git error as a sync failure.
-	if gitIsEmpty(ctx, targetDir) {
-		return "empty repository (no commits yet)", true
-	}
-	if branch, err := gitCurrentBranch(ctx, targetDir); err == nil && branch != repo.DefaultBranch {
-		return fmt.Sprintf("on branch %s", branch), true
+	if reason, refuse := guards().BranchRefusal(ctx, targetDir, repo.DefaultBranch); refuse {
+		return reason, true
 	}
 	// Skip the network round-trip when the upstream pushed_at is unchanged
 	// since the last successful sync. The cached value lives in
-	// <targetDir>/.corral-state.json. A read error or a zero state falls
+	// <targetDir>/.git/corral-state.json. A read error or a zero state falls
 	// through to the original pull-always behaviour, so a missing or corrupt
 	// sidecar can never cause a stale working tree.
 	if !syncOpts.Force && !repo.PushedAt.IsZero() {
@@ -292,7 +283,8 @@ func cloneURL(repo github.Repo, owner, protocol string) string {
 }
 
 // stampCloneState records the upstream pushed_at in the per-clone state
-// sidecar so the next run can skip a no-op git pull. Best-effort: a write
+// sidecar so the next run can skip a no-op git pull, along with the
+// visibility the forge listed, which `corralctl sync` reads. Best-effort: a write
 // failure is logged but does not fail the operation, since the sidecar is
 // purely an optimization (a missing or stale file falls through to the
 // pre-sidecar behaviour of always pulling).
@@ -300,6 +292,7 @@ func stampCloneState(targetDir string, repo github.Repo) {
 	if err := writeCloneState(targetDir, cloneState{
 		LastSyncedPushedAt: repo.PushedAt,
 		LastSyncedAt:       time.Now().UTC(),
+		Visibility:         visibilityRecord(repo.Visibility),
 	}); err != nil {
 		diag.Warnf("failed writing %s in %s: %v", StateFileName, targetDir, err)
 	}

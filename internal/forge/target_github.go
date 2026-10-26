@@ -73,6 +73,18 @@ func (g GitHub) EnsureRepo(ctx context.Context, owner string, spec RepoSpec, opt
 	}
 }
 
+// SetDefaultBranch implements DefaultBranchSetter. GitHub, like git
+// itself, refuses to delete a repository's default branch, so a mirror
+// push that prunes it is rejected until the default points elsewhere.
+func (g GitHub) SetDefaultBranch(ctx context.Context, owner, name, branch string, opts TargetOptions) error {
+	client, err := g.targetClient(opts)
+	if err != nil {
+		return err
+	}
+	_, _, err = client.Repositories.Edit(ctx, owner, name, &gh.Repository{DefaultBranch: gh.Ptr(branch)})
+	return err
+}
+
 // PushAuth implements Target. GitHub takes a token as the password for the
 // fixed username x-access-token, which is how internal/git already
 // authenticates clones.
@@ -97,12 +109,18 @@ func (GitHub) targetClient(opts TargetOptions) (*gh.Client, error) {
 }
 
 func (GitHub) remote(r *gh.Repository, created bool) Remote {
-	return Remote{
+	out := Remote{
 		HTTPSURL: r.GetCloneURL(),
 		SSHURL:   r.GetSSHURL(),
 		Private:  r.GetPrivate(),
 		Created:  created,
 	}
+	// A repository created by this run is empty: the default it reports
+	// names a branch that does not exist yet, which no push can prune.
+	if !created {
+		out.DefaultBranch = r.GetDefaultBranch()
+	}
+	return out
 }
 
 // githubStatusIs reports whether err is a go-github error with the given

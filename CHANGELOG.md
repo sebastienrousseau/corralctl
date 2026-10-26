@@ -6,7 +6,337 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.0.53] - 2026-10-25
+## [0.0.54] - 2026-10-26
+
+### Security
+
+- **`corral_adopt_repo` no longer sends a forge token to a host the MCP
+  caller chose** (GHSA-qc3v-fj4r-j4j9, affects 0.0.44 to 0.0.53). With
+  `--enable-mutations`, the tool resolved the operator's token for the named
+  forge and sent it to whatever `forge_url` the caller passed, so an agent
+  steered by planted instructions could collect it. A `forge_url` is now
+  accepted only when the operator named that instance with the new
+  `corralctl mcp --forge-url` flag; any other value is refused and audited
+  before a token is read.
+
+- **Dependabot no longer auto-merges Go module updates.** Patch and minor
+  bumps of Go modules used to merge on green CI with no one reading them,
+  so a compromised upstream release would have reached `main` on its own.
+  Auto-merge now covers only GitHub Actions and Docker digest updates; every
+  Go module update waits for a person.
+
+- **Metrics labels come from fixed sets.** `mcp_requests_total` keyed its
+  `endpoint` label on the raw decoded request path, and
+  `mcp_tool_calls_total` its `tool` label on the name the client sent. Both
+  are counted before authentication, so anyone who could reach the socket
+  could add a series per request without bound, and a path holding `"` and
+  a newline wrote forged lines into `/metrics`. The endpoint is now one of
+  `/`, `/mcp`, `/sse`, `/metrics` or `other`, the method one of the five
+  the transports answer or `OTHER`, the tool a registered name or
+  `unknown`, and every label value is escaped.
+
+- **`example.com` is no longer an allowed `Host`.** The HTTP transports
+  accepted `Host: example.com` alongside loopback, a leftover from the
+  default host of Go's `httptest.NewRequest`. It was reachable only by
+  whoever controls that domain's DNS, but test behaviour should not ship.
+
+- **A loopback `Origin` is no longer trusted by default, and responses
+  carry `Vary: Origin`.** The HTTP transports let in, and echoed back in
+  `Access-Control-Allow-Origin`, any `localhost` or loopback origin on any
+  port, so any page served by a local dev server could drive the server,
+  mutations included when they were enabled and no token was set. Only
+  origins listed in `--allowed-origins` now pass. **Breaking:** a browser
+  client connecting directly from a loopback page must be listed, for
+  example `--allowed-origins http://localhost:6274`. Clients that are not
+  browsers send no `Origin` and are unaffected.
+
+- **`--allow-remote` requires a bearer token.** A routable `--host`,
+  `--http` or `--metrics-addr` was allowed with `--allow-remote` alone, which
+  published every repository under the root to anyone who could reach the
+  port. It is now refused unless a token is set. **Breaking:** an operator
+  who relied on a proxy's own authentication must also set
+  `CORRAL_MCP_TOKEN` or `--token-file`.
+
+- **A wrong bearer token is answered `401` with a challenge.** It was a
+  `403` without `WWW-Authenticate`, which tells a client the token is
+  valid but lacks permission. It now carries
+  `WWW-Authenticate: Bearer realm="corral-mcp", error="invalid_token"`, as
+  RFC 6750 asks.
+
+- **The plain-HTTP limit is stated.** The server has no TLS listener. On a
+  routable address it now warns on stderr that the token and every response
+  cross the network unencrypted, and the README and security model say a
+  TLS-terminating proxy is required.
+
+- **git no longer follows an inherited `GIT_DIR`.** Run from a git hook or
+  alias, corralctl inherited `GIT_DIR`, `GIT_WORK_TREE`, `GIT_INDEX_FILE`
+  and the other variables git exports there, and they outrank `-C`, so every
+  git command, including the guards that check a clone for unpublished work
+  before `prune` or a delete, inspected the repository the variable named.
+  Every git child now starts without them.
+
+- **git runs with `core.fsmonitor=false` and `protocol.file.allow=user`.**
+  A clone whose config named an fsmonitor command ran it on every status, as
+  a hook would. A user who set `protocol.file.allow=always`, or a git older
+  than 2.30.6, 2.31.5 or 2.38.1, let a `--recurse-submodules` clone of an
+  untrusted repository read a local path (CVE-2022-39253). Both are now
+  overridden on every invocation, next to `core.hooksPath` and
+  `protocol.ext.allow`.
+
+- **`sync` no longer creates a public destination on a directory name.**
+  Visibility was read from the path alone, so a repository made private
+  upstream but still filed under `Public/`, or a clone corral never made,
+  was created public on every destination. `corralctl clone` now records the
+  visibility the source forge reports in each clone's state sidecar, on
+  every pass including skipped pulls, and `sync` creates a destination
+  public only when that record says public and the directory agrees.
+  Anything else is private. Behaviour change: until `corralctl clone` has
+  run once for an owner, its clones mirror as private, and an existing
+  public destination is refused with a message that says how to clear it.
+  `--dry-run` now names the visibility each destination would get.
+
+- **`corral_sync_repo` makes the CLI's checks before it pulls.** The MCP
+  tool ran `git pull --rebase --autostash` on whatever branch was checked
+  out, so an agent could rebase a user's feature branch, and it took no lock,
+  so it could race `corral_delete_repo` on the same clone. It now refuses,
+  through the functions `corralctl clone` uses (in the new
+  `internal/syncguard`), a clone with no origin or whose origin changed
+  since the index was read, one with no commits, and one that is not on
+  the branch `origin/HEAD` names (the server never calls a forge API, so a
+  clone without `origin/HEAD` is refused rather than trusted). Every refusal is audited, and the pull holds the
+  per-repository lock deletion takes.
+
+### Added
+
+- **A complexity gate with a shrinking baseline.** `make complexity-check`,
+  part of `make check` and run in CI's Lint job, holds every function to
+  cyclomatic 10, cognitive 15, Halstead difficulty 30 and 60 lines of code,
+  and every file to 500 lines of code. The 282 existing offenders are
+  recorded in `scripts/complexity_baseline.tsv`; a new or worse one fails,
+  and so does an improvement the baseline has not recorded, so the backlog
+  can only shrink. gocyclo v0.6.0 and gocognit v1.3.0 are pinned in the
+  script.
+
+- **Trace context from `_meta`.** A request that carries a W3C `traceparent`
+  in its `_meta`, as protocol `2026-07-28` specifies (SEP-414), is recorded
+  under that trace in `--trace-file`, on stdio as well as HTTP. Over HTTP a
+  valid `_meta` value takes precedence over the `traceparent` header.
+
+- **`--token-file`** reads the bearer token from a file, so it stays out of
+  the process list.
+
+- **`exec --timeout`** sets a deadline for each repository on its own,
+  spelled like `doctor --timeout` (0, the default, means none). A command
+  that overruns is killed together with the processes it started (its
+  process group on Unix), reported as timed out and counted as failed,
+  while the other repositories carry on.
+
+- **`exec --output json|ndjson`**, in the same shapes as `sync`: one
+  `{"results", "summary"}` document, or one record per repository as it
+  finishes. Each record carries `repo`, `exit_code`, `duration_ms`,
+  `stdout` and `stderr` (kept apart, each capped at 1 MiB like the text
+  output), `timed_out` and `error`. `--dry-run` with a JSON format is
+  refused rather than mixing text into the stream.
+
+### Changed
+
+- **`internal/search`'s per-file search is split into helpers.** `searchFile`
+  was the worst offender in the package (cognitive 29, cyclomatic 19). It is
+  now within every ceiling, with table tests that pin its results for every
+  input shape it branches on. Search results are unchanged.
+
+- **The build-from-source prerequisites name the real toolchain floor.**
+  README and CONTRIBUTING said "Go 1.26+", which admits 1.26.0 to 1.26.9
+  and 1.27.0 to 1.27.2. Those releases carry GO-2026-6809 in
+  `crypto/x509`, reachable from the forge HTTPS client. The docs now point
+  at the `go` directive in `go.mod` and exclude 1.27.0 to 1.27.2, and
+  `docs/packaging.md` explains why a `toolchain` line cannot.
+
+- **`make staticcheck` and `make vuln-check` run pinned tool versions.**
+  They installed `staticcheck@latest` and `govulncheck@latest`, so a local
+  `make check` and CI could run different scanners against the same tree.
+  They now run staticcheck v0.8.2 and govulncheck v1.7.0 (the version CI
+  pins), set by `STATICCHECK_VERSION` and `GOVULNCHECK_VERSION`.
+
+- **The MCP server no longer advertises the `logging` capability.** It never
+  sent a log message; the capability was the Go SDK's default. Logging is
+  Deprecated in protocol `2026-07-28` (SEP-2577), and diagnostics stay on
+  stderr. `initialize` and `server/discover` now list `prompts`, `resources`
+  and `tools` only.
+- **The MCP server no longer links the terminal UI.** Adoption moved from
+  `internal/engine` to a new `internal/adopt` package and the forge token
+  resolver to `internal/forge`, so `internal/mcp` no longer depends on
+  `internal/engine`, `internal/tui` or the Bubble Tea stack. A test keeps
+  that boundary.
+
+- **Streamed runs no longer keep every result in memory.** The engine
+  appended each result to a slice for every output format, although only
+  `--output json` writes the aggregate. Text and NDJSON runs now keep the
+  summary counts only.
+
+- **The documented minimum git is 2.31.** The README and DEVELOPMENT.md said
+  2.30, the security model and the Debian notes 2.20, and credentials reach
+  git through `GIT_CONFIG_COUNT`, which git 2.31 introduced.
+
+- **`exec` runs the command through `/bin/sh -c`, not `$SHELL -c`**
+  (behaviour change). The same command line meant different things under
+  fish or nushell, and a `$SHELL` that did not exist failed every
+  repository. On Windows it runs through `cmd.exe /C` (or `%COMSPEC%`). To
+  use another shell, name it in the command.
+
+- **`exec` headers name the repository by its path under the base
+  directory** (`--- [Public/Go/x] ---`) instead of its basename, so two
+  clones that share a name in different collections can be told apart.
+
+### Deprecated
+
+- **`--token`** prints a warning: anything on the command line is visible
+  to every user on the machine through `ps`. Use `--token-file` or
+  `CORRAL_MCP_TOKEN`.
+
+### Fixed
+
+- **`corralctl sync` aligns a stale GitHub default branch too.** The
+  0.0.53 fix for a destination whose default branch was deleted upstream
+  covered only the Gitea family. A GitHub destination refuses the pruning
+  push the same way, so it now reports its default branch and has it
+  repointed through the API before the push. GitLab and Bitbucket are
+  unchanged; see the usage guide for why.
+
+- **Private HTTPS clones work on every forge, not only GitHub.** git was
+  given only the GitHub token, scoped to `https://github.com/`, so a
+  private repository on GitLab, Gitea, Forgejo, Codeberg, Bitbucket or a
+  GitHub Enterprise Server was cloned anonymously and failed unless a git
+  credential helper was configured. Clones and pulls now present the
+  listing forge's token with that forge's username convention, scoped to
+  its HTTPS origin and never sent over plain `http://`.
+
+- **`sync` and `adopt` use the Enterprise Server's own token.**
+  `corralctl sync --to github:<owner>@<url>` and `corralctl adopt --forge
+  github --forge-url <url>` resolved the github.com credential
+  (`GITHUB_TOKEN`, `GH_TOKEN` or `gh auth token`) for a GitHub Enterprise
+  Server destination. The token is now resolved for that host
+  (`GH_ENTERPRISE_TOKEN`, `GITHUB_ENTERPRISE_TOKEN`, then
+  `gh auth token --hostname <host>`).
+
+- **`--forge github --forge-url` lists from GitHub Enterprise Server.**
+  The GitHub adapter dropped the forge URL, so
+  `corralctl acme --forge github --forge-url https://ghe.corp` listed and
+  cloned `github.com/acme`, a different owner on a different host. The
+  listing now goes to the instance's `/api/v3` API with that host's token
+  (`GH_ENTERPRISE_TOKEN`, `GITHUB_ENTERPRISE_TOKEN`, then
+  `gh auth token --hostname`), a github.com address still means
+  github.com, and an unusable URL is refused.
+
+- **Forge listings stop retrying when cancelled and honour `Retry-After`.**
+  The GitLab, Gitea-family and Bitbucket client slept through its backoff
+  with `time.Sleep`, so Ctrl-C waited up to eight seconds per retry, and it
+  answered HTTP 429 with a fixed backoff whatever the server asked for. The
+  wait now ends with the context, and a 429 or 5xx that carries
+  `Retry-After` (seconds or an HTTP date, capped at ten minutes) waits that
+  long. A requested wait that would run past `--api-total-timeout` is
+  reported as such instead of being started.
+
+- **Quitting the progress view stops the run.** Pressing `q` or `ctrl+c`
+  in the clone progress view closed the view and left the workers cloning
+  with no output, then exited 0. In raw mode `ctrl+c` reaches the view as
+  a key, not as SIGINT, so the signal handler never fired. Quitting the
+  view now cancels the run's context, which interrupts in-flight git
+  processes, and the run exits 130 as a cancelled run.
+
+- **The MCP workspace watcher no longer exhausts file descriptors.** It
+  watched every directory under `--root`, `node_modules` and `target` trees
+  included, which on macOS held one descriptor per directory and per file: over
+  10,000 on a real workspace. Under a 256-descriptor limit the workspace scan
+  then could not open the root and `corral_search_code` answered "No match ...
+  across 0 repositories". The watcher now watches only the layout directories
+  and each clone's `.git` directory, stays within half the open-file limit,
+  reports a failed or skipped watch on stderr, and registers in the background
+  instead of before the stdio handshake. `--watch` stays on by default.
+- **A workspace scan that runs out of file descriptors is an error.** It used
+  to skip the directory it failed on, and with it every repository beneath,
+  and return what was left as a complete index.
+- **The watcher ignores events that cannot change the workspace index.**
+  Every event dropped the whole index and, while symbol tools were in use,
+  started a warm pass, including `git status` rewriting `.git/index`. Inside a
+  `.git` directory only `config`, `HEAD` and the corral state file now count,
+  permission-only changes are ignored, and a file in a clone's working tree
+  never counts.
+- **A warm pass started by the watcher is waited for on shutdown, and only
+  one warm pass runs at a time.** The watcher started its pass as an untracked
+  goroutine, so the HTTP server could release its memory-mapped search indexes
+  while that pass was still reading one, and the watcher and the periodic
+  warmer could scan the whole workspace at once. The watcher now waits for its
+  pass before reporting itself stopped, and a pass requested while another runs
+  returns at once.
+
+- **Sync refuses to pull over work in progress or local commits.** An
+  unattended `git pull --rebase --autostash` ran whatever state a clone was
+  in: a revert staged with `--no-commit` was stashed, HEAD moved, and
+  `REVERT_HEAD` was left pointing at the old base; commits only in the clone
+  were rebased, and since signing is off for the pull, a signed commit came
+  back unsigned. `corralctl` sync and `corral_sync_repo` now refuse, naming
+  the reason, when a rebase, `git am`, merge, cherry-pick, revert or bisect is
+  in progress, when the branch has commits its upstream lacks, or when it has
+  no upstream. Push the local commits, or finish the operation, then sync.
+  This is a behaviour change: those clones used to be rebased.
+
+- **An interrupted delete is reported, and never mirrored.**
+  `corral_delete_repo` renames a clone to `.corral-deleting-<name>-<hex>`
+  before removing it, so a crash in between leaves that directory, `.git`
+  included. `corralctl sync` took it for a repository and would have created
+  and pushed a destination repository under that name, and `doctor` counted
+  it as a healthy clone. The mirror walk now skips it, and `doctor` lists it
+  under "Interrupted Deletions" (`staged_deletions` in JSON) and reports the
+  workspace as needing attention. Neither removes it.
+
+- **Mirror errors no longer print the git command line.** A failing
+  `remote add` or `remote set-url` reported its full argv, URL included, in
+  terminal output and `--output json` results. The message now names the
+  subcommand and remote (`git remote add gitlab failed: ...`), as `git pull`
+  errors already did.
+
+- **A credential no longer replaces your own `GIT_CONFIG_*` settings.**
+  Attaching the GitHub token or a mirror's push credential wrote
+  `GIT_CONFIG_COUNT=1` and `GIT_CONFIG_KEY_0`, which overwrote config a user
+  passes through the environment, such as a proxy or `http.sslCAInfo`.
+  corralctl's entries are now numbered after the user's and the count raised
+  to cover both.
+
+- **`exec --visibility` reaches every collection.** It knew only `public`
+  and `private`, so clones under `Forks/` and `Work/` could not be selected.
+  It now accepts `all` and each top-level collection of the layout (`public`,
+  `private`, `work`, `forks`), read from the same list the layout uses.
+
+### Documentation
+
+- **The documented minimum git is now 2.31,** in the README,
+  `DEVELOPMENT.md`, the Debian package README and the security model, which
+  disagreed (2.20 and 2.30). Credentials reach git through
+  `GIT_CONFIG_COUNT`, which git reads from 2.31.0 on; an older git ignores
+  it and runs the clone or push without the token.
+- **Claims the code contradicted are corrected.** The MCP help, README, docs
+  site and ADR-0007 said the HTTP transports have no authentication; they
+  have an optional bearer token (`--token`, `CORRAL_MCP_TOKEN`), and the
+  loopback guard still applies with one. The security model said corralctl
+  never pushes; `sync` and `adopt` create repositories and push, within the
+  bounds C6 and C7 state. The architecture document listed seven read and
+  three write MCP tools (there are eleven and seven), Go as the only
+  indexed language (there are ten extractors), and a dependency diagram
+  that omitted most packages; it now carries the `go list` import table.
+  The `mcp` help named five indexed languages, and `--enable-mutations` and
+  the server's instructions to agents named two of the six write tools it
+  unlocks.
+
+- **What `sync` mirrors is stated plainly.** A destination mirrors the
+  clone's own branches (`refs/heads`), not its origin: an upstream branch the
+  clone holds only as `origin/<name>` is not pushed, and the pruning push
+  deletes it from a destination that has it. The README, `corralctl sync
+  --help`, the `internal/mirror` package comment and security-model claim C6
+  now say so, and `TestPushMirrorCarriesOnlyLocalBranches` pins the
+  behaviour. The push semantics are unchanged.
+
+## [0.0.53] - 2026-10-26
 
 ### Security
 
@@ -2787,7 +3117,8 @@ cron-safety overhaul.
   100 % doc coverage.
 - All tests green under `-race -count=1`.
 
-[Unreleased]: https://github.com/sebastienrousseau/corralctl/compare/v0.0.53...HEAD
+[Unreleased]: https://github.com/sebastienrousseau/corralctl/compare/v0.0.54...HEAD
+[0.0.54]: https://github.com/sebastienrousseau/corralctl/compare/v0.0.53...v0.0.54
 [0.0.53]: https://github.com/sebastienrousseau/corralctl/compare/v0.0.52...v0.0.53
 [0.0.52]: https://github.com/sebastienrousseau/corralctl/compare/v0.0.51...v0.0.52
 [0.0.51]: https://github.com/sebastienrousseau/corralctl/compare/v0.0.50...v0.0.51

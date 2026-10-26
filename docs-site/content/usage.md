@@ -136,8 +136,27 @@ concurrently:
 corralctl exec "git status -s" --languages go,rust --visibility private
 ```
 
+The command line is interpreted by `/bin/sh -c` on Unix and `cmd.exe /C` on
+Windows, whatever `$SHELL` names, so it means the same thing for everyone. To
+use another shell, name it in the command: `corralctl exec "fish -c '...'"`.
+
+`--timeout 2m` gives each repository its own deadline (the default, `0`,
+means none). A command that overruns is killed with the processes it started,
+reported as timed out and counted as failed; the rest carry on.
+
+`--output ndjson` writes one record per repository as it finishes, and
+`--output json` one document with every record and a summary, in the same
+shapes `sync` uses. A record carries `repo` (the path under the base
+directory), `exit_code`, `duration_ms`, `stdout`, `stderr`, `timed_out` and,
+when the command failed, `error`:
+
+```bash
+corralctl exec "git status --porcelain" --output ndjson | jq -r 'select(.stdout != "") | .repo'
+```
+
 The same filtering flags apply, so you can scope a command to one ecosystem,
-one visibility, or both. `--dry-run` works here too, and lists the
+one collection, or both. `--visibility` takes `all` or any top-level
+collection of the layout: `public`, `private`, `work` or `forks`. `--dry-run` works here too, and lists the
 repositories a command would run against without running it.
 
 ## Mirror to other forges
@@ -174,13 +193,16 @@ lives on, so a clone taken *from* GitLab is not pruned against GitLab. And a
 destination that already holds a same-named repository with the other
 visibility is an error rather than a silent reuse.
 
-One destination setting is changed. When a Gitea, Forgejo or Codeberg
+One destination setting is changed. When a GitHub, Gitea, Forgejo or Codeberg
 repository's default branch no longer exists locally — deleted upstream, say —
 the push would prune it, and the forge would reject the whole push. sync first
 pushes the local default branch (origin's default, else the checked-out
 branch), makes it the destination's default, and reports
 `default branch <old> -> <new>`. A default that still exists locally is left
-alone.
+alone. GitLab and Bitbucket destinations are pushed as before: Bitbucket
+Cloud's API cannot change a repository's main branch, and GitLab protects
+its default branch, so repointing it would not let the prune through.
+Change the default in the forge's settings when sync reports the rejection.
 
 ## Worktree management
 

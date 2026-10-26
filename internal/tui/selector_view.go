@@ -318,7 +318,7 @@ func (m *selectorModel) renderHelpPanel() string {
 
 func (m *selectorModel) renderFooter() string {
 	left := " ? for commands"
-	right := fmt.Sprintf("Made with ❤️ in London, UK (%s)", version.Display(Version))
+	right := fmt.Sprintf("Made with ❤️ in London, UK (%s)", version.Display(m.version))
 
 	leftLen := len(left)
 	rightRunes := []rune(right)

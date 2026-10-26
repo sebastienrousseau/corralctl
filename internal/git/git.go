@@ -185,13 +185,10 @@ func submodulesHaveUnpublishedWork(ctx context.Context, targetDir string) (bool,
 }
 
 func gitOutput(ctx context.Context, targetDir string, args ...string) (string, error) {
-	fullArgs := append([]string{
-		"-c", "core.hooksPath=/dev/null",
-		"-c", "protocol.ext.allow=never",
-		"-C", targetDir,
-	}, args...)
+	fullArgs := append(hardened("-C", targetDir), args...)
 	cmd := exec.CommandContext(ctx, gitBinary, fullArgs...) // #nosec G204 -- fixed git binary and structured arguments
-	withGitEnv(cmd)
+	// Inspection only: these commands present no credential.
+	withGitEnv(cmd, nil)
 	out, err := cmd.Output()
 	return string(out), err
 }
