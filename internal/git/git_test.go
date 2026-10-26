@@ -461,7 +461,12 @@ func TestPullArgsContainCommitSigningOverride(t *testing.T) {
 	if err := Pull(context.Background(), targetDir, PullOptions{}); err != nil {
 		t.Fatalf("Pull must not fail on the user's signing configuration, got: %v", err)
 	}
-	if got, err := os.ReadFile(filepath.Join(targetDir, "test.txt")); err != nil || string(got) != "local edit" {
+	root, err := os.OpenRoot(targetDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = root.Close() }()
+	if got, err := root.ReadFile("test.txt"); err != nil || string(got) != "local edit" {
 		t.Fatalf("autostashed change not restored: %q, %v", got, err)
 	}
 }

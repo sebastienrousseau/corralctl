@@ -60,7 +60,12 @@ func TestChildEnvIgnoresRepositoryRedirects(t *testing.T) {
 	if err := runMirror(ctx, target, nil, "config", "config", "corral.probe", "1"); err != nil {
 		t.Fatal(err)
 	}
-	cfg, err := os.ReadFile(filepath.Join(target, ".git", "config"))
+	root, err := os.OpenRoot(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = root.Close() }()
+	cfg, err := root.ReadFile(filepath.Join(".git", "config"))
 	if err != nil {
 		t.Fatal(err)
 	}
