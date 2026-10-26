@@ -6,6 +6,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Quitting the progress view stops the run.** Pressing `q` or `ctrl+c`
+  in the clone progress view closed the view and left the workers cloning
+  with no output, then exited 0. In raw mode `ctrl+c` reaches the view as
+  a key, not as SIGINT, so the signal handler never fired. Quitting the
+  view now cancels the run's context, which interrupts in-flight git
+  processes, and the run exits 130 as a cancelled run.
+
 ## [0.0.53] - 2026-10-25
 
 ### Security

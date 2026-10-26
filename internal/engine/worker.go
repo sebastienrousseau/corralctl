@@ -6,6 +6,7 @@ package engine
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -24,7 +25,13 @@ type runOutcome struct {
 	results   []RepoResult
 	summary   Summary
 	outputErr error
+	// aborted is set when the user quit the progress view mid-run.
+	aborted error
 }
+
+// errProgressViewQuit is the cancellation cause recorded when the user
+// quits the progress view (q or ctrl+c) before the run has finished.
+var errProgressViewQuit = errors.New("progress view closed by the user")
 
 // executeJobs runs the whole worker phase: it starts the pool, enqueues one
 // job per repository, streams results to the selected output, and returns
@@ -37,6 +44,10 @@ func executeJobs(
 	isTTY bool,
 	encoder *json.Encoder,
 ) runOutcome {
+	// Derived so that quitting the progress view can stop the workers and
+	// any git process they started, not only the view.
+	ctx, cancel := context.WithCancelCause(ctx)
+	defer cancel(nil)
 	existingByRemote := discoverExistingRepos(opts.BaseDir)
 
 	jobs := make(chan Job, len(repos))
@@ -61,19 +72,41 @@ func executeJobs(
 		consumeResults(opts, results, program, encoder, &outcome)
 	}()
 
-	if program != nil {
-		if _, err := runProgram(program); err != nil {
-			fmt.Fprintf(os.Stderr, "Error running TUI: %v\n", err)
-		}
-		// Ensure Send unblocks if an injected runner or an early TUI failure
-		// returns without shutting down Bubble Tea's context.
-		program.Kill()
+	var aborted error
+	if program != nil && runProgressView(program) {
+		aborted = errProgressViewQuit
+		cancel(aborted)
 	}
 
 	workers.Wait()
 	close(results)
 	consumer.Wait()
+	outcome.aborted = aborted
 	return outcome
+}
+
+// runProgressView drives the progress TUI until it exits, and reports
+// whether the user quit it before every result arrived.
+func runProgressView(program *tea.Program) bool {
+	final, err := runProgram(program)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error running TUI: %v\n", err)
+	}
+	// Ensure Send unblocks if an injected runner or an early TUI failure
+	// returns without shutting down Bubble Tea's context.
+	program.Kill()
+	view, ok := final.(interface{ Aborted() bool })
+	return ok && view.Aborted()
+}
+
+// runCancellation reports why the run stopped early: the caller's context
+// (SIGINT, SIGTERM or a parent cancel) or the user quitting the progress
+// view. It returns nil for a run that was allowed to finish.
+func runCancellation(ctx context.Context, outcome *runOutcome) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return outcome.aborted
 }
 
 // startWorkers launches opts.Concurrency goroutines draining jobs into

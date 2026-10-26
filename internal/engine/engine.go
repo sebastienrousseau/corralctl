@@ -291,12 +291,12 @@ func RunE(ctx context.Context, opts RunOptions) error {
 
 	outcome := executeJobs(ctx, opts, repos, layoutTemplate, isTTY, encoder)
 
-	// Detect cancellation after workers + consumer drain. ctx.Err() at this
-	// point is the authoritative signal: it's set if and only if a SIGINT/
-	// SIGTERM (or a parent's cancel()) fired during the run. The result set
-	// in that case is partial and we must signal that to downstream consumers
-	// so they don't mistake an aborted run for a clean one.
-	if err := ctx.Err(); err != nil {
+	// Detect cancellation after workers + consumer drain. runCancellation is
+	// the authoritative signal: it is set if and only if a SIGINT/SIGTERM, a
+	// parent's cancel() or quitting the progress view stopped the run. The
+	// result set in that case is partial and we must signal that to
+	// downstream consumers so they don't mistake it for a clean run.
+	if err := runCancellation(ctx, &outcome); err != nil {
 		outcome.summary.Canceled = true
 		emitCancellation(opts.Output, isTTY, encoder, err)
 	}

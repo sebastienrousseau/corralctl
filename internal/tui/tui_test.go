@@ -627,3 +627,19 @@ func TestRemainingSelectorStates(t *testing.T) {
 		t.Fatalf("long-version footer = %q", footer)
 	}
 }
+
+// TestModelAborted distinguishes a person quitting the progress view from
+// the view closing itself once every result has arrived.
+func TestModelAborted(t *testing.T) {
+	quit, _ := NewModel(2).Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'q'}})
+	if !quit.(model).Aborted() {
+		t.Error("q before completion should report Aborted")
+	}
+	done, _ := NewModel(1).Update(LogMsg{RepoName: "r", Action: "CLONE"})
+	if done.(model).Aborted() {
+		t.Error("a view closed by completion should not report Aborted")
+	}
+	if NewModel(1).(model).Aborted() {
+		t.Error("a running view should not report Aborted")
+	}
+}

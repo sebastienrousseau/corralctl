@@ -70,7 +70,9 @@ prepare workspace          (classic layout only, never on --dry-run)
 execute jobs
   ├─ discover existing clones, keyed by canonical remote identity
   ├─ N workers, each: relocate → sync-or-clone → Finder tags
-  └─ one consumer drains results into the chosen output format
+  ├─ one consumer drains results into the chosen output format
+  └─ q or ctrl+c in the progress view cancels the run's ctx, which
+     stops the workers and the git processes they started
 
 report
   ├─ orphan detection (skipped when cancelled: the tree is mid-clone)
