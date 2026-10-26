@@ -6,7 +6,6 @@ package engine
 import (
 	"context"
 	"fmt"
-	"log"
 	"os"
 	"strings"
 	"sync"
@@ -106,7 +105,7 @@ func announceFetch(opts RunOptions, isTTY bool) {
 		return
 	}
 	if !isTTY {
-		log.Println(fetchAnnouncement(opts))
+		logger.Println(fetchAnnouncement(opts))
 		return
 	}
 	if os.Getenv("CORRAL_SHOW_LOGO") != "0" {

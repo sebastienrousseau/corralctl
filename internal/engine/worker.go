@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -209,7 +208,7 @@ func consumeResults(
 		case program != nil:
 			program.Send(toLogMsg(msg))
 		case opts.Output == OutputText:
-			log.Printf("%s [%s] %s: %s", resultIcon(msg), msg.Action, msg.RepoName, msg.Message)
+			logger.Printf("%s [%s] %s: %s", resultIcon(msg), msg.Action, msg.RepoName, msg.Message)
 		case opts.Output == OutputNDJSON:
 			if err := encoder.Encode(msg); err != nil {
 				fmt.Fprintf(os.Stderr, "ERROR: failed to encode ndjson result: %v\n", err)
@@ -305,7 +304,7 @@ func emitCancellation(output OutputFormat, isTTY bool, encoder *json.Encoder, ca
 		if !isTTY {
 			// Non-TTY text path: scripted log consumers get a single line.
 			// TTY users get nothing — the TUI handles its own signal display.
-			log.Printf("%s", msg)
+			logger.Printf("%s", msg)
 		}
 	}
 }

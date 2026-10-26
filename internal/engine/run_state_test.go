@@ -4,7 +4,9 @@
 package engine
 
 import (
+	"bytes"
 	"context"
+	"log"
 	"os"
 	"path/filepath"
 	"testing"
@@ -53,5 +55,28 @@ func TestOrphanReportUsesTheRunsForge(t *testing.T) {
 	got := emitOrphanReport(opts, upstream, &runOutcome{}, nil)
 	if len(got) != 1 || got[0] != dir {
 		t.Errorf("orphans = %v, want [%s]", got, dir)
+	}
+}
+
+// TestRunELeavesTheStandardLoggerAlone pins A-03: RunE redirected the
+// process-wide standard logger to stderr on every run, overriding
+// whatever an embedder had configured. The engine writes its own
+// diagnostics through its own logger instead.
+func TestRunELeavesTheStandardLoggerAlone(t *testing.T) {
+	old := fetchRepos
+	t.Cleanup(func() { fetchRepos = old })
+	fetchRepos = func(context.Context, string, github.FetchOptions, string, string) ([]github.Repo, error) {
+		return nil, nil
+	}
+	var embedder bytes.Buffer
+	oldOut := log.Writer()
+	log.SetOutput(&embedder)
+	t.Cleanup(func() { log.SetOutput(oldOut) })
+
+	if err := RunE(context.Background(), defaultRunOptions(t.TempDir())); err != nil {
+		t.Fatalf("RunE: %v", err)
+	}
+	if log.Writer() != &embedder {
+		t.Error("RunE replaced the standard logger's output")
 	}
 }

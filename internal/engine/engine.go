@@ -151,6 +151,21 @@ type Summary struct {
 	Canceled bool `json:"canceled,omitempty"`
 }
 
+// stderrWriter writes to whatever os.Stderr is when the write happens,
+// so a caller that swaps os.Stderr is honoured without the engine
+// touching the process-wide standard logger.
+type stderrWriter struct{}
+
+// Write implements io.Writer.
+func (stderrWriter) Write(p []byte) (int, error) { return os.Stderr.Write(p) }
+
+// logger carries the engine's diagnostics. stdout is reserved for the
+// selected output format, so diagnostics always go to stderr and JSON and
+// NDJSON remain parseable. It is the engine's own logger: RunE used to
+// call log.SetOutput on every run, which overrode an embedder's standard
+// logger for the whole process.
+var logger = log.New(stderrWriter{}, "", log.LstdFlags)
+
 // cancelExitCode is the POSIX convention for "killed by SIGINT" (128 + 2).
 // Used when a non-interactive corralctl run is interrupted, so scripted
 // callers can distinguish cancellation from other failures.
@@ -252,9 +267,6 @@ func RunE(ctx context.Context, opts RunOptions) error {
 	opts.Clone.Credential = runCloneCredential(ctx, opts)
 
 	isTTY := isTerminal(os.Stdout.Fd())
-	// stdout is reserved for the selected output format. Diagnostics always go
-	// to stderr so JSON and NDJSON remain parseable.
-	log.SetOutput(os.Stderr)
 
 	repos, proceed, err := resolveRepos(ctx, opts, isTTY)
 	if err != nil {

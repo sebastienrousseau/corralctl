@@ -989,9 +989,9 @@ func TestEngineRunCanceledTextSilentOnTTY(t *testing.T) {
 	// Redirect log output so we can assert it's empty (no "operation
 	// canceled" line on the TTY path).
 	var logBuf strings.Builder
-	oldLogOut := log.Writer()
-	log.SetOutput(&logBuf)
-	defer log.SetOutput(oldLogOut)
+	oldLogger := logger
+	logger = log.New(&logBuf, "", 0)
+	defer func() { logger = oldLogger }()
 
 	opts := defaultRunOptions(baseDir)
 	opts.Output = OutputText
@@ -1012,13 +1012,11 @@ func TestEngineRunCanceledTextNoisyOnNonTTY(t *testing.T) {
 	oldGitClone := gitClone
 	oldOsExit := osExit
 	oldIsTerminal := isTerminal
-	oldLogOut := log.Writer()
 	defer func() {
 		fetchRepos = oldFetchRepos
 		gitClone = oldGitClone
 		osExit = oldOsExit
 		isTerminal = oldIsTerminal
-		log.SetOutput(oldLogOut)
 	}()
 
 	fetchRepos = func(ctx context.Context, owner string, opts github.FetchOptions, _, _ string) ([]github.Repo, error) {
