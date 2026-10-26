@@ -11,6 +11,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 	"time"
 
@@ -197,24 +198,32 @@ func (s *Server) isAllowedHost(host string) bool {
 		h = parsedHost
 	}
 	h = strings.ToLower(strings.TrimSpace(h))
+	if isLoopbackName(h) {
+		return true
+	}
+	return slices.ContainsFunc(s.opts.AllowedOrigins, func(allowed string) bool {
+		return hostMatches(h, host, allowed)
+	})
+}
+
+// isLoopbackName reports whether a bare, lower-cased host names loopback.
+func isLoopbackName(h string) bool {
 	if h == "localhost" {
 		return true
 	}
 	ip := net.ParseIP(h)
-	if ip != nil && ip.IsLoopback() {
+	return ip != nil && ip.IsLoopback()
+}
+
+// hostMatches reports whether a Host header, as h without its port or as
+// the raw host with it, names the host of one --allowed-origins entry. The
+// entry may be a bare host or a full origin.
+func hostMatches(h, host, allowed string) bool {
+	if strings.EqualFold(h, allowed) || strings.EqualFold(host, allowed) {
 		return true
 	}
-	for _, allowed := range s.opts.AllowedOrigins {
-		if strings.EqualFold(h, allowed) || strings.EqualFold(host, allowed) {
-			return true
-		}
-		if u, err := url.Parse(allowed); err == nil {
-			if strings.EqualFold(h, u.Hostname()) || strings.EqualFold(host, u.Host) {
-				return true
-			}
-		}
-	}
-	return false
+	u, err := url.Parse(allowed)
+	return err == nil && (strings.EqualFold(h, u.Hostname()) || strings.EqualFold(host, u.Host))
 }
 
 type statusRecorder struct {
@@ -238,71 +247,90 @@ func (rec *statusRecorder) Flush() {
 // transport handler.
 func (s *Server) wrapAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Propagate or generate W3C traceparent distributed tracing context.
-		rawTP := r.Header.Get("traceparent")
-		tc, ok := ParseTraceParent(rawTP)
-		if !ok {
-			tc = NewTraceContext()
-		}
-		w.Header().Set("traceparent", tc.String())
-		r = r.WithContext(ContextWithTrace(r.Context(), tc))
-
-		if !s.isAllowedHost(r.Host) {
-			http.Error(w, "Forbidden: invalid Host header", http.StatusForbidden)
-			if s.metrics != nil {
-				s.metrics.incRequest(r.Method, r.URL.Path, http.StatusForbidden)
-			}
+		r = withTraceContext(w, r)
+		if status, answered := s.gate(w, r); answered {
+			s.countRequest(r, status)
 			return
 		}
-
-		if origin := r.Header.Get("Origin"); origin != "" {
-			if !s.isAllowedOrigin(origin) {
-				http.Error(w, "Forbidden: cross-origin request rejected", http.StatusForbidden)
-				if s.metrics != nil {
-					s.metrics.incRequest(r.Method, r.URL.Path, http.StatusForbidden)
-				}
-				return
-			}
-			w.Header().Set("Access-Control-Allow-Origin", origin)
-			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
-			w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type, Mcp-Session-Id, Mcp-Method, Mcp-Name, io.modelcontextprotocol.protocol-version, traceparent")
-			w.Header().Set("Access-Control-Expose-Headers", "Mcp-Session-Id, WWW-Authenticate, traceparent")
-			if r.Method == http.MethodOptions {
-				w.WriteHeader(http.StatusNoContent)
-				if s.metrics != nil {
-					s.metrics.incRequest(r.Method, r.URL.Path, http.StatusNoContent)
-				}
-				return
-			}
-		}
-
-		if s.opts.AuthToken != "" {
-			authHeader := r.Header.Get("Authorization")
-			const prefix = "Bearer "
-			if !strings.HasPrefix(authHeader, prefix) {
-				w.Header().Set("WWW-Authenticate", `Bearer realm="corral-mcp"`)
-				http.Error(w, "Unauthorized: missing Bearer token", http.StatusUnauthorized)
-				if s.metrics != nil {
-					s.metrics.incRequest(r.Method, r.URL.Path, http.StatusUnauthorized)
-				}
-				return
-			}
-			token := strings.TrimPrefix(authHeader, prefix)
-			if subtle.ConstantTimeCompare([]byte(token), []byte(s.opts.AuthToken)) != 1 {
-				http.Error(w, "Forbidden: invalid token", http.StatusForbidden)
-				if s.metrics != nil {
-					s.metrics.incRequest(r.Method, r.URL.Path, http.StatusForbidden)
-				}
-				return
-			}
-		}
-
 		rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
 		next.ServeHTTP(rec, r)
-		if s.metrics != nil {
-			s.metrics.incRequest(r.Method, r.URL.Path, rec.status)
-		}
+		s.countRequest(r, rec.status)
 	})
+}
+
+// withTraceContext propagates the request's W3C traceparent, or starts a
+// new trace, echoes it on the response and carries it in the context.
+func withTraceContext(w http.ResponseWriter, r *http.Request) *http.Request {
+	tc, ok := ParseTraceParent(r.Header.Get("traceparent"))
+	if !ok {
+		tc = NewTraceContext()
+	}
+	w.Header().Set("traceparent", tc.String())
+	return r.WithContext(ContextWithTrace(r.Context(), tc))
+}
+
+// gate runs the checks a request passes before it reaches a transport, in
+// order: Host, then Origin and CORS, then the bearer token. When one of
+// them answers the request itself, gate returns the status it wrote and
+// true.
+func (s *Server) gate(w http.ResponseWriter, r *http.Request) (int, bool) {
+	if !s.isAllowedHost(r.Host) {
+		http.Error(w, "Forbidden: invalid Host header", http.StatusForbidden)
+		return http.StatusForbidden, true
+	}
+	if status, answered := s.applyCORS(w, r); answered {
+		return status, true
+	}
+	return s.checkBearer(w, r)
+}
+
+// applyCORS refuses a disallowed Origin, sets the CORS headers for an
+// allowed one, and answers a preflight.
+func (s *Server) applyCORS(w http.ResponseWriter, r *http.Request) (int, bool) {
+	origin := r.Header.Get("Origin")
+	if origin == "" {
+		return 0, false
+	}
+	if !s.isAllowedOrigin(origin) {
+		http.Error(w, "Forbidden: cross-origin request rejected", http.StatusForbidden)
+		return http.StatusForbidden, true
+	}
+	w.Header().Set("Access-Control-Allow-Origin", origin)
+	w.Header().Set("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
+	w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type, Mcp-Session-Id, Mcp-Method, Mcp-Name, io.modelcontextprotocol.protocol-version, traceparent")
+	w.Header().Set("Access-Control-Expose-Headers", "Mcp-Session-Id, WWW-Authenticate, traceparent")
+	if r.Method == http.MethodOptions {
+		w.WriteHeader(http.StatusNoContent)
+		return http.StatusNoContent, true
+	}
+	return 0, false
+}
+
+// checkBearer enforces ServerOptions.AuthToken when one is set.
+func (s *Server) checkBearer(w http.ResponseWriter, r *http.Request) (int, bool) {
+	if s.opts.AuthToken == "" {
+		return 0, false
+	}
+	authHeader := r.Header.Get("Authorization")
+	const prefix = "Bearer "
+	if !strings.HasPrefix(authHeader, prefix) {
+		w.Header().Set("WWW-Authenticate", `Bearer realm="corral-mcp"`)
+		http.Error(w, "Unauthorized: missing Bearer token", http.StatusUnauthorized)
+		return http.StatusUnauthorized, true
+	}
+	token := strings.TrimPrefix(authHeader, prefix)
+	if subtle.ConstantTimeCompare([]byte(token), []byte(s.opts.AuthToken)) != 1 {
+		http.Error(w, "Forbidden: invalid token", http.StatusForbidden)
+		return http.StatusForbidden, true
+	}
+	return 0, false
+}
+
+// countRequest records a served or refused request in the metrics.
+func (s *Server) countRequest(r *http.Request, status int) {
+	if s.metrics != nil {
+		s.metrics.incRequest(r.Method, r.URL.Path, status)
+	}
 }
 
 // httpHandler is the mux ServeHTTP serves: the Streamable HTTP transport at
