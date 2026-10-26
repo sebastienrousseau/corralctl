@@ -5,7 +5,9 @@ package engine
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"io"
 	"testing"
 	"time"
 
@@ -92,6 +94,34 @@ func TestProgressViewCompletionDoesNotCancel(t *testing.T) {
 	opts.DryRun = true
 	if err := RunE(context.Background(), opts); err != nil {
 		t.Fatalf("RunE = %v, want nil", err)
+	}
+}
+
+// TestConsumeResultsRetainsOnlyForJSON pins P-05: the per-result slice is
+// only read by the --output json aggregate, so the streaming formats must
+// not accumulate it.
+func TestConsumeResultsRetainsOnlyForJSON(t *testing.T) {
+	for _, tc := range []struct {
+		output OutputFormat
+		want   int
+	}{
+		{OutputNDJSON, 0},
+		{OutputText, 0},
+		{OutputJSON, 3},
+	} {
+		results := make(chan RepoResult, 3)
+		for _, a := range []string{"CLONE", "SKIP", "ERROR"} {
+			results <- RepoResult{RepoName: a, Action: a}
+		}
+		close(results)
+		var outcome runOutcome
+		consumeResults(RunOptions{Output: tc.output}, results, nil, json.NewEncoder(io.Discard), &outcome)
+		if got := len(outcome.results); got != tc.want {
+			t.Errorf("%s: retained %d results, want %d", tc.output, got, tc.want)
+		}
+		if s := outcome.summary; s.Cloned != 1 || s.Skipped != 1 || s.Failed != 1 {
+			t.Errorf("%s: summary = %+v, want one each of cloned, skipped, failed", tc.output, s)
+		}
 	}
 }
 

@@ -22,6 +22,9 @@ import (
 
 // runOutcome is everything the worker phase produced.
 type runOutcome struct {
+	// results holds every result, but only for --output json, the one
+	// format that needs the aggregate. The streaming formats have already
+	// written each result by the time the run ends.
 	results   []RepoResult
 	summary   Summary
 	outputErr error
@@ -201,8 +204,7 @@ func consumeResults(
 	outcome *runOutcome,
 ) {
 	for msg := range results {
-		outcome.results = append(outcome.results, msg)
-		outcome.summary.add(msg)
+		outcome.record(opts.Output, msg)
 		switch {
 		case program != nil:
 			program.Send(toLogMsg(msg))
@@ -305,6 +307,16 @@ func emitCancellation(output OutputFormat, isTTY bool, encoder *json.Encoder, ca
 			// TTY users get nothing — the TUI handles its own signal display.
 			log.Printf("%s", msg)
 		}
+	}
+}
+
+// record counts msg in the summary and keeps it only when the output
+// format needs the aggregate, so a streamed run's memory does not grow
+// with the number of repositories.
+func (o *runOutcome) record(output OutputFormat, msg RepoResult) {
+	o.summary.add(msg)
+	if output == OutputJSON {
+		o.results = append(o.results, msg)
 	}
 }
 

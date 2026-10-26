@@ -15,6 +15,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   view now cancels the run's context, which interrupts in-flight git
   processes, and the run exits 130 as a cancelled run.
 
+### Changed
+
+- **Streamed runs no longer keep every result in memory.** The engine
+  appended each result to a slice for every output format, although only
+  `--output json` writes the aggregate. Text and NDJSON runs now keep the
+  summary counts only.
+
 ## [0.0.53] - 2026-10-25
 
 ### Security
