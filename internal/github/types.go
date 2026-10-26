@@ -75,6 +75,11 @@ type FetchOptions struct {
 	ExcludeLanguages []string
 	// AuthMode selects how the GitHub token is resolved.
 	AuthMode AuthMode
+	// BaseURL is a GitHub Enterprise Server instance root, such as
+	// "https://ghe.corp". Empty, or any github.com address, means
+	// github.com. The REST API is reached under /api/v3 on the instance,
+	// and the token is resolved for that host, never github.com's.
+	BaseURL string
 	// Type filters repositories by specific category (e.g. "sources", "forks", "archived", "mirrors", etc.).
 	Type string
 	// Sort specifies how the returned repositories list should be ordered.

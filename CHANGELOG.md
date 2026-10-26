@@ -8,6 +8,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`--forge github --forge-url` lists from GitHub Enterprise Server.**
+  The GitHub adapter dropped the forge URL, so
+  `corralctl acme --forge github --forge-url https://ghe.corp` listed and
+  cloned `github.com/acme`, a different owner on a different host. The
+  listing now goes to the instance's `/api/v3` API with that host's token
+  (`GH_ENTERPRISE_TOKEN`, `GITHUB_ENTERPRISE_TOKEN`, then
+  `gh auth token --hostname`), a github.com address still means
+  github.com, and an unusable URL is refused.
+
 - **Forge listings stop retrying when cancelled and honour `Retry-After`.**
   The GitLab, Gitea-family and Bitbucket client slept through its backoff
   with `time.Sleep`, so Ctrl-C waited up to eight seconds per retry, and it

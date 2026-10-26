@@ -614,6 +614,7 @@ Cloning works against six hosting services:
 
 ```bash
 corralctl <owner>                                    # GitHub (default)
+corralctl <owner> --forge github --forge-url https://ghe.example.com  # GitHub Enterprise Server
 corralctl <group> --forge gitlab                     # GitLab
 corralctl <owner> --forge codeberg                   # Codeberg
 corralctl <owner> --forge gitea --forge-url https://git.example.com
@@ -625,6 +626,13 @@ Gitea and Forgejo have no single public instance, so they need
 `--forge-url`. GitLab and Codeberg default to theirs. `--forge-url` alone
 is enough when the host is recognisable — `--forge-url
 https://codeberg.org` implies Codeberg.
+
+For GitHub, `--forge-url` names a GitHub Enterprise Server instance: the
+listing goes to its `/api/v3` API, and a URL that is not http or https
+with a host is refused rather than replaced with github.com. Its token
+comes from `GH_ENTERPRISE_TOKEN` (or `GITHUB_ENTERPRISE_TOKEN`), then
+`gh auth token --hostname <host>`, the same names the `gh` CLI uses. A
+github.com token is never sent to an Enterprise Server.
 
 Credentials come from the environment, under the names each forge's own
 tooling already uses: `GITLAB_TOKEN` (or `CI_JOB_TOKEN`), and

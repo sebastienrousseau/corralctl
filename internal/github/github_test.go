@@ -71,7 +71,7 @@ func TestFetchReposWithOptionsAuthModes(t *testing.T) {
 
 	oldRunAuth := runGitHubCLIAuthToken
 	defer func() { runGitHubCLIAuthToken = oldRunAuth }()
-	runGitHubCLIAuthToken = func(ctx context.Context) (string, error) {
+	runGitHubCLIAuthToken = func(ctx context.Context, _ string) (string, error) {
 		return "gh-token", nil
 	}
 
@@ -633,17 +633,17 @@ func TestEnvToken(t *testing.T) {
 
 	mustUnsetenv(t, "GITHUB_TOKEN")
 	mustUnsetenv(t, "GH_TOKEN")
-	if got := envToken(); got != "" {
+	if got := envToken(""); got != "" {
 		t.Fatalf("expected empty token, got %q", got)
 	}
 
 	mustSetenv(t, "GH_TOKEN", "gh-env")
-	if got := envToken(); got != "gh-env" {
+	if got := envToken(""); got != "gh-env" {
 		t.Fatalf("expected gh-env, got %q", got)
 	}
 
 	mustSetenv(t, "GITHUB_TOKEN", "github-env")
-	if got := envToken(); got != "github-env" {
+	if got := envToken(""); got != "github-env" {
 		t.Fatalf("expected github-env precedence, got %q", got)
 	}
 }
@@ -662,7 +662,7 @@ func TestResolveTokenAutoFallback(t *testing.T) {
 	mustUnsetenv(t, "GH_TOKEN")
 
 	// Auto mode with no env falls through to gh CLI failure.
-	runGitHubCLIAuthToken = func(ctx context.Context) (string, error) {
+	runGitHubCLIAuthToken = func(ctx context.Context, _ string) (string, error) {
 		return "", errors.New("gh failed")
 	}
 	if _, err := resolveToken(context.Background(), AuthModeAuto); err == nil ||
@@ -671,7 +671,7 @@ func TestResolveTokenAutoFallback(t *testing.T) {
 	}
 
 	// Auto mode with successful gh CLI fallback.
-	runGitHubCLIAuthToken = func(ctx context.Context) (string, error) {
+	runGitHubCLIAuthToken = func(ctx context.Context, _ string) (string, error) {
 		return "cli-token", nil
 	}
 	tok, err := resolveToken(context.Background(), AuthModeAuto)
@@ -787,7 +787,7 @@ func TestRunGitHubCLIAuthToken(t *testing.T) {
 	dirErr := t.TempDir()
 	writeFakeGH(t, dirErr, "#!/bin/sh\nexit 1\n")
 	withPath(t, dirErr, func() {
-		if _, err := realRun(context.Background()); err == nil ||
+		if _, err := realRun(context.Background(), ""); err == nil ||
 			!strings.Contains(err.Error(), "gh auth token failed") {
 			t.Fatalf("expected gh failure error, got %v", err)
 		}
@@ -797,7 +797,7 @@ func TestRunGitHubCLIAuthToken(t *testing.T) {
 	dirOK := t.TempDir()
 	writeFakeGH(t, dirOK, "#!/bin/sh\necho '  my-token  '\n")
 	withPath(t, dirOK, func() {
-		tok, err := realRun(context.Background())
+		tok, err := realRun(context.Background(), "")
 		if err != nil || tok != "my-token" {
 			t.Fatalf("expected trimmed my-token, got %q %v", tok, err)
 		}
@@ -807,7 +807,7 @@ func TestRunGitHubCLIAuthToken(t *testing.T) {
 	dirEmpty := t.TempDir()
 	writeFakeGH(t, dirEmpty, "#!/bin/sh\necho '   '\n")
 	withPath(t, dirEmpty, func() {
-		if _, err := realRun(context.Background()); err == nil ||
+		if _, err := realRun(context.Background(), ""); err == nil ||
 			!strings.Contains(err.Error(), "empty token") {
 			t.Fatalf("expected empty token error, got %v", err)
 		}
