@@ -3,7 +3,10 @@
 
 package mcp
 
-import "testing"
+import (
+	"encoding/json"
+	"testing"
+)
 
 // TestCapabilitiesAdvertiseOnlyWhatIsServed: the server never emits
 // notifications/message, so advertising "logging" promised a feature it
@@ -16,8 +19,18 @@ func TestCapabilitiesAdvertiseOnlyWhatIsServed(t *testing.T) {
 	if caps == nil {
 		t.Fatal("initialize result carries no capabilities")
 	}
-	if caps.Logging != nil {
-		t.Errorf("logging capability advertised: %+v", caps.Logging)
+	// Checked on the wire form: the Logging field itself is deprecated in
+	// the SDK, and what a client reads is the JSON.
+	raw, err := json.Marshal(caps)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var wire map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &wire); err != nil {
+		t.Fatal(err)
+	}
+	if v, ok := wire["logging"]; ok {
+		t.Errorf("logging capability advertised: %s", v)
 	}
 	if caps.Tools == nil || !caps.Tools.ListChanged {
 		t.Errorf("tools capability = %+v, want listChanged", caps.Tools)
