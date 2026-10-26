@@ -400,6 +400,8 @@ Execute arbitrary shell commands concurrently across your organized repositories
 
 The command runs through `/bin/sh -c` on Unix and `cmd.exe /C` on Windows,
 whatever `$SHELL` names. To use another shell, name it in the command.
+`--timeout 2m` gives each repository its own deadline (default `0`, none);
+a command that overruns is killed with its children and counted as failed.
 
 ---
 

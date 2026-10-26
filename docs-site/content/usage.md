@@ -140,6 +140,10 @@ The command line is interpreted by `/bin/sh -c` on Unix and `cmd.exe /C` on
 Windows, whatever `$SHELL` names, so it means the same thing for everyone. To
 use another shell, name it in the command: `corralctl exec "fish -c '...'"`.
 
+`--timeout 2m` gives each repository its own deadline (the default, `0`,
+means none). A command that overruns is killed with the processes it started,
+reported as timed out and counted as failed; the rest carry on.
+
 The same filtering flags apply, so you can scope a command to one ecosystem,
 one visibility, or both. `--dry-run` works here too, and lists the
 repositories a command would run against without running it.

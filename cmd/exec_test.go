@@ -434,3 +434,48 @@ func TestRunExecCommandsIgnoresUserShell(t *testing.T) {
 		t.Fatalf("exec used $SHELL instead of /bin/sh: %+v %q", summary, out)
 	}
 }
+
+// TestRunExecCommandsPerRepositoryTimeout pins D-01: --timeout bounds
+// each repository on its own. The slow repository's shell is waiting on
+// a child when the deadline fires; the run must still return promptly,
+// count only that repository as failed, and leave the fast one alone.
+func TestRunExecCommandsPerRepositoryTimeout(t *testing.T) {
+	if _, err := os.Stat("/bin/sh"); err != nil {
+		t.Skip("/bin/sh not available")
+	}
+	fast, slow := t.TempDir(), t.TempDir()
+	if err := os.WriteFile(filepath.Join(slow, "slow"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	opts := execOptions{
+		Command:     "if [ -e slow ]; then sleep 5; echo late; else echo quick; fi",
+		Concurrency: 2,
+		Timeout:     300 * time.Millisecond,
+	}
+	start := time.Now()
+	var summary ExecSummary
+	out := captureStdout(t, func() {
+		summary = runExecCommands(context.Background(), []string{fast, slow}, opts)
+	})
+	if elapsed := time.Since(start); elapsed > 3*time.Second {
+		t.Fatalf("timeout not enforced: run took %s", elapsed)
+	}
+	if summary.Failed != 1 || summary.Canceled {
+		t.Fatalf("summary = %+v, want exactly the slow repository failed", summary)
+	}
+	if !strings.Contains(out, "quick") || !strings.Contains(out, "timed out after 300ms") {
+		t.Fatalf("output = %q", out)
+	}
+}
+
+func TestExecCmdRejectsNegativeTimeout(t *testing.T) {
+	oldConcurrency, oldVisibility, oldTimeout := execConcurrency, execVisibility, execTimeout
+	t.Cleanup(func() { execConcurrency, execVisibility, execTimeout = oldConcurrency, oldVisibility, oldTimeout })
+	execConcurrency, execVisibility, execTimeout = 1, "all", -time.Second
+	if err := execCmd.PreRunE(execCmd, nil); err == nil || !strings.Contains(err.Error(), "--timeout must be >= 0") {
+		t.Fatalf("negative timeout error = %v", err)
+	}
+	if flag := execCmd.Flags().Lookup("timeout"); flag == nil || flag.DefValue != "0s" {
+		t.Fatalf("--timeout flag = %+v, want default 0s", flag)
+	}
+}

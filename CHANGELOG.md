@@ -6,6 +6,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`exec --timeout`** sets a deadline for each repository on its own,
+  spelled like `doctor --timeout` (0, the default, means none). A command
+  that overruns is killed together with the processes it started (its
+  process group on Unix), reported as timed out and counted as failed,
+  while the other repositories carry on.
+
 ### Changed
 
 - **`exec` runs the command through `/bin/sh -c`, not `$SHELL -c`**

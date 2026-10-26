@@ -6,6 +6,7 @@ package cmd
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -13,6 +14,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"time"
 
 	gitutil "github.com/sebastienrousseau/corralctl/internal/git"
 	"github.com/spf13/cobra"
@@ -23,6 +25,7 @@ var (
 	execLanguages    string
 	execExcludeLangs string
 	execVisibility   string
+	execTimeout      time.Duration
 	findRepos        = findLocalRepos
 	execBatch        = runExecCommands
 	walkLocalRepos   = filepath.WalkDir
@@ -37,11 +40,19 @@ var execCmd = &cobra.Command{
 The command line is interpreted by /bin/sh -c on Unix and by cmd.exe /C
 (or %COMSPEC%) on Windows, whatever $SHELL names, so the same command
 means the same thing for every user. To use another shell, name it in
-the command: corralctl exec "fish -c 'string upper (basename $PWD)'".`,
+the command: corralctl exec "fish -c 'string upper (basename $PWD)'".
+
+--timeout sets a deadline for each repository on its own (0, the
+default, means none). A command that overruns is killed together with
+the processes it started, reported as timed out, and counted as failed;
+the other repositories carry on.`,
 	Args: cobra.MinimumNArgs(1),
 	PreRunE: func(cmd *cobra.Command, args []string) error {
 		if execConcurrency < 1 {
 			return fmt.Errorf("--concurrency must be >= 1")
+		}
+		if execTimeout < 0 {
+			return fmt.Errorf("--timeout must be >= 0")
 		}
 		execVisibility = strings.ToLower(strings.TrimSpace(execVisibility))
 		if execVisibility != "all" && execVisibility != "public" && execVisibility != "private" {
@@ -80,7 +91,7 @@ the command: corralctl exec "fish -c 'string upper (basename $PWD)'".`,
 		}
 
 		// Run commands concurrently
-		summary := execBatch(cmdContext(cmd), filtered, execOptions{Command: commandStr, Concurrency: execConcurrency})
+		summary := execBatch(cmdContext(cmd), filtered, execOptions{Command: commandStr, Concurrency: execConcurrency, Timeout: execTimeout})
 		if summary.Failed > 0 || summary.Canceled {
 			osExit(1)
 		}
@@ -231,6 +242,8 @@ type execOptions struct {
 	Command string
 	// Concurrency is the number of repositories worked at once.
 	Concurrency int
+	// Timeout is the deadline for one repository; 0 means none.
+	Timeout time.Duration
 }
 
 // execResult is the outcome of the command in one repository.
@@ -241,6 +254,8 @@ type execResult struct {
 	Output string
 	// Err is why the command failed; nil on success.
 	Err error
+	// TimedOut reports that the per-repository deadline killed it.
+	TimedOut bool
 }
 
 func runExecCommands(ctx context.Context, repoPaths []string, opts execOptions) ExecSummary {
@@ -256,7 +271,7 @@ func runExecCommands(ctx context.Context, repoPaths []string, opts execOptions) 
 	report := func(r execResult) {
 		mu.Lock()
 		defer mu.Unlock()
-		printExecText(r)
+		printExecText(r, opts.Timeout)
 		if r.Err != nil {
 			summary.Failed++
 		}
@@ -289,30 +304,48 @@ func execWorker(ctx context.Context, jobs <-chan string, opts execOptions, repor
 	}
 }
 
-// runExecOne runs the command in one repository.
+// execWaitDelay bounds how long a timed-out command's output may stay
+// open after it is killed, for a child that escaped the process group.
+const execWaitDelay = 2 * time.Second
+
+// runExecOne runs the command in one repository, under opts.Timeout when
+// one is set.
 func runExecOne(ctx context.Context, path string, opts execOptions) execResult {
+	repoCtx, cancel := ctx, context.CancelFunc(func() {})
+	if opts.Timeout > 0 {
+		repoCtx, cancel = context.WithTimeout(ctx, opts.Timeout)
+	}
+	defer cancel()
 	shell, shellFlag := execShell()
 
 	// #nosec G204,G702 -- exec intentionally runs the user-supplied command through the platform shell.
-	cmd := exec.CommandContext(ctx, shell, shellFlag, opts.Command)
+	cmd := exec.CommandContext(repoCtx, shell, shellFlag, opts.Command)
 	cmd.Dir = path
 	cmd.Env = os.Environ()
+	if opts.Timeout > 0 {
+		killExecProcessGroup(cmd)
+		cmd.WaitDelay = execWaitDelay
+	}
 
 	out := &cappedBuffer{limit: maxExecOutputBytes}
 	cmd.Stdout = out
 	cmd.Stderr = out
 	err := cmd.Run()
-	return execResult{Repo: filepath.Base(path), Output: out.String(), Err: err}
+	timedOut := err != nil && ctx.Err() == nil && errors.Is(repoCtx.Err(), context.DeadlineExceeded)
+	return execResult{Repo: filepath.Base(path), Output: out.String(), Err: err, TimedOut: timedOut}
 }
 
 // printExecText writes one result in the text format: a header naming
 // the repository, the captured output, and the failure if there was one.
-func printExecText(r execResult) {
+func printExecText(r execResult, timeout time.Duration) {
 	fmt.Printf("\n--- [%s] ---\n", r.Repo)
 	if r.Output != "" {
 		fmt.Print(r.Output)
 	}
-	if r.Err != nil {
+	switch {
+	case r.TimedOut:
+		fmt.Printf("Command timed out after %s\n", timeout)
+	case r.Err != nil:
 		fmt.Printf("Command failed: %v\n", r.Err)
 	}
 }
@@ -321,6 +354,7 @@ func init() {
 	execCmd.Flags().IntVarP(&execConcurrency, "concurrency", "c", 4, "number of concurrent operations")
 	execCmd.Flags().StringVar(&execLanguages, "languages", "", "comma-separated language filter")
 	execCmd.Flags().StringVar(&execExcludeLangs, "exclude-languages", "", "comma-separated language exclude filter")
+	execCmd.Flags().DurationVar(&execTimeout, "timeout", 0, "deadline per repository (0 to disable)")
 	execCmd.Flags().StringVar(&execVisibility, "visibility", "all", "filter repositories by visibility: all, public, private")
 	rootCmd.AddCommand(execCmd)
 }
