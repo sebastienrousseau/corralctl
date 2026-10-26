@@ -170,37 +170,14 @@ var (
 )
 
 func runMCP(cmd *cobra.Command, args []string) error {
-	root := mcpRoot
-	if root == "" {
-		root = baseDir
-	}
-	if root == "" {
-		root = defaultBaseDir()
-	}
-	abs, err := absMCPPath(root)
+	abs, err := resolveMCPRoot()
 	if err != nil {
-		return fmt.Errorf("resolving root %q: %w", root, err)
-	}
-	info, err := statMCP(abs)
-	if err != nil {
-		return fmt.Errorf("root %q is not accessible: %w", abs, err)
-	}
-	if !info.IsDir() {
-		return fmt.Errorf("root %q is not a directory", abs)
+		return err
 	}
 
 	kind, addr, err := resolveTransport(mcpTransport, mcpHTTP, mcpHost, mcpPort)
 	if err != nil {
 		return err
-	}
-	if kind != transportStdio && !mcpAllowRemote && !loopbackOnly(addr) {
-		return fmt.Errorf(
-			"listening on %s would accept connections from other machines, and this server "+
-				"has no authentication: it exposes every repository under %s, and with "+
-				"mutations enabled it can change them.\n\n"+
-				"Use a loopback address (--host 127.0.0.1 or --host localhost), or pass "+
-				"--allow-remote if you have put your own authentication in front of it",
-			addr, abs)
 	}
 
 	token := mcpToken
@@ -208,12 +185,9 @@ func runMCP(cmd *cobra.Command, args []string) error {
 		token = os.Getenv("CORRAL_MCP_TOKEN")
 	}
 
-	metricsAddr := mcpMetricsAddr
-	if mcpMetricsPort > 0 && metricsAddr == "" {
-		metricsAddr = net.JoinHostPort("127.0.0.1", strconv.Itoa(mcpMetricsPort))
-	}
-	if metricsAddr != "" && !mcpAllowRemote && !loopbackOnly(metricsAddr) {
-		return fmt.Errorf("metrics address %s must be on loopback (use --allow-remote to override)", metricsAddr)
+	metricsAddr := resolveMetricsAddr()
+	if err := checkBinds(kind, addr, metricsAddr, abs); err != nil {
+		return err
 	}
 
 	srv, err := mcpNewServer(mcp.ServerOptions{
@@ -235,9 +209,69 @@ func runMCP(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("constructing mcp server: %w", err)
 	}
 
-	// Startup banner on stderr — stdout is the protocol stream.
-	// The audit-log path is surfaced so an operator setting up the flow
-	// can immediately grep it for the first mutation.
+	printMCPBanner(srv, metricsAddr)
+	if err := serveMCP(cmd, srv, kind, addr); err != nil {
+		return fmt.Errorf("mcp server: %w", err)
+	}
+	return nil
+}
+
+// checkBinds refuses a listener on a routable address unless the operator
+// asked for one with --allow-remote.
+func checkBinds(kind transportKind, addr, metricsAddr, abs string) error {
+	if kind != transportStdio && !mcpAllowRemote && !loopbackOnly(addr) {
+		return fmt.Errorf(
+			"listening on %s would accept connections from other machines, and this server "+
+				"has no authentication: it exposes every repository under %s, and with "+
+				"mutations enabled it can change them.\n\n"+
+				"Use a loopback address (--host 127.0.0.1 or --host localhost), or pass "+
+				"--allow-remote if you have put your own authentication in front of it",
+			addr, abs)
+	}
+	if metricsAddr != "" && !mcpAllowRemote && !loopbackOnly(metricsAddr) {
+		return fmt.Errorf("metrics address %s must be on loopback (use --allow-remote to override)", metricsAddr)
+	}
+	return nil
+}
+
+// resolveMCPRoot picks the directory the server sandboxes itself to
+// (--root, then --base-dir, then the default) and checks that it is an
+// accessible directory.
+func resolveMCPRoot() (string, error) {
+	root := mcpRoot
+	if root == "" {
+		root = baseDir
+	}
+	if root == "" {
+		root = defaultBaseDir()
+	}
+	abs, err := absMCPPath(root)
+	if err != nil {
+		return "", fmt.Errorf("resolving root %q: %w", root, err)
+	}
+	info, err := statMCP(abs)
+	if err != nil {
+		return "", fmt.Errorf("root %q is not accessible: %w", abs, err)
+	}
+	if !info.IsDir() {
+		return "", fmt.Errorf("root %q is not a directory", abs)
+	}
+	return abs, nil
+}
+
+// resolveMetricsAddr folds --metrics-addr and --metrics-port into one
+// address; --metrics-port alone binds 127.0.0.1.
+func resolveMetricsAddr() string {
+	if mcpMetricsPort > 0 && mcpMetricsAddr == "" {
+		return net.JoinHostPort("127.0.0.1", strconv.Itoa(mcpMetricsPort))
+	}
+	return mcpMetricsAddr
+}
+
+// printMCPBanner writes the startup lines to stderr; stdout is the
+// protocol stream. The audit-log path is surfaced so an operator setting
+// up the flow can immediately grep it for the first mutation.
+func printMCPBanner(srv mcpServer, metricsAddr string) {
 	auditNote := "off"
 	if p := srv.AuditLogPath(); p != "" {
 		auditNote = p
@@ -257,24 +291,22 @@ func runMCP(cmd *cobra.Command, args []string) error {
 	if mcpHTTP != "" {
 		fmt.Fprintf(os.Stderr, "corral-mcp: --http is deprecated; use --transport streamable-http --host HOST --port PORT\n")
 	}
+}
 
-	var serveErr error
+// serveMCP runs the chosen transport until it stops.
+func serveMCP(cmd *cobra.Command, srv mcpServer, kind transportKind, addr string) error {
 	switch kind {
 	case transportStreamableHTTP:
 		fmt.Fprintf(os.Stderr, "corral-mcp listening on http://%s%s (streamable HTTP; protocol 2026-07-28 and 2025-11-25)\n",
 			addr, mcp.StreamableEndpoint)
-		serveErr = srv.ServeHTTP(cmdContext(cmd), addr)
+		return srv.ServeHTTP(cmdContext(cmd), addr)
 	case transportSSE:
 		fmt.Fprintf(os.Stderr, "corral-mcp listening on http://%s%s (legacy HTTP+SSE; protocol 2024-11-05)\n",
 			addr, mcp.SSEEndpoint)
-		serveErr = srv.ServeSSE(cmdContext(cmd), addr)
+		return srv.ServeSSE(cmdContext(cmd), addr)
 	default:
-		serveErr = srv.ServeStdio()
+		return srv.ServeStdio()
 	}
-	if serveErr != nil {
-		return fmt.Errorf("mcp server: %w", serveErr)
-	}
-	return nil
 }
 
 // transportKind is which of the three ways in the server was asked for.
