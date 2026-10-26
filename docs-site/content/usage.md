@@ -136,6 +136,10 @@ concurrently:
 corralctl exec "git status -s" --languages go,rust --visibility private
 ```
 
+The command line is interpreted by `/bin/sh -c` on Unix and `cmd.exe /C` on
+Windows, whatever `$SHELL` names, so it means the same thing for everyone. To
+use another shell, name it in the command: `corralctl exec "fish -c '...'"`.
+
 The same filtering flags apply, so you can scope a command to one ecosystem,
 one visibility, or both. `--dry-run` works here too, and lists the
 repositories a command would run against without running it.

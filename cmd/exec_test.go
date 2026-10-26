@@ -176,12 +176,23 @@ func TestFindLocalReposWalkErrorsAndTwoLevelLayout(t *testing.T) {
 	}
 }
 
-func TestRunExecCommandsCOMSPEC(t *testing.T) {
-	t.Setenv("SHELL", "")
-	t.Setenv("COMSPEC", "sh")
-	summary := runExecCommands(context.Background(), []string{t.TempDir()}, "echo hi", 1)
-	if summary.Failed != 1 {
-		t.Fatalf("COMSPEC command should fail with /c on Unix: %+v", summary)
+func TestExecShellPerPlatform(t *testing.T) {
+	oldGOOS := execGOOS
+	t.Cleanup(func() { execGOOS = oldGOOS })
+	t.Setenv("SHELL", "/usr/bin/fish")
+	t.Setenv("COMSPEC", `C:\Windows\System32\cmd.exe`)
+
+	execGOOS = "linux"
+	if shell, flag := execShell(); shell != "/bin/sh" || flag != "-c" {
+		t.Fatalf("unix shell = %q %q", shell, flag)
+	}
+	execGOOS = "windows"
+	if shell, flag := execShell(); shell != `C:\Windows\System32\cmd.exe` || flag != "/C" {
+		t.Fatalf("windows shell with COMSPEC = %q %q", shell, flag)
+	}
+	t.Setenv("COMSPEC", "")
+	if shell, flag := execShell(); shell != "cmd.exe" || flag != "/C" {
+		t.Fatalf("windows shell without COMSPEC = %q %q", shell, flag)
 	}
 }
 
@@ -403,5 +414,23 @@ func TestExecCmdScanError(t *testing.T) {
 	})
 	if !strings.Contains(out, "No matching repositories found") {
 		t.Errorf("expected no-match message for file baseDir, got %q", out)
+	}
+}
+
+// TestRunExecCommandsIgnoresUserShell pins D-01: the command line is
+// interpreted by /bin/sh on Unix whatever $SHELL names, so the same
+// command means the same thing under fish, nushell or no shell at all.
+func TestRunExecCommandsIgnoresUserShell(t *testing.T) {
+	if _, err := os.Stat("/bin/sh"); err != nil {
+		t.Skip("/bin/sh not available")
+	}
+	t.Setenv("SHELL", filepath.Join(t.TempDir(), "fish-that-does-not-exist"))
+	t.Setenv("COMSPEC", "")
+	var summary ExecSummary
+	out := captureStdout(t, func() {
+		summary = runExecCommands(context.Background(), []string{t.TempDir()}, "test 1 = 1 && echo posix", 1)
+	})
+	if summary.Failed != 0 || !strings.Contains(out, "posix") {
+		t.Fatalf("exec used $SHELL instead of /bin/sh: %+v %q", summary, out)
 	}
 }

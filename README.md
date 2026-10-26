@@ -398,6 +398,9 @@ Execute arbitrary shell commands concurrently across your organized repositories
 ./corralctl exec "git status -s" --languages go,rust --visibility private
 ```
 
+The command runs through `/bin/sh -c` on Unix and `cmd.exe /C` on Windows,
+whatever `$SHELL` names. To use another shell, name it in the command.
+
 ---
 
 ## Mirror to other forges

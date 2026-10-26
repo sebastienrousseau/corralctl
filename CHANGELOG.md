@@ -6,6 +6,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **`exec` runs the command through `/bin/sh -c`, not `$SHELL -c`**
+  (behaviour change). The same command line meant different things under
+  fish or nushell, and a `$SHELL` that did not exist failed every
+  repository. On Windows it runs through `cmd.exe /C` (or `%COMSPEC%`). To
+  use another shell, name it in the command.
+
 ## [0.0.53] - 2026-10-25
 
 ### Security

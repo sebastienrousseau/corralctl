@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 
@@ -25,13 +26,19 @@ var (
 	findRepos        = findLocalRepos
 	execBatch        = runExecCommands
 	walkLocalRepos   = filepath.WalkDir
+	execGOOS         = runtime.GOOS
 )
 
 var execCmd = &cobra.Command{
 	Use:   "exec <command>",
 	Short: "Execute a command across all organised local repositories",
-	Long:  `Runs a shell command concurrently across all repositories found under the base directory.`,
-	Args:  cobra.MinimumNArgs(1),
+	Long: `Runs a shell command concurrently across all repositories found under the base directory.
+
+The command line is interpreted by /bin/sh -c on Unix and by cmd.exe /C
+(or %COMSPEC%) on Windows, whatever $SHELL names, so the same command
+means the same thing for every user. To use another shell, name it in
+the command: corralctl exec "fish -c 'string upper (basename $PWD)'".`,
+	Args: cobra.MinimumNArgs(1),
 	PreRunE: func(cmd *cobra.Command, args []string) error {
 		if execConcurrency < 1 {
 			return fmt.Errorf("--concurrency must be >= 1")
@@ -203,6 +210,21 @@ func toLookupSet(values []string) map[string]struct{} {
 	return out
 }
 
+// execShell names the interpreter for the command line: /bin/sh on Unix,
+// and cmd.exe (or %COMSPEC%) on Windows. $SHELL is deliberately not
+// consulted, so a command means the same thing for every user; a
+// fish or nushell user who wants their own shell writes it into the
+// command, as in `corralctl exec "fish -c '...'"`.
+func execShell() (shell, flag string) {
+	if execGOOS != "windows" {
+		return "/bin/sh", "-c"
+	}
+	if comspec := os.Getenv("COMSPEC"); comspec != "" {
+		return comspec, "/C"
+	}
+	return "cmd.exe", "/C"
+}
+
 func runExecCommands(ctx context.Context, repoPaths []string, commandStr string, concurrency int) ExecSummary {
 	jobs := make(chan string, len(repoPaths))
 	for _, p := range repoPaths {
@@ -229,16 +251,9 @@ func runExecCommands(ctx context.Context, repoPaths []string, commandStr string,
 					}
 					repoName := filepath.Base(path)
 
-					shell := "sh"
-					shellFlag := "-c"
-					if os.Getenv("SHELL") != "" {
-						shell = os.Getenv("SHELL")
-					} else if os.Getenv("COMSPEC") != "" {
-						shell = os.Getenv("COMSPEC")
-						shellFlag = "/c"
-					}
+					shell, shellFlag := execShell()
 
-					// #nosec G204,G702 -- exec intentionally runs the user-supplied command via their configured shell.
+					// #nosec G204,G702 -- exec intentionally runs the user-supplied command through the platform shell.
 					cmd := exec.CommandContext(ctx, shell, shellFlag, commandStr)
 					cmd.Dir = path
 					cmd.Env = os.Environ()
