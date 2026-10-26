@@ -5,13 +5,10 @@ package cmd
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/url"
-	"os"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/sebastienrousseau/corralctl/internal/diag"
@@ -245,57 +242,18 @@ func tokenHint(name string) string {
 	}
 }
 
-// syncPrinter renders results in the selected output format. Results
-// arrive from worker goroutines, so writes are serialised.
-type syncPrinter struct {
-	format  string
-	mu      sync.Mutex
-	results []mirror.Result
+// newSyncPrinter renders mirror results in the selected output format.
+func newSyncPrinter(format string) *resultPrinter[mirror.Result, mirror.Summary] {
+	return newResultPrinter[mirror.Result, mirror.Summary](format, printSyncText)
 }
 
-func newSyncPrinter(format string) *syncPrinter {
-	return &syncPrinter{format: format}
-}
-
-func (p *syncPrinter) report(r mirror.Result) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	switch p.format {
-	case string(engine.OutputNDJSON):
-		_ = writeNDJSON(os.Stdout, r)
-	case string(engine.OutputJSON):
-		p.results = append(p.results, r)
-	default:
-		repo := r.Repo
-		if repo == "" {
-			repo = "-"
-		}
-		fmt.Printf("%-8s %-10s %-32s %s\n", r.Action, r.Destination, repo, r.Message)
+// printSyncText writes one mirror result as an aligned text line.
+func printSyncText(r mirror.Result) {
+	repo := r.Repo
+	if repo == "" {
+		repo = "-"
 	}
-}
-
-// finish writes the JSON document, which needs every result and the
-// summary, and is a no-op for the streaming formats.
-func (p *syncPrinter) finish(summary mirror.Summary) error {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	if p.format != string(engine.OutputJSON) {
-		return nil
-	}
-	if p.results == nil {
-		p.results = []mirror.Result{}
-	}
-	return writeJSON(os.Stdout, struct {
-		Results []mirror.Result `json:"results"`
-		Summary mirror.Summary  `json:"summary"`
-	}{p.results, summary})
-}
-
-// writeNDJSON writes one value as a single JSON line.
-func writeNDJSON(target *os.File, value any) error {
-	encoder := json.NewEncoder(target)
-	encoder.SetEscapeHTML(false)
-	return encoder.Encode(value)
+	fmt.Printf("%-8s %-10s %-32s %s\n", r.Action, r.Destination, repo, r.Message)
 }
 
 func init() {
