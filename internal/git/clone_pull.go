@@ -5,7 +5,6 @@ package git
 
 import (
 	"context"
-	"encoding/base64"
 	"fmt"
 	"os"
 	"os/exec"
@@ -16,33 +15,36 @@ import (
 	"github.com/sebastienrousseau/corralctl/internal/diag"
 )
 
-// TokenProvider, when set, returns a GitHub token used to authenticate HTTPS
-// operations against github.com so private repositories can be cloned and
-// pulled non-interactively. The token is supplied to git via GIT_CONFIG_*
-// environment variables (an http extraheader scoped to https://github.com/), so
-// it is never written to a repository's .git/config or exposed in the process
-// argument list.
-var TokenProvider func() string
+// CloneCredential, when set, returns the credential HTTPS clones and pulls
+// present, and the origin it is scoped to ("https://gitlab.com/"), so
+// private repositories on any forge can be cloned non-interactively. A nil
+// credential means none.
+//
+// The credential reaches git as an http.<origin>.extraheader in GIT_CONFIG_*
+// environment variables, the same mechanism PushMirror uses: it is never
+// written to a repository's .git/config, never part of a URL, and never in
+// the process argument list. Scoping it to one origin means a clone URL
+// that points at any other host is sent nothing.
+var CloneCredential func() (origin string, cred *PushCredential)
 
 var updateSubmodulesFn = updateSubmodules
 
-// authEnv returns the environment variables that inject an Authorization header
-// for github.com HTTPS requests, or nil when no token is available. The header
-// is scoped to https://github.com/, so it is harmless for SSH remotes.
+// authEnv returns the environment variables that inject an Authorization
+// header for requests to the credential's origin, or nil when there is no
+// credential or its origin is not HTTPS. SSH remotes are unaffected.
 func authEnv() []string {
-	if TokenProvider == nil {
+	if CloneCredential == nil {
 		return nil
 	}
-	tok := TokenProvider()
-	if tok == "" {
+	origin, cred := CloneCredential()
+	if cred == nil || cred.Secret == "" {
 		return nil
 	}
-	cred := base64.StdEncoding.EncodeToString([]byte("x-access-token:" + tok))
-	return []string{
-		"GIT_CONFIG_COUNT=1",
-		"GIT_CONFIG_KEY_0=http.https://github.com/.extraheader",
-		"GIT_CONFIG_VALUE_0=Authorization: Basic " + cred,
+	env, err := pushAuthEnv(origin, cred)
+	if err != nil {
+		return nil
 	}
+	return env
 }
 
 // nonInteractiveEnv returns the environment variables that force git into

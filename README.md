@@ -642,6 +642,12 @@ tooling already uses: `GITLAB_TOKEN` (or `CI_JOB_TOKEN`), and
 GitHub keeps its existing ladder — explicit token, then the environment,
 then the `gh` CLI.
 
+The same token authenticates HTTPS clones and pulls of private
+repositories, on every forge, presented the way each forge expects it
+(`oauth2` for GitLab, `x-token-auth` for Bitbucket, the token as the
+password for the Gitea family). It is sent only to the forge's own HTTPS
+origin, never over plain `http://`.
+
 `--forge` applies to everything that talks to a hosting service:
 `corralctl <owner>`, `plan`, `profile` and `prune`. Orphan detection and
 `prune` compare against the forge you listed from, and scope by host — a
@@ -1016,9 +1022,10 @@ own machine, so the threat model is about *limiting blast radius*, not
 crossing a privilege boundary. Full detail in
 [docs/security-model.md](docs/security-model.md).
 
-- **Credentials never reach `argv` or `.git/config`.** The GitHub token is
-  handed to git as an `http.extraheader` scoped to `https://github.com/`,
-  so a submodule on another host cannot see it. Clone errors deliberately
+- **Credentials never reach `argv` or `.git/config`.** The forge's token is
+  handed to git as an `http.extraheader` scoped to that forge's HTTPS origin
+  (`https://github.com/`, `https://gitlab.com/`, your instance), so a
+  submodule on another host cannot see it. Clone errors deliberately
   omit their arguments so a URL-embedded credential cannot reach a log.
 - **Git runs non-interactively, always.** `GIT_TERMINAL_PROMPT=0` and
   friends, so an unattended run fails rather than hanging on a prompt.

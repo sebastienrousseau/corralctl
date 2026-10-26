@@ -1357,11 +1357,12 @@ func TestRunWiresGitTokenProvider(t *testing.T) {
 	defer func() { _ = os.RemoveAll(baseDir) }()
 
 	Run(context.Background(), defaultRunOptions(baseDir))
-	if git.TokenProvider == nil {
-		t.Fatal("expected git.TokenProvider to be wired after Run")
+	if git.CloneCredential == nil {
+		t.Fatal("expected git.CloneCredential to be wired after Run")
 	}
-	if got := git.TokenProvider(); got != "tok-xyz" {
-		t.Errorf("git.TokenProvider() = %q, want tok-xyz", got)
+	origin, cred := git.CloneCredential()
+	if origin != "https://github.com/" || cred == nil || cred.Username != "x-access-token" || cred.Secret != "tok-xyz" {
+		t.Errorf("git.CloneCredential() = %q, %+v; want github.com, x-access-token:tok-xyz", origin, cred)
 	}
 }
 

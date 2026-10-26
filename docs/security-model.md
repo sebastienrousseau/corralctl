@@ -233,8 +233,8 @@ origin guard in real and dry runs and the visibility refusal;
 `http.<scheme>://<host>/.extraheader` config entry in the process
 environment, scoped to that destination's origin, and is never written to
 `.git/config` or placed in a URL. The push path deliberately does not use
-the helper that attaches the GitHub token to every git invocation, so a push
-to GitLab carries the GitLab credential and nothing else.
+the helper that attaches the clone credential to every clone and pull, so a
+push to GitLab carries the GitLab credential and nothing else.
 
 **Evidence.** `pushAuthEnv` in `internal/git/mirror.go`, and
 `TestPushMirrorScopesTheCredential`.

@@ -8,6 +8,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Private HTTPS clones work on every forge, not only GitHub.** git was
+  given only the GitHub token, scoped to `https://github.com/`, so a
+  private repository on GitLab, Gitea, Forgejo, Codeberg, Bitbucket or a
+  GitHub Enterprise Server was cloned anonymously and failed unless a git
+  credential helper was configured. Clones and pulls now present the
+  listing forge's token with that forge's username convention, scoped to
+  its HTTPS origin and never sent over plain `http://`.
+
 - **`sync` and `adopt` use the Enterprise Server's own token.**
   `corralctl sync --to github:<owner>@<url>` and `corralctl adopt --forge
   github --forge-url <url>` resolved the github.com credential
