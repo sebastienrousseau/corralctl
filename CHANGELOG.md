@@ -20,6 +20,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **A workspace scan that runs out of file descriptors is an error.** It used
   to skip the directory it failed on, and with it every repository beneath,
   and return what was left as a complete index.
+- **The watcher ignores events that cannot change the workspace index.**
+  Every event dropped the whole index and, while symbol tools were in use,
+  started a warm pass, including `git status` rewriting `.git/index`. Inside a
+  `.git` directory only `config`, `HEAD` and the corral state file now count,
+  permission-only changes are ignored, and a file in a clone's working tree
+  never counts.
 
 ## [0.0.53] - 2026-10-25
 

@@ -148,6 +148,9 @@ index's five-second expiry. It watches only what that index is built from: the
 layout directories down to the scan depth and each clone's `.git` directory.
 It does not watch a clone's working tree, hidden directories, or dependency and
 build trees such as `node_modules`, `vendor` and `target`.
+Inside a `.git` directory only `config`, `HEAD` and the corral state file
+count, so git's own bookkeeping (`git status` rewriting `.git/index`, a fetch
+writing `FETCH_HEAD`) does not drop the index.
 
 On macOS and the BSDs every watched directory, and every entry in it, holds a
 file descriptor, so the watcher uses at most half of the process's open-file

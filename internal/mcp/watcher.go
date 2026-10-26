@@ -344,8 +344,8 @@ func (ww *workspaceWatcher) run(ctx context.Context) {
 	}
 }
 
-// handleEvent watches a directory that was just created and (re)arms the
-// debounce timer.
+// handleEvent watches a directory that was just created and, if the event
+// can change the workspace index, (re)arms the debounce timer.
 func (ww *workspaceWatcher) handleEvent(event fsnotify.Event) {
 	if event.Op&fsnotify.Create != 0 {
 		if info, err := os.Stat(event.Name); err == nil && info.IsDir() {
@@ -353,7 +353,41 @@ func (ww *workspaceWatcher) handleEvent(event fsnotify.Event) {
 			ww.reg.warnIfDegraded()
 		}
 	}
+	if !ww.relevant(event) {
+		return
+	}
 	ww.arm()
+}
+
+// relevant reports whether an event can change what the workspace index
+// holds. Everything else would drop the index (and possibly start a warm
+// pass) for nothing: git rewrites .git/index on a plain `git status`, which
+// the server itself runs, and a fetch rewrites FETCH_HEAD.
+func (ww *workspaceWatcher) relevant(event fsnotify.Event) bool {
+	name := filepath.Base(event.Name)
+	switch {
+	case event.Op == fsnotify.Chmod:
+		// Permission and timestamp changes; fsnotify itself advises
+		// ignoring them.
+		return false
+	case name == ".git":
+		// A clone appearing or disappearing.
+		return true
+	case filepath.Base(filepath.Dir(event.Name)) == ".git":
+		return gitFileRelevant(name)
+	default:
+		return !ww.reg.insideClone(event.Name)
+	}
+}
+
+// gitFileRelevant reports the entries of a .git directory the index reads
+// (the remote in config, the sidecar state) or that mark a branch switch.
+func gitFileRelevant(name string) bool {
+	switch name {
+	case "config", "HEAD", stateFileName:
+		return true
+	}
+	return false
 }
 
 // arm restarts the debounce window.
