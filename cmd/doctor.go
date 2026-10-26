@@ -50,6 +50,7 @@ type DoctorReport struct {
 	ByLanguage      map[string]int        `json:"by_language"`
 	ByVisibility    map[string]int        `json:"by_visibility"`
 	DirtyRepos      []DoctorRepoIssue     `json:"dirty_repos,omitempty"`
+	StagedDeletions []string              `json:"staged_deletions,omitempty"`
 	UnpushedRepos   []DoctorRepoIssue     `json:"unpushed_repos,omitempty"`
 	Worktrees       []DoctorWorktreeEntry `json:"worktrees,omitempty"`
 	PrunedWorktrees int                   `json:"pruned_worktrees,omitempty"`
@@ -182,6 +183,10 @@ func collectDoctorReport(ctx context.Context, root string) (*DoctorReport, error
 	excludePatterns := parseExcludePatterns(doctorExclude)
 
 	for _, repo := range idx.Repos {
+		if gitutil.IsDeletionStaging(repo.Path) {
+			report.StagedDeletions = append(report.StagedDeletions, repo.Path)
+			continue
+		}
 		if isRepoExcluded(repo, excludePatterns) {
 			report.ExcludedRepos++
 			continue
@@ -189,6 +194,10 @@ func collectDoctorReport(ctx context.Context, root string) (*DoctorReport, error
 		auditDoctorRepo(ctx, repo, report)
 	}
 
+	// A clone staged for deletion is not a repository of the workspace;
+	// it is listed on its own and never removed here, since a delete that
+	// stopped midway may have stopped for a reason.
+	report.TotalRepos -= len(report.StagedDeletions)
 	report.TotalSize = formatHumanSize(report.TotalSizeBytes)
 
 	rules, err := loadDoctorRules(root, doctorConfigFile)
@@ -197,7 +206,7 @@ func collectDoctorReport(ctx context.Context, root string) (*DoctorReport, error
 	}
 	evaluateDoctorRules(report, rules, idx.Repos)
 
-	report.Healthy = len(report.DirtyRepos) == 0 && len(report.UnpushedRepos) == 0 && len(report.Violations) == 0
+	report.Healthy = doctorIssueCount(report) == 0
 	return report, nil
 }
 
@@ -233,6 +242,7 @@ func printDoctorText(r *DoctorReport) {
 	printDoctorCounts("Repositories by Forge:", r.ByForge)
 	printDoctorCounts("Repositories by Ecosystem:", r.ByLanguage)
 	printDoctorHygiene(r)
+	printDoctorStaged(r)
 	printDoctorWorktrees(r)
 	if r.PrunedWorktrees > 0 {
 		fmt.Printf("Worktree Cleanup:\n  Pruned: %d stale worktrees\n\n", r.PrunedWorktrees)
@@ -331,8 +341,26 @@ func printDoctorStatus(r *DoctorReport) {
 		fmt.Printf("Status: OK (all repositories clean and synced)\n")
 		return
 	}
-	issues := len(r.DirtyRepos) + len(r.UnpushedRepos) + len(r.Violations)
-	fmt.Printf("Status: WARNING (attention required for %d issues)\n", issues)
+	fmt.Printf("Status: WARNING (attention required for %d issues)\n", doctorIssueCount(r))
+}
+
+// doctorIssueCount is what keeps a report from being healthy.
+func doctorIssueCount(r *DoctorReport) int {
+	return len(r.DirtyRepos) + len(r.UnpushedRepos) + len(r.Violations) + len(r.StagedDeletions)
+}
+
+// printDoctorStaged lists directories a delete renamed aside and never
+// removed. They are reported, never removed: each may be the only copy of
+// what it holds.
+func printDoctorStaged(r *DoctorReport) {
+	if len(r.StagedDeletions) == 0 {
+		return
+	}
+	fmt.Printf("Interrupted Deletions: %d left by a delete that did not finish\n", len(r.StagedDeletions))
+	for _, p := range r.StagedDeletions {
+		fmt.Printf("  - %s\n", p)
+	}
+	fmt.Printf("  corralctl does not remove these: inspect each, then delete it or rename it back.\n\n")
 }
 
 func sortedKeys(m map[string]int) []string {

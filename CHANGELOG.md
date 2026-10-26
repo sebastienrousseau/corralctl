@@ -42,6 +42,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   no upstream. Push the local commits, or finish the operation, then sync.
   This is a behaviour change: those clones used to be rebased.
 
+- **An interrupted delete is reported, and never mirrored.**
+  `corral_delete_repo` renames a clone to `.corral-deleting-<name>-<hex>`
+  before removing it, so a crash in between leaves that directory, `.git`
+  included. `corralctl sync` took it for a repository and would have created
+  and pushed a destination repository under that name, and `doctor` counted
+  it as a healthy clone. The mirror walk now skips it, and `doctor` lists it
+  under "Interrupted Deletions" (`staged_deletions` in JSON) and reports the
+  workspace as needing attention. Neither removes it.
+
 - **Mirror errors no longer print the git command line.** A failing
   `remote add` or `remote set-url` reported its full argv, URL included, in
   terminal output and `--output json` results. The message now names the

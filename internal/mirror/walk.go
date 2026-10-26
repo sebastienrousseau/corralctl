@@ -63,7 +63,10 @@ func (w *walker) visit(path string, d fs.DirEntry, err error) error {
 	if !d.IsDir() {
 		return nil
 	}
-	if d.Name() == ".git" {
+	// A clone staged for deletion still holds .git; a crash between the
+	// rename and the removal leaves it, and mirroring it would create a
+	// destination repository under the staging name. doctor reports it.
+	if d.Name() == ".git" || git.IsDeletionStaging(path) {
 		return fs.SkipDir
 	}
 	if path == w.baseDir || !isRepository(path) {

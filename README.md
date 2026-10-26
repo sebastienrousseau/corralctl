@@ -845,7 +845,9 @@ corralctl adopt ~/Projects --forge github --owner sebastienrousseau
 ```
 
 `status` inventories local clones, `doctor` audits workspace hygiene, worktrees,
-disk budget, exclusions, and Finder tags, `plan` emits a non-mutating reconciliation,
+disk budget, exclusions, and Finder tags, and lists any `.corral-deleting-*`
+directory an interrupted `corral_delete_repo` left behind (it never removes
+one; inspect it, then delete it or rename it back), `plan` emits a non-mutating reconciliation,
 `prune` removes only upstream-orphaned clones that pass the unpublished-work
 checks, and `adopt` discovers untracked local repositories to relocate and link
 to remote forges. JSON output is available on each command.
