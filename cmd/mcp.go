@@ -35,6 +35,7 @@ var (
 	mcpMetricsAddr                string
 	mcpMetricsPort                int
 	mcpTraceFile                  string
+	mcpForgeURLs                  []string
 )
 
 // mcpCmd registers the `corralctl mcp` subcommand. It runs a Model
@@ -230,6 +231,7 @@ func runMCP(cmd *cobra.Command, args []string) error {
 		WatchWorkspace:             mcpWatch,
 		MetricsAddr:                metricsAddr,
 		TraceLogPath:               mcpTraceFile,
+		ForgeURLs:                  mcpForgeURLs,
 	})
 	if err != nil {
 		return fmt.Errorf("constructing mcp server: %w", err)
@@ -363,6 +365,8 @@ func init() {
 		"comma-separated extra file extensions the file resource may serve (e.g. \"tpl,hbs\"). Cannot re-enable credential files")
 	mcpCmd.Flags().StringVar(&mcpSymbolCache, "symbol-cache", "",
 		"where to persist the symbol index between runs (defaults to $XDG_CACHE_HOME/corral/symbols; \"off\" disables it)")
+	mcpCmd.Flags().StringArrayVar(&mcpForgeURLs, "forge-url", nil,
+		"self-hosted forge instance corral_adopt_repo may target (repeatable). Without it, only each forge's public instance is accepted")
 	mcpCmd.Flags().StringVar(&mcpAuditLog, "audit-log", "", "path to the mutation audit log (defaults to $XDG_STATE_HOME/corral/mutations.log or ~/.local/state/corral/mutations.log)")
 	mcpCmd.Flags().StringVar(&mcpToken, "token", "",
 		"bearer token required for HTTP and SSE requests (or CORRAL_MCP_TOKEN env var)")
