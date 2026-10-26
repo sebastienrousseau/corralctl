@@ -22,6 +22,11 @@ Nothing merges without these. All of them are reproducible locally.
 | SBOM / `server.json` / CHANGELOG agree | `make sbom-check` |
 | Examples still compile | `make example-check` |
 | Install tree is correct | `make install-smoke` |
+| Complexity ceilings, baseline only shrinks | `make complexity-check` |
+
+Never edit `scripts/complexity_baseline.tsv` to make the complexity gate
+pass. It is regenerated only by `make complexity-update`, which records
+improvements and refuses while anything has got worse.
 
 Coverage is not negotiable downward. If a new branch is hard to reach, add
 a package-level seam (`var gitClone = git.Clone`) and stub it — that is the

@@ -14,7 +14,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Auto-merge now covers only GitHub Actions and Docker digest updates; every
   Go module update waits for a person.
 
+### Added
+
+- **A complexity gate with a shrinking baseline.** `make complexity-check`,
+  part of `make check` and run in CI's Lint job, holds every function to
+  cyclomatic 10, cognitive 15, Halstead difficulty 30 and 60 lines of code,
+  and every file to 500 lines of code. The 282 existing offenders are
+  recorded in `scripts/complexity_baseline.tsv`; a new or worse one fails,
+  and so does an improvement the baseline has not recorded, so the backlog
+  can only shrink. gocyclo v0.6.0 and gocognit v1.3.0 are pinned in the
+  script.
+
 ### Changed
+
+- **`internal/search`'s per-file search is split into helpers.** `searchFile`
+  was the worst offender in the package (cognitive 29, cyclomatic 19). It is
+  now within every ceiling, with table tests that pin its results for every
+  input shape it branches on. Search results are unchanged.
 
 - **The build-from-source prerequisites name the real toolchain floor.**
   README and CONTRIBUTING said "Go 1.26+", which admits 1.26.0 to 1.26.9

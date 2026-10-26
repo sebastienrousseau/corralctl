@@ -38,7 +38,7 @@ LDFLAGS = -s -w \
 
 .PHONY: all build docs install uninstall install-smoke test test-race vet lint \
         clean format sbom-check sbom-fix example-check doc-check spdx-check pkg-check eval staticcheck race-hard bench claims-check \
-        docs-lint help demo vuln-check check
+        docs-lint help demo vuln-check check complexity-check complexity-update
 
 VHS ?= $(shell which vhs 2>/dev/null || echo /opt/homebrew/bin/vhs)
 
@@ -48,7 +48,7 @@ demo: build
 
 
 ## check: run all static analysis, security, documentation, and integrity gates
-check: format vet staticcheck vuln-check spdx-check doc-check sbom-check pkg-check claims-check example-check test-race
+check: format vet staticcheck vuln-check spdx-check doc-check sbom-check pkg-check claims-check example-check complexity-check test-race
 
 all: check build
 
@@ -202,6 +202,24 @@ eval:
 # across twelve packages.
 claims-check:
 	go run scripts/claims_check.go
+
+## complexity-check: hold functions and files to the complexity ceilings
+#
+# Cyclomatic 10, cognitive 15, Halstead difficulty 30, 60 lines of code per
+# function and 500 per file. Code that was over a ceiling before the gate
+# existed is listed in scripts/complexity_baseline.tsv, which may only
+# shrink: a new offender or a worse one fails, and so does an improvement
+# the baseline has not recorded. gocyclo and gocognit versions are pinned
+# in the script.
+complexity-check:
+	go run scripts/complexity_check.go
+
+## complexity-update: record improvements in the complexity baseline
+#
+# Refuses while anything has got worse, so it can only lower or remove
+# entries.
+complexity-update:
+	go run scripts/complexity_check.go -update
 
 ## pkg-check: verify pkg/ documents every distribution format built
 pkg-check:

@@ -32,6 +32,25 @@ var openSearchFile = func(root, rel string) (*os.File, error) {
 // searchFile reads one file and returns the lines matching m. It reads
 // through safefs, so a symlink is never followed.
 func searchFile(root, rel string, m *Matcher, buf *fileBuffers) (hits []Hit, more bool) {
+	data, ok := readSearchable(root, rel, buf)
+	if !ok {
+		return nil, false
+	}
+	fold := m.CanFoldASCII() && !NeedsUnicodeFold(data)
+	if !mayMatch(m, data, fold) {
+		return nil, false
+	}
+	return matchLines(rel, data, m, fold)
+}
+
+// binarySniffBytes is how much of a file is checked for a NUL byte before
+// it is treated as binary and skipped.
+const binarySniffBytes = 8000
+
+// readSearchable reads root/rel into buf's scratch, keeping the scratch
+// if the read had to grow it. It reports false for a file that cannot be
+// opened or read, or that looks binary.
+func readSearchable(root, rel string, buf *fileBuffers) ([]byte, bool) {
 	f, err := openSearchFile(root, rel)
 	if err != nil {
 		return nil, false
@@ -45,51 +64,34 @@ func searchFile(root, rel string, m *Matcher, buf *fileBuffers) (hits []Hit, mor
 	if readErr != nil {
 		return nil, false
 	}
+	head := data[:min(len(data), binarySniffBytes)]
+	return data, bytes.IndexByte(head, 0) < 0
+}
 
-	head := data
-	if len(head) > 8000 {
-		head = head[:8000]
+// mayMatch is the whole-file prefilter: false only when m cannot match
+// anywhere in data, so the per-line scan can be skipped.
+func mayMatch(m *Matcher, data []byte, fold bool) bool {
+	if !prefilterEnabled || !m.CanPrefilter() {
+		return true
 	}
-	if bytes.IndexByte(head, 0) >= 0 {
-		return nil, false
+	if fold {
+		return m.containsFold(data)
 	}
+	return m.MatchAny(data)
+}
 
-	fold := m.CanFoldASCII() && !NeedsUnicodeFold(data)
-
-	if prefilterEnabled && m.CanPrefilter() {
-		hit := false
-		if fold {
-			hit = m.containsFold(data)
-		} else {
-			hit = m.MatchAny(data)
-		}
-		if !hit {
-			return nil, false
-		}
-	}
-
+// matchLines returns the first match on each line of data, stopping with
+// more set at an over-long line or at m's hit cap.
+func matchLines(rel string, data []byte, m *Matcher, fold bool) (hits []Hit, more bool) {
 	line := 0
-	rest := data
-	for len(rest) > 0 {
+	for rest := data; len(rest) > 0; {
 		var raw []byte
-		if i := bytes.IndexByte(rest, '\n'); i >= 0 {
-			raw, rest = rest[:i], rest[i+1:]
-		} else {
-			raw, rest = rest, nil
-		}
-		if n := len(raw); n > 0 && raw[n-1] == '\r' {
-			raw = raw[:n-1]
-		}
+		raw, rest = nextLine(rest)
 		line++
 		if len(raw) > maxLineBytes {
 			return hits, true
 		}
-		var col int
-		if fold {
-			col = m.indexFold(raw)
-		} else {
-			col = m.MatchBytes(raw)
-		}
+		col := matchLine(m, raw, fold)
 		if col < 0 {
 			continue
 		}
@@ -104,6 +106,27 @@ func searchFile(root, rel string, m *Matcher, buf *fileBuffers) (hits []Hit, mor
 		}
 	}
 	return hits, false
+}
+
+// nextLine splits the first line off data, without its newline or a
+// trailing carriage return.
+func nextLine(data []byte) (line, rest []byte) {
+	line = data
+	if i := bytes.IndexByte(data, '\n'); i >= 0 {
+		line, rest = data[:i], data[i+1:]
+	}
+	if n := len(line); n > 0 && line[n-1] == '\r' {
+		line = line[:n-1]
+	}
+	return line, rest
+}
+
+// matchLine returns the byte offset of m's first match in raw, or -1.
+func matchLine(m *Matcher, raw []byte, fold bool) int {
+	if fold {
+		return m.indexFold(raw)
+	}
+	return m.MatchBytes(raw)
 }
 
 // prefilterEnabled is a seam. A benchmark flips it to measure the same files,

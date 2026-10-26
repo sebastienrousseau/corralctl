@@ -89,6 +89,7 @@ Use imperative commit messages: "Add dry-run flag", not "Added dry-run flag."
 ## Pull Request Checklist
 
 - [ ] `make test` passes
+- [ ] `make complexity-check` passes (no new or worse complexity offenders)
 - [ ] `make build` succeeds
 - [ ] README updated if behaviour changed
 - [ ] All commits are signed (`git log --show-signature`)
