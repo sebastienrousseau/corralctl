@@ -162,6 +162,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`corralctl sync` aligns a stale GitHub default branch too.** The
+  0.0.53 fix for a destination whose default branch was deleted upstream
+  covered only the Gitea family. A GitHub destination refuses the pruning
+  push the same way, so it now reports its default branch and has it
+  repointed through the API before the push. GitLab and Bitbucket are
+  unchanged; see the usage guide for why.
+
+- **Private HTTPS clones work on every forge, not only GitHub.** git was
+  given only the GitHub token, scoped to `https://github.com/`, so a
+  private repository on GitLab, Gitea, Forgejo, Codeberg, Bitbucket or a
+  GitHub Enterprise Server was cloned anonymously and failed unless a git
+  credential helper was configured. Clones and pulls now present the
+  listing forge's token with that forge's username convention, scoped to
+  its HTTPS origin and never sent over plain `http://`.
+
+- **`sync` and `adopt` use the Enterprise Server's own token.**
+  `corralctl sync --to github:<owner>@<url>` and `corralctl adopt --forge
+  github --forge-url <url>` resolved the github.com credential
+  (`GITHUB_TOKEN`, `GH_TOKEN` or `gh auth token`) for a GitHub Enterprise
+  Server destination. The token is now resolved for that host
+  (`GH_ENTERPRISE_TOKEN`, `GITHUB_ENTERPRISE_TOKEN`, then
+  `gh auth token --hostname <host>`).
+
+- **`--forge github --forge-url` lists from GitHub Enterprise Server.**
+  The GitHub adapter dropped the forge URL, so
+  `corralctl acme --forge github --forge-url https://ghe.corp` listed and
+  cloned `github.com/acme`, a different owner on a different host. The
+  listing now goes to the instance's `/api/v3` API with that host's token
+  (`GH_ENTERPRISE_TOKEN`, `GITHUB_ENTERPRISE_TOKEN`, then
+  `gh auth token --hostname`), a github.com address still means
+  github.com, and an unusable URL is refused.
+
+- **Forge listings stop retrying when cancelled and honour `Retry-After`.**
+  The GitLab, Gitea-family and Bitbucket client slept through its backoff
+  with `time.Sleep`, so Ctrl-C waited up to eight seconds per retry, and it
+  answered HTTP 429 with a fixed backoff whatever the server asked for. The
+  wait now ends with the context, and a 429 or 5xx that carries
+  `Retry-After` (seconds or an HTTP date, capped at ten minutes) waits that
+  long. A requested wait that would run past `--api-total-timeout` is
+  reported as such instead of being started.
+
 - **Quitting the progress view stops the run.** Pressing `q` or `ctrl+c`
   in the clone progress view closed the view and left the workers cloning
   with no output, then exited 0. In raw mode `ctrl+c` reaches the view as

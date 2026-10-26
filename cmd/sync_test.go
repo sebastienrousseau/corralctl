@@ -50,7 +50,7 @@ func withSyncSeams(t *testing.T) {
 	})
 	syncTo = []string{"gitlab"}
 	syncProtocol, syncConcurrency, syncTimeout, syncOutput = "https", 2, time.Second, "text"
-	syncToken = func(_ context.Context, name string, _ github.AuthMode) string { return "tok-" + name }
+	syncToken = func(_ context.Context, name string, _ github.AuthMode, _ string) string { return "tok-" + name }
 	syncWalk = func(string) ([]mirror.Repo, error) {
 		return []mirror.Repo{{Name: "a", Path: "/a", Private: true}}, nil
 	}
@@ -227,11 +227,11 @@ func TestSyncRunFailures(t *testing.T) {
 		t.Fatal("a bad destination must fail the run")
 	}
 	syncTo = []string{"gitlab"}
-	syncToken = func(context.Context, string, github.AuthMode) string { return "" }
+	syncToken = func(context.Context, string, github.AuthMode, string) string { return "" }
 	if err := syncCmd.RunE(syncCmd, nil); err == nil || !strings.Contains(err.Error(), "GITLAB_TOKEN") {
 		t.Fatalf("missing token = %v", err)
 	}
-	syncToken = func(context.Context, string, github.AuthMode) string { return "tok" }
+	syncToken = func(context.Context, string, github.AuthMode, string) string { return "tok" }
 	syncWalk = func(string) ([]mirror.Repo, error) { return nil, errors.New("unreadable") }
 	if err := syncCmd.RunE(syncCmd, nil); err == nil || !strings.Contains(err.Error(), "scanning") {
 		t.Fatalf("walk error = %v", err)

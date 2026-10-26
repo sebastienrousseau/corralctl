@@ -85,8 +85,10 @@ func TestCorralConfigAppendsToTheUsersEnvConfig(t *testing.T) {
 	t.Setenv("GIT_CONFIG_COUNT", "1")
 	t.Setenv("GIT_CONFIG_KEY_0", "corral.user")
 	t.Setenv("GIT_CONFIG_VALUE_0", "kept")
-	defer func() { TokenProvider = nil }()
-	TokenProvider = func() string { return "secret" }
+	defer func() { CloneCredential = nil }()
+	CloneCredential = func() (string, *PushCredential) {
+		return "https://github.com/", &PushCredential{Username: "x-access-token", Secret: "secret"}
+	}
 
 	out, err := runGitOutput(ctx, repo, "config", "--get", "corral.user")
 	if err != nil || strings.TrimSpace(out) != "kept" {

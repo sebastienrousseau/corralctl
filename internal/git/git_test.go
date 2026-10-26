@@ -202,22 +202,42 @@ func TestPullIgnoresSignatureVerification(t *testing.T) {
 }
 
 func TestAuthEnv(t *testing.T) {
-	defer func() { TokenProvider = nil }()
+	defer func() { CloneCredential = nil }()
 
-	TokenProvider = nil
+	CloneCredential = nil
 	if env := authEnv(); env != nil {
-		t.Errorf("expected nil env when TokenProvider is unset, got %v", env)
+		t.Errorf("expected nil env when CloneCredential is unset, got %v", env)
 	}
 
-	TokenProvider = func() string { return "" }
+	CloneCredential = func() (string, *PushCredential) { return "https://gitlab.com/", nil }
 	if env := authEnv(); env != nil {
-		t.Errorf("expected nil env for an empty token, got %v", env)
+		t.Errorf("expected nil env for no credential, got %v", env)
 	}
 
-	TokenProvider = func() string { return "secret" }
+	CloneCredential = func() (string, *PushCredential) {
+		return "https://gitlab.com/", &PushCredential{Username: "oauth2"}
+	}
+	if env := authEnv(); env != nil {
+		t.Errorf("expected nil env for an empty secret, got %v", env)
+	}
+
+	// A plain-http or unparseable origin is never sent a credential.
+	for _, origin := range []string{"http://git.example/", "https://"} {
+		CloneCredential = func() (string, *PushCredential) {
+			return origin, &PushCredential{Username: "u", Secret: "secret"}
+		}
+		if env := authEnv(); env != nil {
+			t.Errorf("origin %q: expected nil env, got %v", origin, env)
+		}
+	}
+
+	CloneCredential = func() (string, *PushCredential) {
+		return "https://gitlab.com/", &PushCredential{Username: "oauth2", Secret: "secret"}
+	}
 	env := authEnv()
-	if len(env) != 1 || env[0].key != "http.https://github.com/.extraheader" {
-		t.Fatalf("expected one github.com extraheader entry, got %v", env)
+	if len(env) != 1 || env[0].key != "http.https://gitlab.com/.extraheader" ||
+		!strings.HasPrefix(env[0].value, "Authorization: Basic ") {
+		t.Fatalf("expected one gitlab.com extraheader entry, got %v", env)
 	}
 }
 
@@ -231,11 +251,11 @@ func envContains(env []string, want string) bool {
 }
 
 func TestWithGitEnvAlwaysSetsNonInteractive(t *testing.T) {
-	defer func() { TokenProvider = nil }()
+	defer func() { CloneCredential = nil }()
 
 	// No token: still must set the non-interactive guards so cron clones of
 	// public repos don't hang on an SSH passphrase or askpass helper.
-	TokenProvider = nil
+	CloneCredential = nil
 	cmd := exec.Command("git", "version")
 	withGitEnv(cmd)
 	for _, want := range []string{
@@ -256,9 +276,11 @@ func TestWithGitEnvAlwaysSetsNonInteractive(t *testing.T) {
 }
 
 func TestWithGitEnvIncludesAuthHeader(t *testing.T) {
-	defer func() { TokenProvider = nil }()
+	defer func() { CloneCredential = nil }()
 
-	TokenProvider = func() string { return "secret" }
+	CloneCredential = func() (string, *PushCredential) {
+		return "https://github.com/", &PushCredential{Username: "x-access-token", Secret: "secret"}
+	}
 	cmd := exec.Command("git", "version")
 	withGitEnv(cmd)
 	if !envContains(cmd.Env, "GIT_CONFIG_COUNT=1") {

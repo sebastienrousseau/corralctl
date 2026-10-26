@@ -199,7 +199,7 @@ func TestAdoptRunEForgeValidation(t *testing.T) {
 	adoptAsTarget = func(f forge.Forge) (forge.Target, bool) {
 		return &dummyTargetForge{}, true
 	}
-	adoptForgeToken = func(ctx context.Context, name string, mode github.AuthMode) string {
+	adoptForgeToken = func(ctx context.Context, name string, mode github.AuthMode, _ string) string {
 		return ""
 	}
 	dryRun = false
@@ -237,7 +237,7 @@ func TestAdoptRunEExecutionAndOutputs(t *testing.T) {
 	adoptAsTarget = func(f forge.Forge) (forge.Target, bool) {
 		return &dummyTargetForge{}, true
 	}
-	adoptForgeToken = func(ctx context.Context, name string, mode github.AuthMode) string {
+	adoptForgeToken = func(ctx context.Context, name string, mode github.AuthMode, _ string) string {
 		return "dummytoken"
 	}
 

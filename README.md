@@ -658,6 +658,7 @@ Cloning works against six hosting services:
 
 ```bash
 corralctl <owner>                                    # GitHub (default)
+corralctl <owner> --forge github --forge-url https://ghe.example.com  # GitHub Enterprise Server
 corralctl <group> --forge gitlab                     # GitLab
 corralctl <owner> --forge codeberg                   # Codeberg
 corralctl <owner> --forge gitea --forge-url https://git.example.com
@@ -670,6 +671,13 @@ Gitea and Forgejo have no single public instance, so they need
 is enough when the host is recognisable — `--forge-url
 https://codeberg.org` implies Codeberg.
 
+For GitHub, `--forge-url` names a GitHub Enterprise Server instance: the
+listing goes to its `/api/v3` API, and a URL that is not http or https
+with a host is refused rather than replaced with github.com. Its token
+comes from `GH_ENTERPRISE_TOKEN` (or `GITHUB_ENTERPRISE_TOKEN`), then
+`gh auth token --hostname <host>`, the same names the `gh` CLI uses. A
+github.com token is never sent to an Enterprise Server.
+
 Credentials come from the environment, under the names each forge's own
 tooling already uses: `GITLAB_TOKEN` (or `CI_JOB_TOKEN`), and
 `GITEA_TOKEN` / `FORGEJO_TOKEN` / `CODEBERG_TOKEN`, and
@@ -677,6 +685,12 @@ tooling already uses: `GITLAB_TOKEN` (or `CI_JOB_TOKEN`), and
 `CORRAL_GITLAB_TOKEN` or `CORRAL_FORGE_TOKEN` wins where both are set.
 GitHub keeps its existing ladder — explicit token, then the environment,
 then the `gh` CLI.
+
+The same token authenticates HTTPS clones and pulls of private
+repositories, on every forge, presented the way each forge expects it
+(`oauth2` for GitLab, `x-token-auth` for Bitbucket, the token as the
+password for the Gitea family). It is sent only to the forge's own HTTPS
+origin, never over plain `http://`.
 
 `--forge` applies to everything that talks to a hosting service:
 `corralctl <owner>`, `plan`, `profile` and `prune`. Orphan detection and
@@ -1054,9 +1068,10 @@ own machine, so the threat model is about *limiting blast radius*, not
 crossing a privilege boundary. Full detail in
 [docs/security-model.md](docs/security-model.md).
 
-- **Credentials never reach `argv` or `.git/config`.** The GitHub token is
-  handed to git as an `http.extraheader` scoped to `https://github.com/`,
-  so a submodule on another host cannot see it. Clone errors deliberately
+- **Credentials never reach `argv` or `.git/config`.** The forge's token is
+  handed to git as an `http.extraheader` scoped to that forge's HTTPS origin
+  (`https://github.com/`, `https://gitlab.com/`, your instance), so a
+  submodule on another host cannot see it. Clone errors deliberately
   omit their arguments so a URL-embedded credential cannot reach a log.
 - **Git runs non-interactively, always.** `GIT_TERMINAL_PROMPT=0` and
   friends, so an unattended run fails rather than hanging on a prompt.

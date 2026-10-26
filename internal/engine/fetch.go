@@ -25,14 +25,36 @@ var (
 )
 
 // installTokenProvider lets git authenticate HTTPS clones and pulls of
-// private repositories with the same credential resolved for the GitHub API.
-// The token is resolved at most once, and only if git actually asks for it.
+// private repositories with the credential the run's forge listing uses:
+// GitHub's (or an Enterprise Server's) through its own ladder, every other
+// forge's from its environment variable, presented with that forge's
+// username convention and scoped to that forge's origin. The token is
+// resolved at most once, and only if git actually asks for it.
+//
+// It used to install only the GitHub token, scoped to github.com, so a
+// private repository on GitLab, the Gitea family or Bitbucket was cloned
+// anonymously and failed unless a git credential helper happened to be
+// configured.
 func installTokenProvider(ctx context.Context, opts RunOptions) {
-	var tokenOnce sync.Once
-	var token string
-	git.TokenProvider = func() string {
-		tokenOnce.Do(func() { token = github.Token(ctx, opts.Fetch.AuthMode) })
-		return token
+	f, err := forge.Resolve(opts.Forge, opts.ForgeURL)
+	if err != nil {
+		git.CloneCredential = nil
+		return
+	}
+	origin := forge.CloneOrigin(f, opts.ForgeURL)
+	var once sync.Once
+	var cred *git.PushCredential
+	git.CloneCredential = func() (string, *git.PushCredential) {
+		once.Do(func() {
+			if origin == "" {
+				return
+			}
+			if tok := forge.Token(ctx, f.Name(), opts.Fetch.AuthMode, opts.ForgeURL); tok != "" {
+				user, secret := forge.CloneAuth(f, tok)
+				cred = &git.PushCredential{Username: user, Secret: secret}
+			}
+		})
+		return origin, cred
 	}
 }
 

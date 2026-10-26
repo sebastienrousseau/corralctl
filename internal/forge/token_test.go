@@ -16,12 +16,12 @@ func TestTokenForSync(t *testing.T) {
 	// the target does not carry the listing client's auth ladder.
 	t.Setenv("GITHUB_TOKEN", "gh-env")
 	t.Setenv("GH_TOKEN", "")
-	if got := Token(context.Background(), "github", github.AuthModeToken); got != "gh-env" {
+	if got := Token(context.Background(), "github", github.AuthModeToken, ""); got != "gh-env" {
 		t.Errorf("github sync token = %q", got)
 	}
 	t.Setenv("CORRAL_GITLAB_TOKEN", "")
 	t.Setenv("GITLAB_TOKEN", "gl-env")
-	if got := Token(context.Background(), "gitlab", github.AuthModeAuto); got != "gl-env" {
+	if got := Token(context.Background(), "gitlab", github.AuthModeAuto, ""); got != "gl-env" {
 		t.Errorf("gitlab sync token = %q", got)
 	}
 }

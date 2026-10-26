@@ -70,7 +70,7 @@ func (s *Server) handleAdoptRepo(ctx context.Context, _ *mcp.CallToolRequest, in
 			return nil, MutationOutput{}, fmt.Errorf("forge %s cannot receive repositories", input.Forge)
 		}
 		opts.Forge = tf
-		tok := adoptForgeToken(ctx, f.Name(), github.AuthModeAuto)
+		tok := adoptForgeToken(ctx, f.Name(), github.AuthModeAuto, "")
 		opts.ForgeOptions = forge.TargetOptions{
 			Token:   tok,
 			BaseURL: input.ForgeURL,
