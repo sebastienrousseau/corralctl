@@ -402,6 +402,18 @@ Execute arbitrary shell commands concurrently across your organized repositories
 ./corralctl exec "git status -s" --languages go,rust --visibility private
 ```
 
+- **Shell:** the command runs through `/bin/sh -c` on Unix and `cmd.exe /C`
+  on Windows, whatever `$SHELL` names. To use another shell, name it in the
+  command.
+- **Deadline:** `--timeout 2m` gives each repository its own deadline (default
+  `0`, none). A command that overruns is killed with its children and counted
+  as failed.
+- **Collections:** `--visibility` takes `all` or any top-level collection:
+  `public`, `private`, `work` or `forks`.
+- **Machine output:** `--output json` or `--output ndjson` writes one record
+  per repository (`repo`, `exit_code`, `duration_ms`, `stdout`, `stderr`,
+  `timed_out`).
+
 ---
 
 ## Mirror to other forges

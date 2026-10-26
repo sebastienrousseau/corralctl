@@ -6,6 +6,7 @@ package cmd
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"io/fs"
@@ -127,12 +128,12 @@ func TestExecCommandAdditionalBranches(t *testing.T) {
 	}
 
 	findRepos = func(string) ([]localRepoInfo, error) { return []localRepoInfo{{Path: "/repo"}}, nil }
-	execBatch = func(context.Context, []string, string, int) ExecSummary { return ExecSummary{Failed: 1} }
+	execBatch = func(context.Context, []string, execOptions) ExecSummary { return ExecSummary{Failed: 1} }
 	execCmd.Run(execCmd, []string{"echo", "joined"})
 	if exitCode != 1 {
 		t.Fatalf("batch failure exit = %d", exitCode)
 	}
-	execBatch = func(context.Context, []string, string, int) ExecSummary { return ExecSummary{Canceled: true} }
+	execBatch = func(context.Context, []string, execOptions) ExecSummary { return ExecSummary{Canceled: true} }
 	execCmd.Run(execCmd, []string{"echo"})
 }
 
@@ -176,12 +177,23 @@ func TestFindLocalReposWalkErrorsAndTwoLevelLayout(t *testing.T) {
 	}
 }
 
-func TestRunExecCommandsCOMSPEC(t *testing.T) {
-	t.Setenv("SHELL", "")
-	t.Setenv("COMSPEC", "sh")
-	summary := runExecCommands(context.Background(), []string{t.TempDir()}, "echo hi", 1)
-	if summary.Failed != 1 {
-		t.Fatalf("COMSPEC command should fail with /c on Unix: %+v", summary)
+func TestExecShellPerPlatform(t *testing.T) {
+	oldGOOS := execGOOS
+	t.Cleanup(func() { execGOOS = oldGOOS })
+	t.Setenv("SHELL", "/usr/bin/fish")
+	t.Setenv("COMSPEC", `C:\Windows\System32\cmd.exe`)
+
+	execGOOS = "linux"
+	if shell, flag := execShell(); shell != "/bin/sh" || flag != "-c" {
+		t.Fatalf("unix shell = %q %q", shell, flag)
+	}
+	execGOOS = "windows"
+	if shell, flag := execShell(); shell != `C:\Windows\System32\cmd.exe` || flag != "/C" {
+		t.Fatalf("windows shell with COMSPEC = %q %q", shell, flag)
+	}
+	t.Setenv("COMSPEC", "")
+	if shell, flag := execShell(); shell != "cmd.exe" || flag != "/C" {
+		t.Fatalf("windows shell without COMSPEC = %q %q", shell, flag)
 	}
 }
 
@@ -244,10 +256,10 @@ func TestRunExecCommandsSuccess(t *testing.T) {
 	}
 
 	out := captureStdout(t, func() {
-		runExecCommands(context.Background(), []string{a, b}, "echo hello", 2)
+		runExecCommands(context.Background(), []string{a, b}, execOptions{Root: base, Command: "echo hello", Concurrency: 2})
 	})
 
-	for _, name := range []string{"alpha", "beta"} {
+	for _, name := range []string{"public/go/alpha", "public/rust/beta"} {
 		if !strings.Contains(out, "--- ["+name+"] ---") {
 			t.Errorf("expected per-repo header for %q in output: %q", name, out)
 		}
@@ -270,7 +282,7 @@ func TestRunExecCommandsReportsFailure(t *testing.T) {
 	}
 
 	out := captureStdout(t, func() {
-		runExecCommands(context.Background(), []string{repo}, "exit 7", 1)
+		runExecCommands(context.Background(), []string{repo}, execOptions{Command: "exit 7", Concurrency: 1})
 	})
 
 	if !strings.Contains(out, "Command failed") {
@@ -297,7 +309,7 @@ func TestRunExecCommandsHonoursContextCancellation(t *testing.T) {
 
 	done := make(chan struct{})
 	go func() {
-		runExecCommands(ctx, paths, "sleep 5", 2)
+		runExecCommands(ctx, paths, execOptions{Command: "sleep 5", Concurrency: 2})
 		close(done)
 	}()
 
@@ -314,7 +326,7 @@ func TestRunExecCommandsHonoursContextCancellation(t *testing.T) {
 func TestRunExecCommandsEmpty(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
-		runExecCommands(context.Background(), nil, "echo x", 1)
+		runExecCommands(context.Background(), nil, execOptions{Command: "echo x", Concurrency: 1})
 		close(done)
 	}()
 	select {
@@ -403,5 +415,301 @@ func TestExecCmdScanError(t *testing.T) {
 	})
 	if !strings.Contains(out, "No matching repositories found") {
 		t.Errorf("expected no-match message for file baseDir, got %q", out)
+	}
+}
+
+// TestRunExecCommandsIgnoresUserShell pins D-01: the command line is
+// interpreted by /bin/sh on Unix whatever $SHELL names, so the same
+// command means the same thing under fish, nushell or no shell at all.
+func TestRunExecCommandsIgnoresUserShell(t *testing.T) {
+	if _, err := os.Stat("/bin/sh"); err != nil {
+		t.Skip("/bin/sh not available")
+	}
+	t.Setenv("SHELL", filepath.Join(t.TempDir(), "fish-that-does-not-exist"))
+	t.Setenv("COMSPEC", "")
+	var summary ExecSummary
+	out := captureStdout(t, func() {
+		summary = runExecCommands(context.Background(), []string{t.TempDir()}, execOptions{Command: "test 1 = 1 && echo posix", Concurrency: 1})
+	})
+	if summary.Failed != 0 || !strings.Contains(out, "posix") {
+		t.Fatalf("exec used $SHELL instead of /bin/sh: %+v %q", summary, out)
+	}
+}
+
+// TestRunExecCommandsPerRepositoryTimeout pins D-01: --timeout bounds
+// each repository on its own. The slow repository's shell is waiting on
+// a child when the deadline fires; the run must still return promptly,
+// count only that repository as failed, and leave the fast one alone.
+func TestRunExecCommandsPerRepositoryTimeout(t *testing.T) {
+	if _, err := os.Stat("/bin/sh"); err != nil {
+		t.Skip("/bin/sh not available")
+	}
+	fast, slow := t.TempDir(), t.TempDir()
+	if err := os.WriteFile(filepath.Join(slow, "slow"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	opts := execOptions{
+		Command:     "if [ -e slow ]; then sleep 5; echo late; else echo quick; fi",
+		Concurrency: 2,
+		Timeout:     300 * time.Millisecond,
+	}
+	start := time.Now()
+	var summary ExecSummary
+	out := captureStdout(t, func() {
+		summary = runExecCommands(context.Background(), []string{fast, slow}, opts)
+	})
+	if elapsed := time.Since(start); elapsed > 3*time.Second {
+		t.Fatalf("timeout not enforced: run took %s", elapsed)
+	}
+	if summary.Failed != 1 || summary.Canceled {
+		t.Fatalf("summary = %+v, want exactly the slow repository failed", summary)
+	}
+	if !strings.Contains(out, "quick") || !strings.Contains(out, "timed out after 300ms") {
+		t.Fatalf("output = %q", out)
+	}
+}
+
+func TestExecCmdRejectsNegativeTimeout(t *testing.T) {
+	oldConcurrency, oldVisibility, oldTimeout := execConcurrency, execVisibility, execTimeout
+	t.Cleanup(func() { execConcurrency, execVisibility, execTimeout = oldConcurrency, oldVisibility, oldTimeout })
+	execConcurrency, execVisibility, execTimeout = 1, "all", -time.Second
+	if err := execCmd.PreRunE(execCmd, nil); err == nil || !strings.Contains(err.Error(), "--timeout must be >= 0") {
+		t.Fatalf("negative timeout error = %v", err)
+	}
+	if flag := execCmd.Flags().Lookup("timeout"); flag == nil || flag.DefValue != "0s" {
+		t.Fatalf("--timeout flag = %+v, want default 0s", flag)
+	}
+}
+
+// TestRunExecCommandsHeaderIsRelativePath pins D-01: two clones that
+// share a name in different collections must be told apart in the output.
+func TestRunExecCommandsHeaderIsRelativePath(t *testing.T) {
+	if _, err := os.Stat("/bin/sh"); err != nil {
+		t.Skip("/bin/sh not available")
+	}
+	base := t.TempDir()
+	public := filepath.Join(base, "Public", "Go", "x")
+	private := filepath.Join(base, "Private", "Go", "x")
+	for _, p := range []string{public, private} {
+		if err := os.MkdirAll(p, 0o750); err != nil {
+			t.Fatal(err)
+		}
+	}
+	out := captureStdout(t, func() {
+		runExecCommands(context.Background(), []string{public, private}, execOptions{Root: base, Command: "true", Concurrency: 1})
+	})
+	for _, want := range []string{"--- [Public/Go/x] ---", "--- [Private/Go/x] ---"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing header %q in %q", want, out)
+		}
+	}
+}
+
+func TestExecRepoLabelFallsBackToPath(t *testing.T) {
+	if got := execRepoLabel("", "/abs/repo"); got != "/abs/repo" {
+		t.Fatalf("label without root = %q", got)
+	}
+	if got := execRepoLabel("/base", "/elsewhere/repo"); got != "/elsewhere/repo" {
+		t.Fatalf("label outside root = %q", got)
+	}
+}
+
+// execRecord mirrors the documented JSON shape of one exec result, so the
+// tests check the wire format rather than the Go struct.
+type execRecord struct {
+	Repo       string `json:"repo"`
+	ExitCode   *int   `json:"exit_code"`
+	DurationMs *int64 `json:"duration_ms"`
+	Stdout     string `json:"stdout"`
+	Stderr     string `json:"stderr"`
+	TimedOut   *bool  `json:"timed_out"`
+	Error      string `json:"error"`
+}
+
+func execTwoRepos(t *testing.T) (base, ok, bad string) {
+	t.Helper()
+	if _, err := os.Stat("/bin/sh"); err != nil {
+		t.Skip("/bin/sh not available")
+	}
+	base = t.TempDir()
+	ok = filepath.Join(base, "Public", "Go", "ok")
+	bad = filepath.Join(base, "Work", "Go", "bad")
+	for _, p := range []string{ok, bad} {
+		if err := os.MkdirAll(p, 0o750); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(bad, "fail"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return base, ok, bad
+}
+
+const execSplitCommand = "echo out; echo err >&2; if [ -e fail ]; then exit 3; fi"
+
+// TestRunExecCommandsNDJSON pins D-01: --output ndjson writes one record
+// per repository with stdout and stderr kept apart.
+func TestRunExecCommandsNDJSON(t *testing.T) {
+	base, ok, bad := execTwoRepos(t)
+	var summary ExecSummary
+	out := captureStdout(t, func() {
+		summary = runExecCommands(context.Background(), []string{ok, bad},
+			execOptions{Root: base, Command: execSplitCommand, Concurrency: 1, Output: "ndjson"})
+	})
+	lines := strings.Split(strings.TrimSpace(out), "\n")
+	if len(lines) != 2 || summary.Failed != 1 {
+		t.Fatalf("ndjson = %q, summary %+v", out, summary)
+	}
+	records := map[string]execRecord{}
+	for _, line := range lines {
+		var rec execRecord
+		if err := json.Unmarshal([]byte(line), &rec); err != nil {
+			t.Fatalf("line %q: %v", line, err)
+		}
+		if rec.ExitCode == nil || rec.DurationMs == nil || rec.TimedOut == nil {
+			t.Fatalf("record missing a field: %q", line)
+		}
+		records[rec.Repo] = rec
+	}
+	good, failed := records["Public/Go/ok"], records["Work/Go/bad"]
+	if *good.ExitCode != 0 || good.Stdout != "out\n" || good.Stderr != "err\n" || good.Error != "" || *good.TimedOut {
+		t.Fatalf("ok record = %+v", good)
+	}
+	if *failed.ExitCode != 3 || failed.Error == "" || failed.Stderr != "err\n" {
+		t.Fatalf("bad record = %+v", failed)
+	}
+}
+
+// TestRunExecCommandsJSONDocument checks --output json: one document with
+// every result and the summary, in the same shape sync writes.
+func TestRunExecCommandsJSONDocument(t *testing.T) {
+	base, ok, bad := execTwoRepos(t)
+	out := captureStdout(t, func() {
+		runExecCommands(context.Background(), []string{ok, bad},
+			execOptions{Root: base, Command: execSplitCommand, Concurrency: 2, Output: "json"})
+	})
+	var doc struct {
+		Results []execRecord `json:"results"`
+		Summary struct {
+			Total    *int  `json:"total"`
+			Failed   *int  `json:"failed"`
+			Canceled *bool `json:"canceled"`
+		} `json:"summary"`
+	}
+	if err := json.Unmarshal([]byte(out), &doc); err != nil {
+		t.Fatalf("json document %q: %v", out, err)
+	}
+	if len(doc.Results) != 2 || doc.Summary.Total == nil || *doc.Summary.Total != 2 ||
+		doc.Summary.Failed == nil || *doc.Summary.Failed != 1 || doc.Summary.Canceled == nil {
+		t.Fatalf("json document = %+v", doc)
+	}
+}
+
+// TestRunExecCommandsJSONTimedOut checks the timed_out field and the
+// exit code of a killed command.
+func TestRunExecCommandsJSONTimedOut(t *testing.T) {
+	base, ok, _ := execTwoRepos(t)
+	out := captureStdout(t, func() {
+		runExecCommands(context.Background(), []string{ok},
+			execOptions{Root: base, Command: "sleep 5", Concurrency: 1, Timeout: 200 * time.Millisecond, Output: "ndjson"})
+	})
+	var rec execRecord
+	if err := json.Unmarshal([]byte(out), &rec); err != nil {
+		t.Fatalf("record %q: %v", out, err)
+	}
+	if rec.TimedOut == nil || !*rec.TimedOut || rec.ExitCode == nil || *rec.ExitCode != -1 {
+		t.Fatalf("timed-out record = %q", out)
+	}
+}
+
+func TestExecCmdOutputValidation(t *testing.T) {
+	oldConcurrency, oldVisibility, oldOutput, oldDry := execConcurrency, execVisibility, execOutput, dryRun
+	t.Cleanup(func() {
+		execConcurrency, execVisibility, execOutput, dryRun = oldConcurrency, oldVisibility, oldOutput, oldDry
+	})
+	execConcurrency, execVisibility, dryRun = 1, "all", false
+	execOutput = "xml"
+	if err := execCmd.PreRunE(execCmd, nil); err == nil || !strings.Contains(err.Error(), "--output must be text, json, or ndjson") {
+		t.Fatalf("bad output error = %v", err)
+	}
+	execOutput = " NDJSON "
+	if err := execCmd.PreRunE(execCmd, nil); err != nil || execOutput != "ndjson" {
+		t.Fatalf("ndjson accepted = %v, normalised %q", err, execOutput)
+	}
+	dryRun = true
+	if err := execCmd.PreRunE(execCmd, nil); err == nil || !strings.Contains(err.Error(), "--dry-run") {
+		t.Fatalf("dry-run with ndjson error = %v", err)
+	}
+}
+
+// TestExecCmdMachineOutputKeepsStdoutClean checks that the "no matching
+// repositories" notice goes to stderr when stdout carries JSON, and that
+// a failed JSON write fails the run.
+func TestExecCmdMachineOutputKeepsStdoutClean(t *testing.T) {
+	oldFind, oldExit, oldOutput, oldDry, oldBase := findRepos, osExit, execOutput, dryRun, baseDir
+	oldConcurrency, oldVisibility := execConcurrency, execVisibility
+	t.Cleanup(func() {
+		findRepos, osExit, execOutput, dryRun, baseDir = oldFind, oldExit, oldOutput, oldDry, oldBase
+		execConcurrency, execVisibility = oldConcurrency, oldVisibility
+	})
+	execOutput, dryRun, baseDir, execConcurrency, execVisibility = "json", false, t.TempDir(), 1, "all"
+	exitCode := 0
+	osExit = func(code int) { exitCode = code }
+	findRepos = func(string) ([]localRepoInfo, error) { return nil, nil }
+	if out := captureStdout(t, func() { execCmd.Run(execCmd, []string{"true"}) }); out != "" {
+		t.Fatalf("stdout carried a notice in json mode: %q", out)
+	}
+
+	repo := t.TempDir()
+	findRepos = func(string) ([]localRepoInfo, error) { return []localRepoInfo{{Path: repo}}, nil }
+	old := os.Stdout
+	f, err := os.Open(os.DevNull)
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.Stdout = f // read-only: the JSON write fails
+	t.Cleanup(func() { os.Stdout = old; _ = f.Close() })
+	execCmd.Run(execCmd, []string{"true"})
+	if exitCode != 1 {
+		t.Fatalf("failed JSON write exit = %d", exitCode)
+	}
+}
+
+// TestExecVisibilityReachesEveryCollection pins D-01: Forks and Work are
+// top-level collections of the layout, so --visibility must reach them.
+func TestExecVisibilityReachesEveryCollection(t *testing.T) {
+	oldConcurrency, oldVisibility, oldLanguages, oldExclude := execConcurrency, execVisibility, execLanguages, execExcludeLangs
+	t.Cleanup(func() {
+		execConcurrency, execVisibility, execLanguages, execExcludeLangs = oldConcurrency, oldVisibility, oldLanguages, oldExclude
+	})
+	base := t.TempDir()
+	for _, rel := range []string{"Public/Go/a", "Private/Go/b", "Forks/Go/c", "Work/Rust/d"} {
+		if err := os.MkdirAll(filepath.Join(base, filepath.FromSlash(rel), ".git"), 0o750); err != nil {
+			t.Fatal(err)
+		}
+	}
+	repos, err := findLocalRepos(base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	execConcurrency, execLanguages, execExcludeLangs = 1, "", ""
+	for value, want := range map[string]string{"Forks": "c", " work ": "d", "public": "a", "PRIVATE": "b"} {
+		execVisibility = value
+		if err := execCmd.PreRunE(execCmd, nil); err != nil {
+			t.Fatalf("--visibility %q refused: %v", value, err)
+		}
+		got := filterLocalRepos(repos)
+		if len(got) != 1 || filepath.Base(got[0]) != want {
+			t.Fatalf("--visibility %q = %v, want only %s", value, got, want)
+		}
+	}
+	execVisibility = "all"
+	if got := filterLocalRepos(repos); len(got) != 4 {
+		t.Fatalf("--visibility all = %v", got)
+	}
+	execVisibility = "shared"
+	err = execCmd.PreRunE(execCmd, nil)
+	if err == nil || !strings.Contains(err.Error(), "all, public, private, work, forks") {
+		t.Fatalf("unknown visibility error = %v", err)
 	}
 }

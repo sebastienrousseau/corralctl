@@ -114,6 +114,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`--token-file`** reads the bearer token from a file, so it stays out of
   the process list.
 
+- **`exec --timeout`** sets a deadline for each repository on its own,
+  spelled like `doctor --timeout` (0, the default, means none). A command
+  that overruns is killed together with the processes it started (its
+  process group on Unix), reported as timed out and counted as failed,
+  while the other repositories carry on.
+
+- **`exec --output json|ndjson`**, in the same shapes as `sync`: one
+  `{"results", "summary"}` document, or one record per repository as it
+  finishes. Each record carries `repo`, `exit_code`, `duration_ms`,
+  `stdout` and `stderr` (kept apart, each capped at 1 MiB like the text
+  output), `timed_out` and `error`. `--dry-run` with a JSON format is
+  refused rather than mixing text into the stream.
+
 ### Changed
 
 - **`internal/search`'s per-file search is split into helpers.** `searchFile`
@@ -153,6 +166,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **The documented minimum git is 2.31.** The README and DEVELOPMENT.md said
   2.30, the security model and the Debian notes 2.20, and credentials reach
   git through `GIT_CONFIG_COUNT`, which git 2.31 introduced.
+
+- **`exec` runs the command through `/bin/sh -c`, not `$SHELL -c`**
+  (behaviour change). The same command line meant different things under
+  fish or nushell, and a `$SHELL` that did not exist failed every
+  repository. On Windows it runs through `cmd.exe /C` (or `%COMSPEC%`). To
+  use another shell, name it in the command.
+
+- **`exec` headers name the repository by its path under the base
+  directory** (`--- [Public/Go/x] ---`) instead of its basename, so two
+  clones that share a name in different collections can be told apart.
 
 ### Deprecated
 
@@ -268,6 +291,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   passes through the environment, such as a proxy or `http.sslCAInfo`.
   corralctl's entries are now numbered after the user's and the count raised
   to cover both.
+
+- **`exec --visibility` reaches every collection.** It knew only `public`
+  and `private`, so clones under `Forks/` and `Work/` could not be selected.
+  It now accepts `all` and each top-level collection of the layout (`public`,
+  `private`, `work`, `forks`), read from the same list the layout uses.
 
 ### Documentation
 
