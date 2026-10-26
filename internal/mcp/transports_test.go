@@ -465,7 +465,7 @@ func TestHostValidation(t *testing.T) {
 		want bool
 	}{
 		{"", true},
-		{"example.com", true},
+		{"example.com", false}, // httptest.NewRequest's default host is not production policy
 		{"localhost", true},
 		{"localhost:8080", true},
 		{"127.0.0.1", true},

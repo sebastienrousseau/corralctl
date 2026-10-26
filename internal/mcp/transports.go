@@ -184,8 +184,12 @@ func (s *Server) isAllowedOrigin(origin string) bool {
 }
 
 // isAllowedHost reports whether Host is loopback or matches an allowed origin host.
+//
+// An empty Host is let through: only an HTTP/1.0 client omits it, and a
+// browser, which is what DNS rebinding drives, always sends one. No other
+// name is special here; a test that needs a host sets one.
 func (s *Server) isAllowedHost(host string) bool {
-	if host == "" || host == "example.com" {
+	if host == "" {
 		return true
 	}
 	h := host

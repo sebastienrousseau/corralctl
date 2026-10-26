@@ -18,6 +18,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the transports answer or `OTHER`, the tool a registered name or
   `unknown`, and every label value is escaped.
 
+- **`example.com` is no longer an allowed `Host`.** The HTTP transports
+  accepted `Host: example.com` alongside loopback, a leftover from the
+  default host of Go's `httptest.NewRequest`. It was reachable only by
+  whoever controls that domain's DNS, but test behaviour should not ship.
+
 ## [0.0.53] - 2026-10-25
 
 ### Security
