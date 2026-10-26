@@ -34,6 +34,9 @@ func TestWalkFindsRepositoriesInOrder(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(public, "vendor", "nested", ".git"), 0o750); err != nil {
 		t.Fatal(err)
 	}
+	// The forge recorded every one but the fork as public; the directory
+	// still vetoes zeta, and the fork has no record.
+	stubRecorded(t, map[string]bool{"alpha": false, "beta": false, "zeta": false})
 	got, err := Walk(base)
 	if err != nil {
 		t.Fatal(err)

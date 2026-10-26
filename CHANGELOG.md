@@ -6,6 +6,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- **`sync` no longer creates a public destination on a directory name.**
+  Visibility was read from the path alone, so a repository made private
+  upstream but still filed under `Public/`, or a clone corral never made,
+  was created public on every destination. `corralctl clone` now records the
+  visibility the source forge reports in each clone's state sidecar, on
+  every pass including skipped pulls, and `sync` creates a destination
+  public only when that record says public and the directory agrees.
+  Anything else is private. Behaviour change: until `corralctl clone` has
+  run once for an owner, its clones mirror as private, and an existing
+  public destination is refused with a message that says how to clear it.
+  `--dry-run` now names the visibility each destination would get.
+
 ## [0.0.53] - 2026-10-25
 
 ### Security

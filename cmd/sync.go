@@ -56,6 +56,11 @@ A repository is never pushed to the forge its origin lives on, and a
 destination that already holds a same-named repository with the wrong
 visibility is refused rather than reused.
 
+A destination is created public only when the source forge reported the
+repository as public at the last 'corralctl clone' and the clone sits under
+a Public directory. Anything else, including a clone with no recorded
+visibility, is created private.
+
 Destinations are named as <forge>[:<owner>][@<url>]:
 
   --to gitlab                          gitlab.com, under the token's own account

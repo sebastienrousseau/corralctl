@@ -415,8 +415,7 @@ corralctl sync --to gitlab --to gitea@https://git.example.com
 ```
 
 For every repository under the base directory, on every destination, `sync`
-creates the destination repository if it does not exist — with the
-visibility the local layout says, `Public/` or `Private/` — points a remote
+creates the destination repository if it does not exist, points a remote
 named after the forge at it, and pushes in one round trip:
 
 ```text
@@ -426,6 +425,16 @@ git push --prune --no-verify <forge> refs/heads/*:refs/heads/* +refs/tags/*:refs
 Every local branch and tag exists on the destination afterwards, and nothing
 else does. Branches are never forced: a destination that has moved on is
 refused and reported, not overwritten. Tags follow the local namespace.
+
+A new destination is created public only when two things agree: the source
+forge reported the repository as public the last time `corralctl clone`
+listed it (the answer is recorded in the clone's state sidecar), and the
+clone sits under a `Public/` directory. Anything else is created private,
+including a clone corral did not make and one cloned before 0.0.54. The
+directory name alone is a guess, and a repository made private upstream can
+still sit under `Public/`. Run `corralctl clone` for the owner before `sync`
+so the record is current; `--dry-run` shows the visibility each destination
+would get.
 
 A destination is `<forge>[:<owner>][@<url>]`:
 

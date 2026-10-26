@@ -137,6 +137,9 @@ func processExistingClone(
 		result.Message = msg
 		return result
 	}
+	if !dryRun {
+		recordVisibility(targetDir, repo)
+	}
 	if doSync {
 		return syncExistingClone(ctx, result, repo, targetDir, dryRun, cloneOpts, syncOpts)
 	}
@@ -292,7 +295,8 @@ func cloneURL(repo github.Repo, owner, protocol string) string {
 }
 
 // stampCloneState records the upstream pushed_at in the per-clone state
-// sidecar so the next run can skip a no-op git pull. Best-effort: a write
+// sidecar so the next run can skip a no-op git pull, along with the
+// visibility the forge listed, which `corralctl sync` reads. Best-effort: a write
 // failure is logged but does not fail the operation, since the sidecar is
 // purely an optimization (a missing or stale file falls through to the
 // pre-sidecar behaviour of always pulling).
@@ -300,6 +304,7 @@ func stampCloneState(targetDir string, repo github.Repo) {
 	if err := writeCloneState(targetDir, cloneState{
 		LastSyncedPushedAt: repo.PushedAt,
 		LastSyncedAt:       time.Now().UTC(),
+		Visibility:         visibilityRecord(repo.Visibility),
 	}); err != nil {
 		diag.Warnf("failed writing %s in %s: %v", StateFileName, targetDir, err)
 	}

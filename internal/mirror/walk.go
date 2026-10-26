@@ -10,14 +10,16 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/sebastienrousseau/corralctl/internal/engine"
 	"github.com/sebastienrousseau/corralctl/internal/git"
 )
 
 // Seams for the walk, so the error branches are reachable without a
 // filesystem that produces them.
 var (
-	walkDir      = filepath.WalkDir
-	isRepository = git.IsRepository
+	walkDir            = filepath.WalkDir
+	isRepository       = git.IsRepository
+	recordedVisibility = engine.RecordedVisibility
 )
 
 // Walk finds every repository under baseDir, in path order.
@@ -55,7 +57,8 @@ func Walk(baseDir string) ([]Repo, error) {
 		}
 		name := filepath.Base(path)
 		key := strings.ToLower(name)
-		repo := Repo{Name: name, Path: path, Private: privateFromPath(baseDir, path)}
+		private, known := visibility(baseDir, path)
+		repo := Repo{Name: name, Path: path, Private: private, VisibilityKnown: known}
 		if i, dup := seen[key]; dup {
 			first := &repos[i]
 			if first.Conflict == "" {
@@ -73,6 +76,18 @@ func Walk(baseDir string) ([]Repo, error) {
 	}
 	sort.Slice(repos, func(i, j int) bool { return repos[i].Path < repos[j].Path })
 	return repos, nil
+}
+
+// visibility decides what a destination is created with. Public needs
+// two agreeing witnesses: the source forge's own answer, recorded in the
+// clone's sidecar by `corralctl clone`, and a directory that says public.
+// Either one saying anything else makes it private, so a clone with no
+// record is private wherever it sits, and nothing is public that the
+// directory alone would not have made public. known reports whether a
+// record was found.
+func visibility(baseDir, repoPath string) (private, known bool) {
+	recorded, known := recordedVisibility(repoPath)
+	return !known || recorded || privateFromPath(baseDir, repoPath), known
 }
 
 // privateFromPath reads visibility from the directory segments between
