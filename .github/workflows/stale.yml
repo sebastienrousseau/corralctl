@@ -14,7 +14,7 @@ permissions:
 jobs:
   stale:
     name: Mark Stale
-    uses: sebastienrousseau/pipelines/.github/workflows/stale.yml@980375f1d96368885ff65cc4c7f1ff355a5a4095
+    uses: sebastienrousseau/pipelines/.github/workflows/stale.yml@83114142d0a14e9c6302a9ba9e716a0cc53e4e01
     with:
       days-before-stale: 60
       days-before-close: 14
