@@ -16,7 +16,7 @@ jobs:
     name: Go CI
     permissions:
       contents: read
-    uses: sebastienrousseau/pipelines/.github/workflows/go-ci.yml@980375f1d96368885ff65cc4c7f1ff355a5a4095
+    uses: sebastienrousseau/pipelines/.github/workflows/go-ci.yml@83114142d0a14e9c6302a9ba9e716a0cc53e4e01
     with:
       go-version: '1.26.10'
       run-cross-platform: true
@@ -373,7 +373,7 @@ jobs:
       # deploy workflow, because a change that breaks it was previously
       # invisible until after it had merged.
       - name: Install cargo-binstall
-        uses: cargo-bins/cargo-binstall@8a2045612414e945291083f820cd50b4d8fc2218 # v1.26.0
+        uses: cargo-bins/cargo-binstall@81df5c23b0dc775b009efdfc9895c5965b7a4e40 # v1.26.1
 
       - name: Install ssg
         run: |
