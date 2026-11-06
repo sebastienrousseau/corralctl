@@ -50,12 +50,21 @@ jobs:
       # The site is built by ssg through the Lucid theme vendored at
       # docs-site/_layouts. The version is pinned in a file rather than here
       # so a bump is one line and shows up in a diff as a version change.
+      # The pin must name the latest ssg release (~/Code/AGENTS.md §1.9): it
+      # sat at 0.0.56 while 0.0.72 shipped, so this fails as soon as it falls
+      # behind, and the deploy waits for the bump.
       - name: Resolve the generator version
         id: ssg_version
         run: |
           version="$(tr -d '[:space:]' < .github/ssg-version)"
           if [[ -z "${version}" ]]; then
             echo "::error::no generator version in .github/ssg-version"
+            exit 1
+          fi
+          latest="$(curl -fsSL -A "corralctl-docs (https://github.com/sebastienrousseau/corralctl)" \
+            https://crates.io/api/v1/crates/ssg | jq -r .crate.max_stable_version)"
+          if [[ "${version}" != "${latest}" ]]; then
+            echo "::error::.github/ssg-version is ${version}, but the latest ssg is ${latest}; move the pin up"
             exit 1
           fi
           echo "version=${version}" >> "${GITHUB_OUTPUT}"
