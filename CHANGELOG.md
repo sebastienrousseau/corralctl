@@ -8,7 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- The documentation site is built with ssg 0.0.72, the latest release, up
+- The documentation site is built with ssg 0.0.75, the latest release, up
   from 0.0.56; `~/Code/AGENTS.md` §1.9 requires the latest. The docs
   workflow now fails when `.github/ssg-version` falls behind the latest
   release, so the pin cannot go stale unnoticed again.
