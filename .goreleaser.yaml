@@ -8,6 +8,9 @@ project_name: corralctl
 # Replace an existing GitHub release on re-run, so a release can be retried
 # after adding the Homebrew/AUR publishing secrets.
 release:
+  # The release title is "<project> <version>" (corralctl 0.0.55), never
+  # the bare tag; ~/Code/AGENTS.md §3 makes that a release gate.
+  name_template: "{{ .ProjectName }} {{ .Version }}"
   mode: replace
   # The grouped commit log below answers "what changed"; this answers "how do
   # I trust it", which is the question a release page should not make someone
