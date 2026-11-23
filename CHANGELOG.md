@@ -8,10 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- The documentation site is built with ssg 0.0.75, the latest release, up
+- The documentation site is built with ssg 0.0.76, the latest release, up
   from 0.0.56; `~/Code/AGENTS.md` §1.9 requires the latest. The docs
   workflow now fails when `.github/ssg-version` falls behind the latest
   release, so the pin cannot go stale unnoticed again.
+- `golang.org/x/sys` 0.49.0 to 0.50.0 and `github.com/spf13/pflag` 1.0.10
+  to 1.1.0 (Dependabot #192, #190).
 
 ## [0.0.54] - 2026-10-26
 
