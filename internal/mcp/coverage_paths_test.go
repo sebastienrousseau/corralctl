@@ -623,7 +623,8 @@ func TestServeStdioDefaultRunsOverStdin(t *testing.T) {
 	go func() { done <- serveStdioDefault(srv.mcp) }()
 
 	select {
-	case <-done:
+	case err := <-done:
+		t.Logf("serveStdioDefault returned: %v", err)
 		// Returning at all is the assertion: an EOF on stdin must end the
 		// server loop rather than hang it. Whether that surfaces as nil or
 		// as an EOF error is the SDK's business, not ours.
