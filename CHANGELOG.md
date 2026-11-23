@@ -6,6 +6,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.55] - 2026-11-23
+
 ### Changed
 
 - The documentation site is built with ssg 0.0.76, the latest release, up
@@ -14,6 +16,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   release, so the pin cannot go stale unnoticed again.
 - `golang.org/x/sys` 0.49.0 to 0.50.0 and `github.com/spf13/pflag` 1.0.10
   to 1.1.0 (Dependabot #192, #190).
+- GitHub Actions pins moved forward in three grouped Dependabot updates
+  (#191, #193, #194). These were auto-merged into `main` by
+  `dependabot-automerge.yml` rather than through the release branch.
+- The GitHub release title is set by goreleaser as `corralctl <version>`,
+  not the bare tag.
+- `docs/osps-baseline-fillable.md` (OSPS-BR-01.03) said one workflow uses
+  `pull_request_target`; two do. The PR labeler is now covered: it checks
+  out the base branch without persisting credentials.
+
+### Fixed
+
+- Three MCP test teardowns logged nothing when a server returned an error;
+  they now log it. golangci-lint 2.15's errcheck flags the old form.
 
 ## [0.0.54] - 2026-10-26
 
@@ -3126,7 +3141,8 @@ cron-safety overhaul.
   100 % doc coverage.
 - All tests green under `-race -count=1`.
 
-[Unreleased]: https://github.com/sebastienrousseau/corralctl/compare/v0.0.54...HEAD
+[Unreleased]: https://github.com/sebastienrousseau/corralctl/compare/v0.0.55...HEAD
+[0.0.55]: https://github.com/sebastienrousseau/corralctl/compare/v0.0.54...v0.0.55
 [0.0.54]: https://github.com/sebastienrousseau/corralctl/compare/v0.0.53...v0.0.54
 [0.0.53]: https://github.com/sebastienrousseau/corralctl/compare/v0.0.52...v0.0.53
 [0.0.52]: https://github.com/sebastienrousseau/corralctl/compare/v0.0.51...v0.0.52
