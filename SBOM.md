@@ -20,9 +20,9 @@ Versions pinned in `go.mod`. Refresh this table whenever a direct dependency is 
 | `github.com/mattn/go-isatty` | v0.0.24 | Terminal Detection | MIT |
 | `github.com/modelcontextprotocol/go-sdk` | v1.8.0 | MCP Server Protocol | Apache-2.0 |
 | `github.com/spf13/cobra` | v1.10.2 | CLI Framework | Apache-2.0 |
-| `github.com/spf13/pflag` | v1.0.10 | CLI Flag Parsing | BSD-3-Clause |
+| `github.com/spf13/pflag` | v1.1.0 | CLI Flag Parsing | BSD-3-Clause |
 | `go.uber.org/goleak` | v1.3.0 | Goroutine leak detection (tests only) | MIT |
-| `golang.org/x/sys` | v0.49.0 | Platform Syscalls | BSD-3-Clause |
+| `golang.org/x/sys` | v0.50.0 | Platform Syscalls | BSD-3-Clause |
 | `howett.net/plist` | v1.0.1 | Native macOS Finder Tag property-list encoding | BSD-2-Clause |
 
 This table lists every **direct** requirement in `go.mod`, and `make sbom-check`
