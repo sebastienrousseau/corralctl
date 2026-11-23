@@ -75,7 +75,9 @@ func newHarnessWithClient(t *testing.T, opts ServerOptions, clientOpts *mcp.Clie
 	}
 	t.Cleanup(func() {
 		_ = session.Close()
-		<-serverDone
+		if err := <-serverDone; err != nil {
+			t.Logf("server returned: %v", err)
+		}
 		// Unmap only once the server has stopped and nothing can still be
 		// reading an index. This runs before any TempDir this function created
 		// is removed (cleanups are LIFO) and before one passed in as an

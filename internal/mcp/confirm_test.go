@@ -649,7 +649,8 @@ func TestConfirmationSurvivesTheHTTPTransport(t *testing.T) {
 	defer func() {
 		cancel()
 		select {
-		case <-served:
+		case err := <-served:
+			t.Logf("ServeHTTP returned: %v", err)
 		case <-time.After(10 * time.Second):
 			t.Error("ServeHTTP did not return within 10s of the context being cancelled")
 		}
