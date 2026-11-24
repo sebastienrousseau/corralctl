@@ -14,6 +14,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   that every other change goes through. Dependabot updates now land in
   `feat/v<next>` and ship with the release PR. OSPS-BR-01.03 and
   OSPS-BR-01.04 in `docs/osps-baseline-fillable.md` no longer cite it.
+- `ossf/scorecard-action` is held at v2.5.0. The v2.6.0 image cannot be
+  pulled from ghcr.io (its index references deleted manifests,
+  ossf/scorecard-action#1752), which failed the required Scorecard
+  Analysis check on every run.
 
 ## [0.0.55] - 2026-11-23
 
