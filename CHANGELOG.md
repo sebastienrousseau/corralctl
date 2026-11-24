@@ -6,6 +6,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Dependabot pull requests are no longer auto-merged.**
+  `dependabot-automerge.yml` merged GitHub Actions and Docker updates
+  straight into `main` (#191, #193, #194), bypassing the release branch
+  that every other change goes through. Dependabot updates now land in
+  `feat/v<next>` and ship with the release PR. OSPS-BR-01.03 and
+  OSPS-BR-01.04 in `docs/osps-baseline-fillable.md` no longer cite it.
+
 ## [0.0.55] - 2026-11-23
 
 ### Changed
