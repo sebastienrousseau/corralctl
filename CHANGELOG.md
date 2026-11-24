@@ -6,6 +6,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.56] - 2026-11-24
+
 ### Changed
 
 - **Dependabot pull requests are no longer auto-merged.**
@@ -3159,7 +3161,8 @@ cron-safety overhaul.
   100 % doc coverage.
 - All tests green under `-race -count=1`.
 
-[Unreleased]: https://github.com/sebastienrousseau/corralctl/compare/v0.0.55...HEAD
+[Unreleased]: https://github.com/sebastienrousseau/corralctl/compare/v0.0.56...HEAD
+[0.0.56]: https://github.com/sebastienrousseau/corralctl/compare/v0.0.55...v0.0.56
 [0.0.55]: https://github.com/sebastienrousseau/corralctl/compare/v0.0.54...v0.0.55
 [0.0.54]: https://github.com/sebastienrousseau/corralctl/compare/v0.0.53...v0.0.54
 [0.0.53]: https://github.com/sebastienrousseau/corralctl/compare/v0.0.52...v0.0.53
