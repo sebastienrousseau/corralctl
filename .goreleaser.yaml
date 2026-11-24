@@ -219,7 +219,9 @@ homebrew_casks:
     binaries:
       - corralctl
     homepage: "https://github.com/sebastienrousseau/corralctl"
-    description: "Clone and organise repositories from GitHub, GitLab, Gitea, Forgejo, Codeberg and Bitbucket by visibility and language, then let your AI coding agent search across all of them at once, straight from disk."
+    # brew audit --strict rejects a cask desc of 80 characters or more, or
+    # one ending in a full stop, so the cask keeps this short form.
+    description: "Clone and organise Git repositories for AI coding agents to search"
 
 # 3. Arch Linux / CachyOS (AUR)
 aurs:
