@@ -380,6 +380,10 @@ jobs:
       - name: Publish
         env:
           AUR_KEY: ${{ secrets.AUR_KEY }}
+          # publish_aur.sh downloads the release with `gh`; without a token
+          # the call is anonymous and shares the runner IP's 60-an-hour limit,
+          # which failed the v0.0.57 publish with HTTP 403.
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           if [[ -z "${AUR_KEY}" ]]; then

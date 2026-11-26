@@ -6,6 +6,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- The AUR publish step now passes `GH_TOKEN` to `scripts/publish_aur.sh`.
+  Its `gh release download` ran anonymously and shared the runner IP's
+  rate limit, so the v0.0.57 publish failed with HTTP 403 and needed a
+  re-run.
+
 ## [0.0.57] - 2026-11-26
 
 ### Fixed
