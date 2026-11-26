@@ -111,7 +111,7 @@ func TestFoldsKeepsOneReleaseAtATime(t *testing.T) {
 	})
 	want := []string{
 		"o/other: release pull request #7 from feat/v0.0.60 is already open; a repository has one at a time",
-		"o/untagged: feat/v0.0.25 was merged in #8 with its release preparation but v0.0.25 is not tagged; tag that release first",
+		"o/untagged: feat/v0.0.25 was merged in #8 with a changelog entry for v0.0.25 but is not tagged; check its version files, then tag it",
 	}
 	if len(folds) != 0 || !reflect.DeepEqual(skipped, want) {
 		t.Errorf("folds = %v\nskipped = %v\nwant %v", folds, skipped, want)

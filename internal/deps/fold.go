@@ -142,7 +142,7 @@ func (f *RepoFold) target(s RepoState) error {
 		return fmt.Errorf("release pull request #%d from %s is already open; a repository has one at a time", s.OtherReleasePR, s.OtherReleaseBranch)
 	}
 	if s.MergedReleasePR != 0 && s.MergedPrepared {
-		return fmt.Errorf("feat/%s was merged in #%d with its release preparation but %s is not tagged; tag that release first", next, s.MergedReleasePR, next)
+		return fmt.Errorf("feat/%s was merged in #%d with a changelog entry for %s but is not tagged; check its version files, then tag it", next, s.MergedReleasePR, next)
 	}
 	f.Branch, f.Base = "feat/"+next, s.DefaultBranch
 	f.CreateBranch = !s.BranchExists

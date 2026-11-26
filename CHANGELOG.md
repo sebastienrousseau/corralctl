@@ -73,12 +73,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   repository with another `feat/v*` release pull request already open,
   and one whose `feat/v<next>` was merged with its release preparation
   (a CHANGELOG heading for the version at the merge commit) but never
-  tagged: that release is tagged first. A `feat/v<next>` merged without
+  tagged: its version files are checked and it is tagged first. Of the
+  54 on this account, 4 had the changelog entry but a manifest still on
+  the previous version, so the changelog alone does not make a release
+  taggable. A `feat/v<next>` merged without
   its preparation never released the version, which stays the next one:
   the run folds into it again and opens a new draft release pull
   request. The dry run on this account found 54 merged, untagged
-  release branches; the first two checked (acmt001-lsp, acmt001-mcp)
-  were unprepared.
+  release branches: 28 unprepared, 26 with a changelog entry.
 - Release notes in the standard layout, written by the release workflow.
   A new `notes` job runs `scripts/release_notes.py` after the assets are
   published and applies its output with `gh release edit`: the

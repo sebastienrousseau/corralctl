@@ -460,7 +460,7 @@ func TestDepsApplyReadsOtherAndMergedReleasePullRequests(t *testing.T) {
 	}
 	for _, want := range []string{
 		"skip  o/a: release pull request #7 from feat/v0.0.60 is already open",
-		"skip  o/b: feat/v0.0.10 was merged in #8 with its release preparation but v0.0.10 is not tagged",
+		"skip  o/b: feat/v0.0.10 was merged in #8 with a changelog entry for v0.0.10 but is not tagged",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("output lacks %q:\n%s", want, out)
