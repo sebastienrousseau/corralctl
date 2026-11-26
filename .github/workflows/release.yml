@@ -181,6 +181,42 @@ jobs:
           gh release upload "${GITHUB_REF_NAME}" \
             "${RUNNER_TEMP}/checksums.txt.intoto.jsonl" --clobber
 
+  notes:
+    name: Write the standard release notes
+    needs: release
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    # Its own job, like every publisher below: it edits a release whose
+    # artefacts are already out, so a failure here must not skip the AUR,
+    # Homebrew and registry jobs. The notes are the ones ~/Code/AGENTS.md
+    # section 3 requires (Highlights, What's Changed, New Contributors,
+    # Checksums of every asset, Full Changelog); goreleaser writes its own
+    # layout, and every release up to 0.0.57 was corrected by hand.
+    continue-on-error: true
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          show-progress: false
+
+      - name: Compose and apply the notes
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          assets="${RUNNER_TEMP}/release-assets"
+          mkdir -p "${assets}"
+          gh release download "${GITHUB_REF_NAME}" --dir "${assets}"
+          python3 scripts/release_notes.py "${GITHUB_REF_NAME}" \
+            --assets "${assets}" > "${RUNNER_TEMP}/notes.md"
+          gh release edit "${GITHUB_REF_NAME}" \
+            --title "corralctl ${GITHUB_REF_NAME#v}" \
+            --notes-file "${RUNNER_TEMP}/notes.md"
+
   registry:
     name: Publish to the MCP registry
     needs: release
@@ -380,6 +416,10 @@ jobs:
       - name: Publish
         env:
           AUR_KEY: ${{ secrets.AUR_KEY }}
+          # publish_aur.sh downloads the release with `gh`; without a token
+          # the call is anonymous and shares the runner IP's 60-an-hour limit,
+          # which failed the v0.0.57 publish with HTTP 403.
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           if [[ -z "${AUR_KEY}" ]]; then

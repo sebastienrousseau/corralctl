@@ -6,6 +6,92 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- The AUR publish step now passes `GH_TOKEN` to `scripts/publish_aur.sh`.
+  Its `gh release download` ran anonymously and shared the runner IP's
+  rate limit, so the v0.0.57 publish failed with HTTP 403 and needed a
+  re-run.
+
+### Changed
+
+- `ossf/scorecard-action` moves from v2.5.0 to v2.6.0. The hold in 0.0.56
+  was for ossf/scorecard-action#1752, v2.6.0's image index referencing
+  platform manifests that returned 404; the issue is closed and the
+  index and both its manifests now resolve on ghcr.io.
+
+### Added
+
+- `corralctl deps inventory <owner>` lists every open Dependabot pull
+  request across the owner's repositories (forks and archived ones
+  excluded unless asked), with its head branch, mergeable state and one
+  CI verdict over its check runs and commit statuses. `corralctl deps
+  plan <owner>` tiers each one: 1 fold as is, 2 fix first, 3 needs a
+  person (a major or pre-1.0 minor jump), 4 close (superseded by a newer
+  pull request, or a known-bad version with no fix). It names the bumps
+  open in three or more repositories as fleet batches with a canary, and
+  `--overrides` takes known-bad versions, such as config-kit 0.0.9
+  superseded by 0.0.10. Both are read-only and print text or
+  `--output json`. Every kept update's action folds it into the
+  repository's `feat/v<next>` branch, as `~/Code/AGENTS.md` section 3
+  requires; nothing merges a Dependabot pull request into `main`.
+- `corralctl deps apply <owner>` applies the plan. Per repository with
+  tier 1 updates it creates `feat/v<next>` from the default branch if
+  needed (`<next>` is the newest `vX.Y.Z` tag plus 0.0.1, v0.0.999
+  followed by v0.1.0), merges each tier 1 pull request's head into it
+  through the GitHub merges API (a merge commit GitHub signs, carrying
+  `Signed-off-by` from `--signoff "Name <email>"`), opens the release
+  pull request if none is open, and closes each merged pull request with
+  a comment linking it. Tier 4 pull requests are closed with their
+  reason; tiers 2 and 3 are left for a person. It is a dry run that
+  changes nothing unless `--live`, which requires `--signoff`. A failing
+  repository is reported and skipped; three failures in a row stop the
+  run. Release pull requests open as drafts, for the version and
+  changelog to be prepared before review.
+- A bump open in several repositories (a fleet) is folded into one canary
+  repository first. Its siblings follow only once the checks on the
+  canary's release pull request pass, read every 30 seconds for up to
+  `--ci-timeout` (15 minutes by default); if they fail, stay unfinished,
+  cannot be read, or the canary's own fold failed, the siblings are held
+  and the run says why. A sibling's other updates and closes do not wait.
+  The canary is a repository whose `feat/v<next>` the run creates when
+  one exists: a fresh branch carries only the run's folds, where an
+  existing one may hold unreleased work whose checks fail on their own.
+- `deps apply` merges the release pull requests earlier runs opened once
+  they are ready. Each one it opens is labelled `corral-deps`; at the
+  start of a run it finds them with one search and merges one only when
+  every commit is a Dependabot change, a `deps` fold merge, an update of
+  the branch from its base, or the release preparation, a
+  `chore(release):` commit is there, and its checks pass. A draft is
+  marked ready for review first (GraphQL; REST cannot), and the merge
+  uses the first method the repository allows of merge commit, squash
+  and rebase, with `Signed-off-by` from `--signoff`. Anything else is
+  left with the reason (`wait`); an unprepared release is never merged,
+  so the default branch never gets an unversioned iteration. Tagging and
+  publishing stay with the maintainer.
+- `deps apply` keeps one release at a time. It skips, and names, a
+  repository with another `feat/v*` release pull request already open,
+  and one whose `feat/v<next>` was merged with its release preparation
+  (a CHANGELOG heading for the version at the merge commit) but never
+  tagged: its version files are checked and it is tagged first. Of the
+  54 on this account, 4 had the changelog entry but a manifest still on
+  the previous version, so the changelog alone does not make a release
+  taggable. A `feat/v<next>` merged without
+  its preparation never released the version, which stays the next one:
+  the run folds into it again and opens a new draft release pull
+  request. The dry run on this account found 54 merged, untagged
+  release branches: 28 unprepared, 26 with a changelog entry.
+- Release notes in the standard layout, written by the release workflow.
+  A new `notes` job runs `scripts/release_notes.py` after the assets are
+  published and applies its output with `gh release edit`: the
+  hand-written Highlights from `.github/releases/vX.Y.Z.md`, What's
+  Changed, New Contributors, Checksums of every asset, and the Full
+  Changelog link. goreleaser's own layout had to be corrected by hand
+  after every release. `release_preflight.py` now fails a release whose
+  Highlights file is missing, holds other than 2 to 4 bullets, or
+  contains an em dash, and treats `notes` as a publisher that must not
+  be able to fail the release.
+
 ## [0.0.57] - 2026-11-26
 
 ### Fixed
