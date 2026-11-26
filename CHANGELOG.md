@@ -13,6 +13,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   rate limit, so the v0.0.57 publish failed with HTTP 403 and needed a
   re-run.
 
+### Changed
+
+- `ossf/scorecard-action` moves from v2.5.0 to v2.6.0. The hold in 0.0.56
+  was for ossf/scorecard-action#1752, v2.6.0's image index referencing
+  platform manifests that returned 404; the issue is closed and the
+  index and both its manifests now resolve on ghcr.io.
+
 ### Added
 
 - `corralctl deps inventory <owner>` lists every open Dependabot pull
