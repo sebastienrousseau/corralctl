@@ -40,7 +40,12 @@ func TestDecideTiersEachKindOfUpdate(t *testing.T) {
 		{"failing", PR{Title: "bump a from 1.2.3 to 1.2.4", CI: CIFailure, Mergeable: "clean"}, TierRemediate, "checks fail"},
 		{"pending", PR{Title: "bump a from 1.2.3 to 1.2.4", CI: CIPending, Mergeable: "clean"}, TierRemediate, "checks are pending"},
 		{"no checks", PR{Title: "bump a from 1.2.3 to 1.2.4", CI: CINone, Mergeable: "clean"}, TierRemediate, "checks are none"},
-		{"behind", PR{Title: "bump a from 1.2.3 to 1.2.4", CI: CISuccess, Mergeable: "behind"}, TierRemediate, "branch is behind"},
+		{"conflicting", PR{Title: "bump a from 1.2.3 to 1.2.4", CI: CISuccess, Mergeable: "dirty"}, TierRemediate, "conflicts with its base"},
+		// Funnelled updates are cherry-picked, never merged from their own
+		// pull request, so its base-branch protection is no obstacle.
+		{"behind", PR{Title: "bump a from 1.2.3 to 1.2.4", CI: CISuccess, Mergeable: "behind"}, TierFast, "a patch update"},
+		{"blocked", PR{Title: "bump a from 1.2.3 to 1.2.4", CI: CISuccess, Mergeable: "blocked"}, TierFast, "a patch update"},
+		{"requirement range", green("update s requirement from >=0.6.0,<0.8 to >=0.6.0,<0.9", npmBranch), TierRemediate, "not limited"},
 		{"downgrade", green("bump a from 1.2.4 to 1.2.3", npmBranch), TierRemediate, "not limited"},
 		{"rewritten title", green("Update dependencies", npmBranch), TierRemediate, "not in a form"},
 	}

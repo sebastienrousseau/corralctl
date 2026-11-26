@@ -42,17 +42,25 @@ var (
 	// single matches "bump <pkg> from <a> to <b>", whatever precedes it
 	// ("chore(deps): ", "build(deps-dev): Bump ", "deps: Bump ").
 	single = regexp.MustCompile(`(?i)\bbump\s+(\S+)\s+from\s+(\S+)\s+to\s+(\S+)`)
+	// requirement matches "update <pkg> requirement from <range> to
+	// <range>", which Dependabot writes when it widens a version range
+	// (pip, Poetry) instead of pinning a version.
+	requirement = regexp.MustCompile(`(?i)\bupdate\s+(\S+)\s+requirement\s+from\s+(\S+)\s+to\s+(\S+)`)
 	// group matches "bump the <name> group ... with <n> update(s)".
 	group = regexp.MustCompile(`(?i)\bbump\s+the\s+(\S+)\s+group\b.*?\bwith\s+(\d+)\s+updates?\b`)
 	// inGroup matches the group a single bump was made in.
 	inGroup = regexp.MustCompile(`(?i)\bin\s+the\s+(\S+)\s+group\b`)
 )
 
-// ParseTitle reads a Dependabot pull request title. ok is false when the
-// title is in neither the single nor the group form, which is a title a
-// person rewrote; such a pull request is triaged by hand.
+// ParseTitle reads a Dependabot pull request title: a single bump, a range
+// ("requirement") update, or a group update. ok is false for any other
+// title, which a person rewrote; such a pull request is triaged by hand.
 func ParseTitle(title string) (b Bump, ok bool) {
-	if m := single.FindStringSubmatch(title); m != nil {
+	m := single.FindStringSubmatch(title)
+	if m == nil {
+		m = requirement.FindStringSubmatch(title)
+	}
+	if m != nil {
 		b = Bump{Package: m[1], From: m[2], To: m[3], Updates: 1}
 		if g := inGroup.FindStringSubmatch(title); g != nil {
 			b.Group = g[1]

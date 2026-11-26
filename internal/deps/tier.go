@@ -124,8 +124,12 @@ func (d Decision) byState() Decision {
 	case !d.lowRisk():
 		return d.set(TierRemediate, "a group whose contents are not limited to minor and patch updates",
 			"review each update in the group before folding it")
-	case pr.Mergeable != "clean":
-		return d.set(TierRemediate, "the branch is "+pr.Mergeable, Fold+", resolving the conflict there")
+	// Only a conflict matters: a kept update is cherry-picked onto
+	// feat/v<next>, never merged from its own pull request, so that pull
+	// request being behind or blocked by base-branch protection is no
+	// obstacle.
+	case pr.Mergeable == "dirty":
+		return d.set(TierRemediate, "the branch conflicts with its base", Fold+", resolving the conflict there")
 	default:
 		return d.set(TierFast, "a "+string(d.Jump)+" update with green checks", Fold)
 	}

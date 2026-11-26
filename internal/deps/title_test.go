@@ -28,6 +28,8 @@ func TestParseTitleReadsEveryFormDependabotUses(t *testing.T) {
 			Bump{Group: "python-dependencies", Updates: 17}},
 		{"ci: Bump the github-actions group with 1 update",
 			Bump{Group: "github-actions", Updates: 1}},
+		{"chore(deps):(deps-dev): update pydata-sphinx-theme requirement from >=0.15,<0.24 to >=0.15,<0.25",
+			Bump{Package: "pydata-sphinx-theme", From: ">=0.15,<0.24", To: ">=0.15,<0.25", Updates: 1}},
 	}
 	for _, c := range cases {
 		got, ok := ParseTitle(c.title)
