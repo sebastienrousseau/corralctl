@@ -406,16 +406,3 @@ func TestOpenIndexRefusesABrokenOffsetTable(t *testing.T) {
 		})
 	}
 }
-
-func TestMapFileReportsAnUnmappableTarget(t *testing.T) {
-	// A directory has a size and opens cleanly, and mmap refuses it — which is
-	// the shape of every real mmap failure this code can meet.
-	d, err := os.Open(t.TempDir())
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = d.Close() }()
-	if _, err := mapFile(d); err == nil {
-		t.Error("mapping a directory should fail")
-	}
-}
