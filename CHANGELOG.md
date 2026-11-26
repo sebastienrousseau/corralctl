@@ -47,6 +47,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `--ci-timeout` (15 minutes by default); if they fail, stay unfinished,
   cannot be read, or the canary's own fold failed, the siblings are held
   and the run says why. A sibling's other updates and closes do not wait.
+- `deps apply` merges the release pull requests earlier runs opened once
+  they are ready. Each one it opens is labelled `corral-deps`; at the
+  start of a run it finds them with one search and merges one only when
+  every commit is a Dependabot change, a `deps` fold merge, an update of
+  the branch from its base, or the release preparation, a
+  `chore(release):` commit is there, and its checks pass. A draft is
+  marked ready for review first (GraphQL; REST cannot), and the merge
+  uses the first method the repository allows of merge commit, squash
+  and rebase, with `Signed-off-by` from `--signoff`. Anything else is
+  left with the reason (`wait`); an unprepared release is never merged,
+  so the default branch never gets an unversioned iteration. Tagging and
+  publishing stay with the maintainer.
 - `deps apply` keeps one release at a time. It skips, and names, a
   repository with another `feat/v*` release pull request already open,
   and one whose `feat/v<next>` was merged but never tagged (the first

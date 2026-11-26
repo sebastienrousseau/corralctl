@@ -41,6 +41,10 @@ var (
 	depsClosePR      = github.ClosePullRequest
 	depsPRCI         = github.PullRequestCI
 	depsSleep        = time.Sleep
+	depsLabeled      = github.LabeledPullRequests
+	depsPRCommits    = github.PullRequestCommits
+	depsAddLabel     = github.AddLabel
+	depsMergeRelease = github.MergeReleasePullRequest
 )
 
 // signoffPattern is a DCO identity: "Name <email>".
@@ -77,7 +81,11 @@ var depsApplyCmd = &cobra.Command{
 			return err
 		}
 		folds, skipped := deps.Folds(plan, states)
-		return newApplier(ctx, &lines{w: cmd.OutOrStdout()}, client).runAll(folds, plan.Fleets, skipped)
+		a := newApplier(ctx, &lines{w: cmd.OutOrStdout()}, client)
+		if err := a.settle(args[0]); err != nil {
+			return err
+		}
+		return a.runAll(folds, plan.Fleets, skipped)
 	},
 }
 
@@ -209,13 +217,7 @@ func (a *applier) run(f deps.RepoFold) error {
 	}
 	release, err := applyFold(a.ctx, a.w, a.client, f)
 	if err != nil {
-		a.failed[f.Repo] = true
-		a.failures++
-		a.w.printf("FAIL  %s: %v\n", f.Repo, err)
-		if a.failures >= breakerLimit {
-			return fmt.Errorf("stopped after %d failures in a row; the last: %w", a.failures, err)
-		}
-		return nil
+		return a.fail(f.Repo, err)
 	}
 	a.failures = 0
 	if len(f.Merge) > 0 {
@@ -278,6 +280,79 @@ func (a *applier) waitForChecks(owner, name string, n int) string {
 		}
 		depsSleep(ciPoll)
 	}
+}
+
+// settle merges the release pull requests earlier runs opened that are
+// ready: hygiene and the release preparation only (deps.MergeReady), with
+// passing checks. Any other is left for a person, with the reason.
+func (a *applier) settle(owner string) error {
+	prs, err := depsLabeled(a.ctx, a.client, owner, deps.ReleaseLabel)
+	if err != nil {
+		return err
+	}
+	for _, pr := range prs {
+		if err := a.settleOne(pr); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// settleOne merges one labelled release pull request if it is ready.
+func (a *applier) settleOne(pr github.LabeledPullRequest) error {
+	owner, name, _ := strings.Cut(pr.Repo, "/")
+	why, err := a.mergeBlocker(owner, name, pr.Number)
+	if err != nil {
+		return a.fail(pr.Repo, err)
+	}
+	if why != "" {
+		a.w.printf("wait  %s#%d: %s\n", pr.Repo, pr.Number, why)
+		return nil
+	}
+	a.w.printf("%s  %s#%d: merge the release pull request (hygiene and release preparation only, checks green)\n", verb(), pr.Repo, pr.Number)
+	if !depsLive {
+		return nil
+	}
+	msg := fmt.Sprintf("%s (#%d)\n\nSigned-off-by: %s", pr.Title, pr.Number, depsSignoff)
+	if err := depsMergeRelease(a.ctx, a.client, owner, name, pr.Number, msg); err != nil {
+		return a.fail(pr.Repo, err)
+	}
+	a.failures = 0
+	return nil
+}
+
+// mergeBlocker is "" when owner/name#n may be merged, and otherwise why not.
+func (a *applier) mergeBlocker(owner, name string, n int) (string, error) {
+	commits, err := depsPRCommits(a.ctx, a.client, owner, name, n)
+	if err != nil {
+		return "", err
+	}
+	cs := make([]deps.Commit, 0, len(commits))
+	for _, c := range commits {
+		cs = append(cs, deps.Commit{SHA: c.SHA, Subject: c.Subject, Author: c.Author, Parents: c.Parents})
+	}
+	if ok, why := deps.MergeReady(cs); !ok {
+		return why, nil
+	}
+	ci, err := depsPRCI(a.ctx, a.client, owner, name, n)
+	if err != nil {
+		return "", err
+	}
+	if ci != "success" {
+		return "checks are " + ci, nil
+	}
+	return "", nil
+}
+
+// fail reports one failure and counts it for the breaker.
+func (a *applier) fail(repo string, err error) error {
+	a.failed[repo] = true
+	a.failures++
+	a.w.printf("FAIL  %s: %v\n", repo, err)
+	if a.failures >= breakerLimit {
+		return fmt.Errorf("stopped after %d failures in a row; the last: %w", a.failures, err)
+	}
+	return nil
 }
 
 // applyFold carries out one repository's fold, in the order the release
@@ -343,7 +418,12 @@ func mergeAndOpen(ctx context.Context, w *lines, client *gh.Client, owner, name 
 		return 0, nil
 	}
 	title := "chore(release): " + strings.TrimPrefix(f.Branch, "feat/")
-	return depsCreatePR(ctx, client, owner, name, f.Branch, f.Base, title, releaseBody(f))
+	n, err := depsCreatePR(ctx, client, owner, name, f.Branch, f.Base, title, releaseBody(f))
+	if err != nil {
+		return 0, err
+	}
+	// The label is how a later run finds the release pull requests it may merge.
+	return n, depsAddLabel(ctx, client, owner, name, n, deps.ReleaseLabel)
 }
 
 // releaseBody is the release pull request's opening description: what was

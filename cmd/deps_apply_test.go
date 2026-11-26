@@ -26,6 +26,8 @@ type applyWorld struct {
 	release map[string]int  // repo -> open release pull request
 	fail    map[string]error
 	extra   map[string]github.ReleasePRs // repo -> other or merged release pull requests
+	labeled []github.LabeledPullRequest  // release pull requests earlier runs opened
+	commits map[string][]github.Commit   // "repo#n" -> its commits
 	ci      map[string][]string          // repo -> successive check verdicts on its release pull request
 	sleeps  int
 	writes  []string
@@ -37,10 +39,12 @@ func stubApply(t *testing.T, w *applyWorld) {
 	stubDeps(t)
 	readState, branchExists, releasePRs := depsReadState, depsBranchExists, depsReleasePRs
 	createBranch, merge, createPR, closePR, prCI, sleep := depsCreateBranch, depsMerge, depsCreatePR, depsClosePR, depsPRCI, depsSleep
+	labeled, prCommits, addLabel, mergeRelease := depsLabeled, depsPRCommits, depsAddLabel, depsMergeRelease
 	live, signoff, timeout := depsLive, depsSignoff, depsCITimeout
 	t.Cleanup(func() {
 		depsReadState, depsBranchExists, depsReleasePRs = readState, branchExists, releasePRs
 		depsCreateBranch, depsMerge, depsCreatePR, depsClosePR, depsPRCI, depsSleep = createBranch, merge, createPR, closePR, prCI, sleep
+		depsLabeled, depsPRCommits, depsAddLabel, depsMergeRelease = labeled, prCommits, addLabel, mergeRelease
 		depsLive, depsSignoff, depsCITimeout = live, signoff, timeout
 	})
 	depsCITimeout = 2 * ciPoll
@@ -78,6 +82,22 @@ func stubApply(t *testing.T, w *applyWorld) {
 		return seq[0], nil
 	}
 	depsSleep = func(time.Duration) { w.sleeps++ }
+	depsLabeled = func(_ context.Context, _ *gh.Client, owner, label string) ([]github.LabeledPullRequest, error) {
+		if label != "corral-deps" {
+			t.Errorf("searched label %q", label)
+		}
+		return w.labeled, w.fail["search"]
+	}
+	depsPRCommits = func(_ context.Context, _ *gh.Client, owner, name string, n int) ([]github.Commit, error) {
+		key := fmt.Sprintf("%s/%s#%d", owner, name, n)
+		return w.commits[key], w.fail["commits "+key]
+	}
+	depsAddLabel = func(_ context.Context, _ *gh.Client, owner, name string, n int, label string) error {
+		return w.write(fmt.Sprintf("label %s/%s#%d %s", owner, name, n, label), "label "+owner+"/"+name)
+	}
+	depsMergeRelease = func(_ context.Context, _ *gh.Client, owner, name string, n int, msg string) error {
+		return w.write(fmt.Sprintf("release %s/%s#%d %q", owner, name, n, msg), "release "+owner+"/"+name)
+	}
 	depsCreateBranch = func(_ context.Context, _ *gh.Client, owner, name, branch, from string) error {
 		return w.write(fmt.Sprintf("branch %s/%s %s<-%s", owner, name, branch, from), "branch "+owner+"/"+name)
 	}
@@ -131,6 +151,7 @@ func world(t *testing.T) *applyWorld {
 		fail:    map[string]error{},
 		extra:   map[string]github.ReleasePRs{},
 		ci:      map[string][]string{},
+		commits: map[string][]github.Commit{},
 	}
 }
 
@@ -182,6 +203,7 @@ func TestDepsApplyLiveFoldsInOrder(t *testing.T) {
 		"branch o/a feat/v0.0.58<-main",
 		`merge o/a feat/v0.0.58<-dependabot/npm_and_yarn/x-1 "Merge #1 into feat/v0.0.58\n\nbump x from 1.0.0 to 1.0.1\n\nSigned-off-by: Ada Lovelace <ada@example.com>"`,
 		`pr o/a feat/v0.0.58->main "chore(release): v0.0.58"`,
+		"label o/a#202 corral-deps",
 		"close o/a#1 \"Folded into `feat/v0.0.58`; it ships with the release pull request #202 (~/Code/AGENTS.md section 3: updates reach main only through feat/v<next>).\"",
 		`merge o/b feat/v0.0.10<-dependabot/npm_and_yarn/x-6 "Merge #6 into feat/v0.0.10\n\nbump z from 1.0.0 to 1.0.2\n\nSigned-off-by: Ada Lovelace <ada@example.com>"`,
 		"close o/b#6 \"Folded into `feat/v0.0.10`; it ships with the release pull request #12 (~/Code/AGENTS.md section 3: updates reach master only through feat/v<next>).\"",
@@ -451,5 +473,124 @@ func TestDepsApplyBreakerStopsAFailingFleet(t *testing.T) {
 	_, err := runDeps(t, "apply", "o", "--live", "--signoff", "A B <a@b.c>")
 	if err == nil || !strings.Contains(err.Error(), "stopped after 3 failures in a row") {
 		t.Errorf("three failing siblings after a passing canary stop the run, got %v", err)
+	}
+}
+
+// ready, unprepared and foreign are the commits of three release pull
+// requests an earlier run opened.
+var (
+	prepCommit = github.Commit{SHA: "r1r1r1r1", Subject: "chore(release): v0.0.2", Author: "sebastienrousseau", Parents: 1}
+	foldCommit = github.Commit{SHA: "f1f1f1f1", Subject: "Merge #5 into feat/v0.0.2", Author: "web-flow", Parents: 2}
+	handCommit = github.Commit{SHA: "h1h1h1h1", Subject: "feat: a person's change", Author: "sebastienrousseau", Parents: 1}
+)
+
+// settleWorld has one release pull request ready to merge (o/r#30), one
+// not yet prepared (o/s#31), one carrying a person's commit (o/t#32), and
+// one whose checks are pending (o/u#33). It has no Dependabot pull
+// requests, so only the settle pass acts.
+func settleWorld(t *testing.T) *applyWorld {
+	w := world(t)
+	w.repos, w.prs = nil, map[string][]github.PullRequest{}
+	w.labeled = []github.LabeledPullRequest{
+		{Repo: "o/r", Number: 30, Title: "chore(release): v0.0.2"},
+		{Repo: "o/s", Number: 31, Title: "chore(release): v0.0.2"},
+		{Repo: "o/t", Number: 32, Title: "chore(release): v0.0.2"},
+		{Repo: "o/u", Number: 33, Title: "chore(release): v0.0.2"},
+	}
+	w.commits = map[string][]github.Commit{
+		"o/r#30": {foldCommit, prepCommit},
+		"o/s#31": {foldCommit},
+		"o/t#32": {foldCommit, handCommit, prepCommit},
+		"o/u#33": {foldCommit, prepCommit},
+	}
+	w.ci["o/u"] = []string{"pending"}
+	return w
+}
+
+func TestDepsApplySettleSaysWhatItWouldMerge(t *testing.T) {
+	w := settleWorld(t)
+	stubApply(t, w)
+	out, err := runDeps(t, "apply", "o")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"plan  o/r#30: merge the release pull request (hygiene and release preparation only, checks green)",
+		"wait  o/s#31: no release preparation yet",
+		"wait  o/t#32: commit h1h1h1h (feat: a person's change) is not a Dependabot change",
+		"wait  o/u#33: checks are pending",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output lacks %q:\n%s", want, out)
+		}
+	}
+	if len(w.writes) != 0 {
+		t.Errorf("a dry run merged %v", w.writes)
+	}
+}
+
+func TestDepsApplySettleMergesOnlyTheReadyOne(t *testing.T) {
+	w := settleWorld(t)
+	stubApply(t, w)
+	if _, err := runDeps(t, "apply", "o", "--live", "--signoff", "Ada Lovelace <ada@example.com>"); err != nil {
+		t.Fatal(err)
+	}
+	want := `release o/r#30 "chore(release): v0.0.2 (#30)\n\nSigned-off-by: Ada Lovelace <ada@example.com>"`
+	if strings.Join(w.writes, "\n") != want {
+		t.Errorf("writes = %v, want only %s", w.writes, want)
+	}
+}
+
+func TestDepsApplySettleReportsFailures(t *testing.T) {
+	w := settleWorld(t)
+	w.fail["commits o/s#31"] = errors.New("boom")
+	w.fail["release o/r"] = errors.New("not mergeable")
+	stubApply(t, w)
+	out, err := runDeps(t, "apply", "o", "--live", "--signoff", "A B <a@b.c>")
+	if err != nil {
+		t.Fatalf("two failures are under the breaker: %v", err)
+	}
+	for _, want := range []string{"FAIL  o/r: not mergeable", "FAIL  o/s: boom", "wait  o/u#33: checks are pending"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output lacks %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestDepsApplySettleReportsAChecksReadFailure(t *testing.T) {
+	w := settleWorld(t)
+	w.fail["ci o/u"] = errors.New("ci down")
+	stubApply(t, w)
+	out, err := runDeps(t, "apply", "o")
+	if err != nil || !strings.Contains(out, "FAIL  o/u: ci down") {
+		t.Errorf("err = %v:\n%s", err, out)
+	}
+}
+
+func TestDepsApplySettleBreakerAndSearchErrors(t *testing.T) {
+	w := settleWorld(t)
+	for _, r := range []string{"o/r", "o/s", "o/t"} {
+		w.commits[r+map[string]string{"o/r": "#30", "o/s": "#31", "o/t": "#32"}[r]] = []github.Commit{foldCommit, prepCommit}
+		w.fail["release "+r] = errors.New("token revoked")
+	}
+	stubApply(t, w)
+	if _, err := runDeps(t, "apply", "o", "--live", "--signoff", "A B <a@b.c>"); err == nil || !strings.Contains(err.Error(), "stopped after 3 failures in a row") {
+		t.Errorf("three failed merges in a row stop the run, got %v", err)
+	}
+	w = settleWorld(t)
+	w.fail["search"] = errors.New("search down")
+	stubApply(t, w)
+	if _, err := runDeps(t, "apply", "o"); err == nil || err.Error() != "search down" {
+		t.Errorf("a failed search stops the run, got %v", err)
+	}
+}
+
+func TestDepsApplyLabelFailureFailsTheRepository(t *testing.T) {
+	w := world(t)
+	w.fail["label o/a"] = errors.New("no label")
+	stubApply(t, w)
+	out, _ := runDeps(t, "apply", "o", "--live", "--signoff", "A B <a@b.c>")
+	if !strings.Contains(out, "FAIL  o/a: no label") {
+		t.Errorf("a release pull request that cannot be labelled fails its repository:\n%s", out)
 	}
 }
