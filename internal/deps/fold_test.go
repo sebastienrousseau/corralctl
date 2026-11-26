@@ -99,3 +99,21 @@ func summarise(f RepoFold) string {
 	return fmt.Sprintf("%s<-%s create=%t open=%t pr=%d merge=%v close=%v",
 		f.Branch, f.Base, f.CreateBranch, f.OpenReleasePR, f.ReleasePR, nums(f.Merge), nums(f.Close))
 }
+
+func TestFoldsKeepsOneReleaseAtATime(t *testing.T) {
+	p := Build([]PR{
+		pr("o/other", 1, "bump x from 1.0.0 to 1.0.1"),
+		pr("o/untagged", 2, "bump x from 1.0.0 to 1.0.1"),
+	}, nil)
+	folds, skipped := Folds(p, map[string]RepoState{
+		"o/other":    {Repo: "o/other", DefaultBranch: "main", LatestTag: "v0.0.57", OtherReleasePR: 7, OtherReleaseBranch: "feat/v0.0.60"},
+		"o/untagged": {Repo: "o/untagged", DefaultBranch: "main", LatestTag: "v0.0.24", BranchExists: true, MergedReleasePR: 8},
+	})
+	want := []string{
+		"o/other: release pull request #7 from feat/v0.0.60 is already open; a repository has one at a time",
+		"o/untagged: feat/v0.0.25 was merged in #8 but v0.0.25 is not tagged; tag that release first",
+	}
+	if len(folds) != 0 || !reflect.DeepEqual(skipped, want) {
+		t.Errorf("folds = %v\nskipped = %v\nwant %v", folds, skipped, want)
+	}
+}

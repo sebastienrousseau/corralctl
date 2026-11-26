@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"regexp"
 	"strconv"
+	"strings"
 
 	gh "github.com/google/go-github/v90/github"
 )
@@ -72,19 +73,63 @@ func BranchExists(ctx context.Context, client *gh.Client, owner, name, branch st
 	}
 }
 
-// OpenPullRequest returns the number of the open pull request from head
-// into base in owner/name, or 0 when there is none.
-func OpenPullRequest(ctx context.Context, client *gh.Client, owner, name, head, base string) (int, error) {
-	prs, _, err := client.PullRequests.List(ctx, owner, name, &gh.PullRequestListOptions{
-		State: "open", Head: owner + ":" + head, Base: base,
+// ReleasePRs is what a repository's pull requests say about its release
+// branch feat/v<next>.
+type ReleasePRs struct {
+	// Open is the open pull request from the release branch, or 0.
+	Open int
+	// Other is an open pull request from another feat/v* branch into the
+	// same base, or 0: a release already in progress.
+	Other int
+	// OtherBranch is Other's head branch.
+	OtherBranch string
+	// Merged is a merged pull request from the release branch, or 0: that
+	// version was merged, and is untagged if it is still <next>.
+	Merged int
+}
+
+// ReleasePullRequests reads the pull requests from feat/v* branches into
+// base in owner/name: open ones (every page) and branch's merged one.
+func ReleasePullRequests(ctx context.Context, client *gh.Client, owner, name, branch, base string) (ReleasePRs, error) {
+	var r ReleasePRs
+	opts := &gh.PullRequestListOptions{State: "open", Base: base, ListOptions: gh.ListOptions{PerPage: 100}}
+	for {
+		page, resp, err := client.PullRequests.List(ctx, owner, name, opts)
+		if err != nil {
+			return r, fmt.Errorf("list pull requests into %s in %s/%s: %w", base, owner, name, err)
+		}
+		for _, pr := range page {
+			r.note(pr, branch)
+		}
+		if resp.NextPage == 0 {
+			break
+		}
+		opts.Page = resp.NextPage
+	}
+	merged, _, err := client.PullRequests.List(ctx, owner, name, &gh.PullRequestListOptions{
+		State: "closed", Head: owner + ":" + branch, Base: base,
 	})
 	if err != nil {
-		return 0, fmt.Errorf("list pull requests from %s in %s/%s: %w", head, owner, name, err)
+		return r, fmt.Errorf("list closed pull requests from %s in %s/%s: %w", branch, owner, name, err)
 	}
-	if len(prs) == 0 {
-		return 0, nil
+	for _, pr := range merged {
+		if pr.MergedAt != nil {
+			r.Merged = pr.GetNumber()
+			break
+		}
 	}
-	return prs[0].GetNumber(), nil
+	return r, nil
+}
+
+// note records an open pull request that comes from a release branch.
+func (r *ReleasePRs) note(pr *gh.PullRequest, branch string) {
+	head := pr.GetHead().GetRef()
+	switch {
+	case head == branch:
+		r.Open = pr.GetNumber()
+	case strings.HasPrefix(head, "feat/v") && r.Other == 0:
+		r.Other, r.OtherBranch = pr.GetNumber(), head
+	}
 }
 
 // CreateBranch creates branch in owner/name at the head of from.
@@ -122,11 +167,13 @@ func MergeBranch(ctx context.Context, client *gh.Client, owner, name, base, head
 	}
 }
 
-// CreatePullRequest opens a pull request from head into base in owner/name
-// and returns its number.
-func CreatePullRequest(ctx context.Context, client *gh.Client, owner, name, head, base, title, body string) (int, error) {
+// CreateDraftPullRequest opens a draft pull request from head into base in
+// owner/name and returns its number. A release pull request starts as a
+// draft: it is ready once a person has prepared the version.
+func CreateDraftPullRequest(ctx context.Context, client *gh.Client, owner, name, head, base, title, body string) (int, error) {
+	draft := true
 	pr, _, err := client.PullRequests.Create(ctx, owner, name, gh.CreatePullRequest{
-		Title: &title, Head: head, Base: base, Body: &body,
+		Title: &title, Head: head, Base: base, Body: &body, Draft: &draft,
 	})
 	if err != nil {
 		return 0, fmt.Errorf("open a pull request from %s in %s/%s: %w", head, owner, name, err)

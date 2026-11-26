@@ -145,3 +145,17 @@ func (v verdict) String() string {
 		return "none"
 	}
 }
+
+// PullRequestCI is the combined check verdict ("success", "failure",
+// "pending" or "none") on the current head of owner/name#number.
+func PullRequestCI(ctx context.Context, client *gh.Client, owner, name string, number int) (string, error) {
+	pr, _, err := client.PullRequests.Get(ctx, owner, name, number)
+	if err != nil {
+		return "", fmt.Errorf("read %s/%s#%d: %w", owner, name, number, err)
+	}
+	ci, err := checkState(ctx, client, owner, name, pr.GetHead().GetSHA())
+	if err != nil {
+		return "", fmt.Errorf("read checks for %s/%s#%d: %w", owner, name, number, err)
+	}
+	return ci, nil
+}

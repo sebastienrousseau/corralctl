@@ -123,25 +123,46 @@ func TestBranchExistsTellsMissingFromBroken(t *testing.T) {
 	}
 }
 
-func TestOpenPullRequestFindsTheReleasePullRequest(t *testing.T) {
+func TestReleasePullRequestsReadsOpenOtherAndMerged(t *testing.T) {
 	var seen []string
-	client := newTestClient(releaseAPI(t, map[string]route{
-		"GET /repos/o/r/pulls": {200, `[{"number": 201}]`},
-	}, &seen))
-	n, err := OpenPullRequest(bg, client, "o", "r", "feat/v0.0.58", "main")
-	if err != nil || n != 201 {
-		t.Errorf("got %d, %v", n, err)
+	api := roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		seen = append(seen, req.URL.RawQuery)
+		q := req.URL.Query()
+		switch {
+		case q.Get("state") == "open" && q.Get("page") == "":
+			return jsonResp(req, 200, `[{"number": 3, "head": {"ref": "dependabot/x"}},
+				{"number": 7, "head": {"ref": "feat/v0.0.60"}}]`,
+				map[string]string{"Link": `<https://api.test/repos/o/r/pulls?page=2>; rel="next"`}), nil
+		case q.Get("state") == "open":
+			return jsonResp(req, 200, `[{"number": 201, "head": {"ref": "feat/v0.0.58"}},
+				{"number": 8, "head": {"ref": "feat/v0.0.61"}}]`, nil), nil
+		default:
+			return jsonResp(req, 200, `[{"number": 150, "head": {"ref": "feat/v0.0.58"}},
+				{"number": 151, "head": {"ref": "feat/v0.0.58"}, "merged_at": "2026-11-22T07:40:41Z"}]`, nil), nil
+		}
+	})
+	got, err := ReleasePullRequests(bg, newTestClient(api), "o", "r", "feat/v0.0.58", "main")
+	want := ReleasePRs{Open: 201, Other: 7, OtherBranch: "feat/v0.0.60", Merged: 151}
+	if err != nil || got != want {
+		t.Errorf("got %+v, %v; want %+v", got, err, want)
 	}
-	if !strings.Contains(seen[0], "head=o%3Afeat%2Fv0.0.58") || !strings.Contains(seen[0], "base=main") || !strings.Contains(seen[0], "state=open") {
-		t.Errorf("query = %s", seen[0])
+	if !strings.Contains(seen[0], "base=main") || !strings.Contains(seen[2], "head=o%3Afeat%2Fv0.0.58") || !strings.Contains(seen[2], "state=closed") {
+		t.Errorf("queries = %v", seen)
 	}
-	client = newTestClient(releaseAPI(t, map[string]route{"GET /repos/o/r/pulls": {200, `[]`}}, nil))
-	if n, err := OpenPullRequest(bg, client, "o", "r", "feat/v0.0.58", "main"); err != nil || n != 0 {
-		t.Errorf("none open: got %d, %v", n, err)
-	}
-	client = newTestClient(releaseAPI(t, map[string]route{"GET /repos/o/r/pulls": {500, `{}`}}, nil))
-	if _, err := OpenPullRequest(bg, client, "o", "r", "feat/v0.0.58", "main"); err == nil {
-		t.Error("a listing error is an error")
+}
+
+func TestReleasePullRequestsNamesWhatFailed(t *testing.T) {
+	for state, want := range map[string]string{"open": "list pull requests into main", "closed": "list closed pull requests from feat/v0.0.58"} {
+		api := roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			if req.URL.Query().Get("state") == state {
+				return jsonResp(req, 500, `{}`, nil), nil
+			}
+			return jsonResp(req, 200, `[]`, nil), nil
+		})
+		_, err := ReleasePullRequests(bg, newTestClient(api), "o", "r", "feat/v0.0.58", "main")
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("failing %s: err = %v, want %q", state, err, want)
+		}
 	}
 }
 
@@ -206,13 +227,17 @@ func TestMergeBranchReadsEveryOutcome(t *testing.T) {
 	}
 }
 
-func TestCreatePullRequestReturnsItsNumber(t *testing.T) {
-	client := newTestClient(releaseAPI(t, map[string]route{"POST /repos/o/r/pulls": {201, `{"number": 202}`}}, nil))
-	if n, err := CreatePullRequest(bg, client, "o", "r", "feat/v0.0.58", "main", "t", "b"); err != nil || n != 202 {
+func TestCreateDraftPullRequestReturnsItsNumber(t *testing.T) {
+	var seen []string
+	client := newTestClient(releaseAPI(t, map[string]route{"POST /repos/o/r/pulls": {201, `{"number": 202}`}}, &seen))
+	if n, err := CreateDraftPullRequest(bg, client, "o", "r", "feat/v0.0.58", "main", "t", "b"); err != nil || n != 202 {
 		t.Errorf("got %d, %v", n, err)
 	}
+	if !strings.Contains(seen[0], `"draft":true`) {
+		t.Errorf("a release pull request opens as a draft: %s", seen[0])
+	}
 	client = newTestClient(releaseAPI(t, map[string]route{"POST /repos/o/r/pulls": {422, `{}`}}, nil))
-	if _, err := CreatePullRequest(bg, client, "o", "r", "feat/v0.0.58", "main", "t", "b"); err == nil {
+	if _, err := CreateDraftPullRequest(bg, client, "o", "r", "feat/v0.0.58", "main", "t", "b"); err == nil {
 		t.Error("a refused pull request is an error")
 	}
 }

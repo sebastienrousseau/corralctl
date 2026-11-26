@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	gh "github.com/google/go-github/v90/github"
 	"github.com/sebastienrousseau/corralctl/internal/github"
@@ -24,6 +25,9 @@ type applyWorld struct {
 	exists  map[string]bool // repo -> feat/v<next> exists
 	release map[string]int  // repo -> open release pull request
 	fail    map[string]error
+	extra   map[string]github.ReleasePRs // repo -> other or merged release pull requests
+	ci      map[string][]string          // repo -> successive check verdicts on its release pull request
+	sleeps  int
 	writes  []string
 }
 
@@ -31,18 +35,15 @@ type applyWorld struct {
 func stubApply(t *testing.T, w *applyWorld) {
 	t.Helper()
 	stubDeps(t)
-	saved := []any{depsReadState, depsBranchExists, depsOpenPR, depsCreateBranch, depsMerge, depsCreatePR, depsClosePR}
-	live, signoff := depsLive, depsSignoff
+	readState, branchExists, releasePRs := depsReadState, depsBranchExists, depsReleasePRs
+	createBranch, merge, createPR, closePR, prCI, sleep := depsCreateBranch, depsMerge, depsCreatePR, depsClosePR, depsPRCI, depsSleep
+	live, signoff, timeout := depsLive, depsSignoff, depsCITimeout
 	t.Cleanup(func() {
-		depsReadState = saved[0].(func(context.Context, *gh.Client, string, string) (github.ReleaseState, error))
-		depsBranchExists = saved[1].(func(context.Context, *gh.Client, string, string, string) (bool, error))
-		depsOpenPR = saved[2].(func(context.Context, *gh.Client, string, string, string, string) (int, error))
-		depsCreateBranch = saved[3].(func(context.Context, *gh.Client, string, string, string, string) error)
-		depsMerge = saved[4].(func(context.Context, *gh.Client, string, string, string, string, string) (string, error))
-		depsCreatePR = saved[5].(func(context.Context, *gh.Client, string, string, string, string, string, string) (int, error))
-		depsClosePR = saved[6].(func(context.Context, *gh.Client, string, string, int, string) error)
-		depsLive, depsSignoff = live, signoff
+		depsReadState, depsBranchExists, depsReleasePRs = readState, branchExists, releasePRs
+		depsCreateBranch, depsMerge, depsCreatePR, depsClosePR, depsPRCI, depsSleep = createBranch, merge, createPR, closePR, prCI, sleep
+		depsLive, depsSignoff, depsCITimeout = live, signoff, timeout
 	})
+	depsCITimeout = 2 * ciPoll
 	depsFetchRepos = func(_ context.Context, owner string, _ github.FetchOptions) ([]github.Repo, error) {
 		var out []github.Repo
 		for _, r := range w.repos {
@@ -59,9 +60,24 @@ func stubApply(t *testing.T, w *applyWorld) {
 	depsBranchExists = func(_ context.Context, _ *gh.Client, owner, name, branch string) (bool, error) {
 		return w.exists[owner+"/"+name], w.fail["exists "+owner+"/"+name]
 	}
-	depsOpenPR = func(_ context.Context, _ *gh.Client, owner, name, head, base string) (int, error) {
-		return w.release[owner+"/"+name], w.fail["openpr "+owner+"/"+name]
+	depsReleasePRs = func(_ context.Context, _ *gh.Client, owner, name, branch, base string) (github.ReleasePRs, error) {
+		r := w.extra[owner+"/"+name]
+		r.Open = w.release[owner+"/"+name]
+		return r, w.fail["openpr "+owner+"/"+name]
 	}
+	depsPRCI = func(_ context.Context, _ *gh.Client, owner, name string, n int) (string, error) {
+		repo := owner + "/" + name
+		if err := w.fail["ci "+repo]; err != nil {
+			return "", err
+		}
+		seq := w.ci[repo]
+		if len(seq) == 0 {
+			return "success", nil
+		}
+		w.ci[repo] = seq[1:]
+		return seq[0], nil
+	}
+	depsSleep = func(time.Duration) { w.sleeps++ }
 	depsCreateBranch = func(_ context.Context, _ *gh.Client, owner, name, branch, from string) error {
 		return w.write(fmt.Sprintf("branch %s/%s %s<-%s", owner, name, branch, from), "branch "+owner+"/"+name)
 	}
@@ -69,7 +85,11 @@ func stubApply(t *testing.T, w *applyWorld) {
 		return "m", w.write(fmt.Sprintf("merge %s/%s %s<-%s %q", owner, name, base, head, msg), "merge "+owner+"/"+name)
 	}
 	depsCreatePR = func(_ context.Context, _ *gh.Client, owner, name, head, base, title, body string) (int, error) {
-		return 202, w.write(fmt.Sprintf("pr %s/%s %s->%s %q", owner, name, head, base, title), "pr "+owner+"/"+name)
+		n := 202
+		if w.fail["nopr "+owner+"/"+name] != nil {
+			n = 0
+		}
+		return n, w.write(fmt.Sprintf("pr %s/%s %s->%s %q", owner, name, head, base, title), "pr "+owner+"/"+name)
 	}
 	depsClosePR = func(_ context.Context, _ *gh.Client, owner, name string, n int, comment string) error {
 		return w.write(fmt.Sprintf("close %s/%s#%d %q", owner, name, n, comment), "close "+owner+"/"+name)
@@ -109,6 +129,8 @@ func world(t *testing.T) *applyWorld {
 		exists:  map[string]bool{"o/b": true},
 		release: map[string]int{"o/b": 12},
 		fail:    map[string]error{},
+		extra:   map[string]github.ReleasePRs{},
+		ci:      map[string][]string{},
 	}
 }
 
@@ -122,7 +144,7 @@ func TestDepsApplyDryRunChangesNothing(t *testing.T) {
 	for _, want := range []string{
 		"plan  o/a: create feat/v0.0.58 from main",
 		"plan  o/a: merge #1 (dependabot/npm_and_yarn/x-1) into feat/v0.0.58",
-		"plan  o/a: open the release pull request feat/v0.0.58 -> main",
+		"plan  o/a: open the release pull request feat/v0.0.58 -> main (draft)",
 		"plan  o/a: close #1",
 		"plan  o/b: merge #6", "plan  o/b: close #6", "plan  o/b: close #5",
 		"dry run: nothing was changed; pass --live to apply",
@@ -228,8 +250,10 @@ func TestDepsApplyClosesTierFourEvenWhereNothingMerges(t *testing.T) {
 func TestDepsApplyStopsAfterThreeFailuresInARow(t *testing.T) {
 	w := world(t)
 	w.repos = []string{"a", "b", "c", "d"}
-	for _, r := range []string{"o/a", "o/b", "o/c", "o/d"} {
-		w.prs[r] = []github.PullRequest{dependabotPR(r, 1, "bump x from 1.0.0 to 1.0.1")}
+	for i, r := range []string{"o/a", "o/b", "o/c", "o/d"} {
+		// A different package each: the same bump would be a fleet, held
+		// behind its canary instead of tried four times.
+		w.prs[r] = []github.PullRequest{dependabotPR(r, 1, fmt.Sprintf("bump p%d from 1.0.0 to 1.0.1", i))}
 		w.states[r] = github.ReleaseState{DefaultBranch: "main", LatestTag: "v0.0.1"}
 		w.fail["merge "+r] = errors.New("token revoked")
 	}
@@ -292,8 +316,140 @@ func TestDepsApplyReadsEachRepositoryOnce(t *testing.T) {
 
 func TestDepsApplyReportsAClosedPipe(t *testing.T) {
 	stubApply(t, world(t))
-	err := runFolds(context.Background(), &lines{w: errorWriter{}}, nil, nil, []string{"o/x: one", "o/y: two"})
+	err := newApplier(context.Background(), &lines{w: errorWriter{}}, nil).runAll(nil, nil, []string{"o/x: one", "o/y: two"})
 	if err == nil {
 		t.Error("a failed write should end the run with an error")
+	}
+}
+
+// fleetWorld is the config-kit case: the same bump open in o/a, o/b and
+// o/c. o/a is the canary; o/c also has its own unrelated update.
+func fleetWorld(t *testing.T) *applyWorld {
+	w := world(t)
+	kit := "bump kit from 0.0.9 to 0.0.10"
+	w.repos = []string{"a", "b", "c"}
+	w.prs = map[string][]github.PullRequest{
+		"o/a": {dependabotPR("o/a", 1, kit)},
+		"o/b": {dependabotPR("o/b", 2, kit)},
+		"o/c": {dependabotPR("o/c", 3, kit), dependabotPR("o/c", 4, "bump other from 1.0.0 to 1.0.1")},
+	}
+	w.states = map[string]github.ReleaseState{}
+	for _, r := range []string{"o/a", "o/b", "o/c"} {
+		w.states[r] = github.ReleaseState{DefaultBranch: "main", LatestTag: "v0.0.1"}
+	}
+	w.exists, w.release = map[string]bool{}, map[string]int{}
+	return w
+}
+
+func TestDepsApplyDryRunNamesTheCanary(t *testing.T) {
+	stubApply(t, fleetWorld(t))
+	out, err := runDeps(t, "apply", "o")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"fleet kit to 0.0.10: canary o/a, then 2 sibling(s)",
+		"plan  wait for o/a's release pull request checks to pass",
+		"plan  o/b: merge #2", "plan  o/c: merge #3",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("dry run lacks %q:\n%s", want, out)
+		}
+	}
+	// o/c's own update runs before the canary's checks; its kit bump after.
+	if strings.Index(out, "o/c: merge #4") > strings.Index(out, "wait for o/a") ||
+		strings.Index(out, "o/c: merge #3") < strings.Index(out, "wait for o/a") {
+		t.Errorf("o/c's free update goes first and its fleet bump after the canary:\n%s", out)
+	}
+	if strings.Count(out, "o/c: create feat/v0.0.2") != 1 || strings.Count(out, "o/c: open the release") != 1 {
+		t.Errorf("o/c's branch and release pull request are made once, then reused:\n%s", out)
+	}
+}
+
+func TestDepsApplyFoldsTheSiblingsOnceTheCanaryPasses(t *testing.T) {
+	w := fleetWorld(t)
+	w.ci["o/a"] = []string{"none", "pending", "success"}
+	stubApply(t, w)
+	out, err := runDeps(t, "apply", "o", "--live", "--signoff", "A B <a@b.c>")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if w.sleeps != 2 {
+		t.Errorf("polled the canary %d times between reads, want 2", w.sleeps)
+	}
+	joined := strings.Join(w.writes, "\n")
+	for _, want := range []string{"merge o/b feat/v0.0.2<-dependabot/npm_and_yarn/x-2", "merge o/c feat/v0.0.2<-dependabot/npm_and_yarn/x-3"} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("writes lack %q:\n%s", want, joined)
+		}
+	}
+	if strings.Count(joined, "branch o/c") != 1 || strings.Count(joined, "pr o/c") != 1 {
+		t.Errorf("o/c's branch and release pull request are created once:\n%s", joined)
+	}
+	if strings.Contains(out, "hold") {
+		t.Errorf("nothing is held when the canary passes:\n%s", out)
+	}
+}
+
+func TestDepsApplyHoldsTheSiblingsWhenTheCanaryDoesNotPass(t *testing.T) {
+	cases := map[string]func(w *applyWorld){
+		"checks on #202 failed":                  func(w *applyWorld) { w.ci["o/a"] = []string{"pending", "failure"} },
+		"checks on #202 were pending after 1m0s": func(w *applyWorld) { w.ci["o/a"] = []string{"pending", "pending", "pending", "pending"} },
+		"its checks could not be read: boom":     func(w *applyWorld) { w.fail["ci o/a"] = errors.New("boom") },
+		"the canary's own fold failed":           func(w *applyWorld) { w.fail["merge o/a"] = errors.New("boom") },
+		"the canary has no release pull request": func(w *applyWorld) { w.fail["nopr o/a"] = errors.New("GitHub returned no number") },
+	}
+	for why, setUp := range cases {
+		w := fleetWorld(t)
+		setUp(w)
+		stubApply(t, w)
+		out, err := runDeps(t, "apply", "o", "--live", "--signoff", "A B <a@b.c>")
+		if err != nil {
+			t.Errorf("%s: a held fleet is not a failed run: %v", why, err)
+		}
+		for _, want := range []string{"hold  o/b: waits on canary o/a (" + why + ")", "hold  o/c: waits on canary o/a (" + why + ")"} {
+			if !strings.Contains(out, want) {
+				t.Errorf("%s: output lacks %q:\n%s", why, want, out)
+			}
+		}
+		if strings.Contains(strings.Join(w.writes, "\n"), "merge o/b") {
+			t.Errorf("%s: a held sibling must not be merged: %v", why, w.writes)
+		}
+	}
+}
+
+func TestDepsApplyReadsOtherAndMergedReleasePullRequests(t *testing.T) {
+	w := world(t)
+	w.extra["o/a"] = github.ReleasePRs{Other: 7, OtherBranch: "feat/v0.0.60"}
+	w.extra["o/b"] = github.ReleasePRs{Merged: 8}
+	stubApply(t, w)
+	out, err := runDeps(t, "apply", "o")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"skip  o/a: release pull request #7 from feat/v0.0.60 is already open",
+		"skip  o/b: feat/v0.0.10 was merged in #8 but v0.0.10 is not tagged",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output lacks %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestDepsApplyBreakerStopsAFailingFleet(t *testing.T) {
+	w := fleetWorld(t)
+	kit := "bump kit from 0.0.9 to 0.0.10"
+	w.repos = append(w.repos, "d")
+	w.prs["o/c"] = []github.PullRequest{dependabotPR("o/c", 3, kit)}
+	w.prs["o/d"] = []github.PullRequest{dependabotPR("o/d", 5, kit)}
+	w.states["o/d"] = github.ReleaseState{DefaultBranch: "main", LatestTag: "v0.0.1"}
+	for _, r := range []string{"o/b", "o/c", "o/d"} {
+		w.fail["merge "+r] = errors.New("token revoked")
+	}
+	stubApply(t, w)
+	_, err := runDeps(t, "apply", "o", "--live", "--signoff", "A B <a@b.c>")
+	if err == nil || !strings.Contains(err.Error(), "stopped after 3 failures in a row") {
+		t.Errorf("three failing siblings after a passing canary stop the run, got %v", err)
 	}
 }

@@ -122,3 +122,19 @@ func TestVerdictCombinesRunsAndStatuses(t *testing.T) {
 		}
 	}
 }
+
+func TestPullRequestCIReadsTheHeadsChecks(t *testing.T) {
+	client := newTestClient(pullsAPI(t, fixture(), ""))
+	if ci, err := PullRequestCI(context.Background(), client, "o", "r", 7); err != nil || ci != "failure" {
+		t.Errorf("got %q, %v", ci, err)
+	}
+	for path, want := range map[string]string{
+		"/repos/o/r/pulls/7":               "read o/r#7",
+		"/repos/o/r/commits/s7/check-runs": "read checks for o/r#7",
+	} {
+		client := newTestClient(pullsAPI(t, fixture(), path))
+		if _, err := PullRequestCI(context.Background(), client, "o", "r", 7); err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("failing %s: err = %v, want %q", path, err, want)
+		}
+	}
+}

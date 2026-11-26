@@ -50,6 +50,14 @@ type RepoState struct {
 	// ReleasePR is the open pull request from feat/v<next> into the default
 	// branch, or 0 when there is none.
 	ReleasePR int `json:"release_pr"`
+	// OtherReleasePR is an open pull request from another feat/v* branch,
+	// or 0: a repository has one release pull request at a time.
+	OtherReleasePR int `json:"other_release_pr,omitempty"`
+	// OtherReleaseBranch is OtherReleasePR's head branch.
+	OtherReleaseBranch string `json:"other_release_branch,omitempty"`
+	// MergedReleasePR is a merged pull request from feat/v<next>, or 0:
+	// that version was merged but never tagged.
+	MergedReleasePR int `json:"merged_release_pr,omitempty"`
 }
 
 // RepoFold is what applying a plan does in one repository: fold the kept
@@ -123,6 +131,12 @@ func (f *RepoFold) target(s RepoState) error {
 	next, err := NextVersion(s.LatestTag)
 	if err != nil {
 		return err
+	}
+	if s.OtherReleasePR != 0 {
+		return fmt.Errorf("release pull request #%d from %s is already open; a repository has one at a time", s.OtherReleasePR, s.OtherReleaseBranch)
+	}
+	if s.MergedReleasePR != 0 {
+		return fmt.Errorf("feat/%s was merged in #%d but %s is not tagged; tag that release first", next, s.MergedReleasePR, next)
 	}
 	f.Branch, f.Base = "feat/"+next, s.DefaultBranch
 	f.CreateBranch = !s.BranchExists

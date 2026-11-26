@@ -39,7 +39,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   reason; tiers 2 and 3 are left for a person. It is a dry run that
   changes nothing unless `--live`, which requires `--signoff`. A failing
   repository is reported and skipped; three failures in a row stop the
-  run.
+  run. Release pull requests open as drafts, for the version and
+  changelog to be prepared before review.
+- A bump open in several repositories (a fleet) is folded into one canary
+  repository first. Its siblings follow only once the checks on the
+  canary's release pull request pass, read every 30 seconds for up to
+  `--ci-timeout` (15 minutes by default); if they fail, stay unfinished,
+  cannot be read, or the canary's own fold failed, the siblings are held
+  and the run says why. A sibling's other updates and closes do not wait.
+- `deps apply` keeps one release at a time. It skips, and names, a
+  repository with another `feat/v*` release pull request already open,
+  and one whose `feat/v<next>` was merged but never tagged (the first
+  live dry run found both on this account): that release is tagged
+  first.
 - Release notes in the standard layout, written by the release workflow.
   A new `notes` job runs `scripts/release_notes.py` after the assets are
   published and applies its output with `gh release edit`: the

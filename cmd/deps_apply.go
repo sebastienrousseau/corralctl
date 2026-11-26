@@ -10,6 +10,7 @@ import (
 	"io"
 	"regexp"
 	"strings"
+	"time"
 
 	gh "github.com/google/go-github/v90/github"
 	"github.com/sebastienrousseau/corralctl/internal/deps"
@@ -22,18 +23,24 @@ import (
 // a common workflow), and retrying the rest would only repeat it.
 const breakerLimit = 3
 
-var (
-	depsLive    bool
-	depsSignoff string
+// ciPoll is how often a canary's release pull request checks are read.
+const ciPoll = 30 * time.Second
 
-	// Seams, so a test can stand in for GitHub.
+var (
+	depsLive      bool
+	depsSignoff   string
+	depsCITimeout time.Duration
+
+	// Seams, so a test can stand in for GitHub and the clock.
 	depsReadState    = github.ReadReleaseState
 	depsBranchExists = github.BranchExists
-	depsOpenPR       = github.OpenPullRequest
+	depsReleasePRs   = github.ReleasePullRequests
 	depsCreateBranch = github.CreateBranch
 	depsMerge        = github.MergeBranch
-	depsCreatePR     = github.CreatePullRequest
+	depsCreatePR     = github.CreateDraftPullRequest
 	depsClosePR      = github.ClosePullRequest
+	depsPRCI         = github.PullRequestCI
+	depsSleep        = time.Sleep
 )
 
 // signoffPattern is a DCO identity: "Name <email>".
@@ -43,9 +50,11 @@ var depsApplyCmd = &cobra.Command{
 	Use:   "apply <owner>",
 	Short: "Fold tier 1 updates into each feat/v<next> and close what is done (dry run unless --live)",
 	Long: "Plan as `deps plan` does, then, per repository: create feat/v<next> from the default branch if " +
-		"needed, merge each tier 1 pull request's head into it, open the release pull request if none is " +
-		"open, and close each merged or tier 4 pull request with a comment saying why. Tier 2 and 3 pull " +
-		"requests are left for a person. Without --live it prints what it would do and changes nothing.",
+		"needed, merge each tier 1 pull request's head into it, open the release pull request (as a draft) " +
+		"if none is open, and close each merged or tier 4 pull request with a comment saying why. A bump " +
+		"shared by several repositories is folded into one canary repository first; the others follow only " +
+		"once the canary's release pull request checks pass. Tier 2 and 3 pull requests are left for a " +
+		"person. Without --live it prints what it would do and changes nothing.",
 	Args:    cobra.ExactArgs(1),
 	PreRunE: validateDepsApply,
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -68,7 +77,7 @@ var depsApplyCmd = &cobra.Command{
 			return err
 		}
 		folds, skipped := deps.Folds(plan, states)
-		return runFolds(ctx, &lines{w: cmd.OutOrStdout()}, client, folds, skipped)
+		return newApplier(ctx, &lines{w: cmd.OutOrStdout()}, client).runAll(folds, plan.Fleets, skipped)
 	},
 }
 
@@ -82,7 +91,7 @@ func validateDepsApply(*cobra.Command, []string) error {
 }
 
 // releaseStates reads, for every repository with tier 1 work, what Folds
-// needs. A repository it cannot read is left out, so Folds skips it.
+// needs.
 func releaseStates(ctx context.Context, client *gh.Client, p deps.Plan) (map[string]deps.RepoState, error) {
 	states := map[string]deps.RepoState{}
 	for _, d := range p.Decisions {
@@ -101,7 +110,7 @@ func releaseStates(ctx context.Context, client *gh.Client, p deps.Plan) (map[str
 	return states, nil
 }
 
-// releaseState reads one repository's branch, tag and release pull request.
+// releaseState reads one repository's branch, tag and release pull requests.
 func releaseState(ctx context.Context, client *gh.Client, repo string) (deps.RepoState, error) {
 	owner, name, _ := strings.Cut(repo, "/")
 	rs, err := depsReadState(ctx, client, owner, name)
@@ -116,9 +125,11 @@ func releaseState(ctx context.Context, client *gh.Client, repo string) (deps.Rep
 	if s.BranchExists, err = depsBranchExists(ctx, client, owner, name, branch); err != nil {
 		return deps.RepoState{}, err
 	}
-	if s.ReleasePR, err = depsOpenPR(ctx, client, owner, name, branch, rs.DefaultBranch); err != nil {
+	prs, err := depsReleasePRs(ctx, client, owner, name, branch, rs.DefaultBranch)
+	if err != nil {
 		return deps.RepoState{}, err
 	}
+	s.ReleasePR, s.OtherReleasePR, s.OtherReleaseBranch, s.MergedReleasePR = prs.Open, prs.Other, prs.OtherBranch, prs.Merged
 	return s, nil
 }
 
@@ -143,55 +154,159 @@ func (l *lines) printf(format string, args ...any) {
 	}
 }
 
-// runFolds applies (or, without --live, describes) each fold, stopping
-// after breakerLimit failures in a row.
-func runFolds(ctx context.Context, w *lines, client *gh.Client, folds []deps.RepoFold, skipped []string) error {
+// applier runs folds. It counts failures in a row for the breaker and
+// remembers, per repository, the release pull request a fold used and
+// whether its release branch now exists, so a sibling folded later in the
+// run reuses them.
+type applier struct {
+	ctx      context.Context
+	w        *lines
+	client   *gh.Client
+	failures int
+	release  map[string]int
+	branched map[string]bool
+	failed   map[string]bool
+}
+
+// newApplier starts a run.
+func newApplier(ctx context.Context, w *lines, client *gh.Client) *applier {
+	return &applier{ctx: ctx, w: w, client: client,
+		release: map[string]int{}, branched: map[string]bool{}, failed: map[string]bool{}}
+}
+
+// runAll folds everything that does not wait on a canary, then each
+// fleet's siblings once its canary has passed, and stops after
+// breakerLimit failures in a row.
+func (a *applier) runAll(folds []deps.RepoFold, fleets []deps.Fleet, skipped []string) error {
 	for _, s := range skipped {
-		w.printf("skip  %s\n", s)
+		a.w.printf("skip  %s\n", s)
 	}
-	failures := 0
-	for _, f := range folds {
-		if err := applyFold(ctx, w, client, f); err != nil {
-			failures++
-			w.printf("FAIL  %s: %v\n", f.Repo, err)
-			if failures >= breakerLimit {
-				return fmt.Errorf("stopped after %d failures in a row; the last: %w", failures, err)
-			}
-			continue
+	first, gates := deps.Stage(folds, fleets)
+	for _, f := range first {
+		if err := a.run(f); err != nil {
+			return err
 		}
-		failures = 0
+	}
+	for _, g := range gates {
+		if err := a.gate(g); err != nil {
+			return err
+		}
 	}
 	if !depsLive {
-		w.printf("dry run: nothing was changed; pass --live to apply\n")
+		a.w.printf("dry run: nothing was changed; pass --live to apply\n")
 	}
-	return w.err
+	return a.w.err
+}
+
+// run applies one fold with what earlier folds in the run left behind, and
+// counts it for the breaker.
+func (a *applier) run(f deps.RepoFold) error {
+	if a.branched[f.Repo] {
+		f.CreateBranch = false
+	}
+	if n, done := a.release[f.Repo]; done {
+		f.OpenReleasePR, f.ReleasePR = false, n
+	}
+	release, err := applyFold(a.ctx, a.w, a.client, f)
+	if err != nil {
+		a.failed[f.Repo] = true
+		a.failures++
+		a.w.printf("FAIL  %s: %v\n", f.Repo, err)
+		if a.failures >= breakerLimit {
+			return fmt.Errorf("stopped after %d failures in a row; the last: %w", a.failures, err)
+		}
+		return nil
+	}
+	a.failures = 0
+	if len(f.Merge) > 0 {
+		a.branched[f.Repo], a.release[f.Repo] = true, release
+	}
+	return nil
+}
+
+// gate folds a fleet's siblings once its canary has passed, or says why
+// they are held.
+func (a *applier) gate(g deps.Gate) error {
+	a.w.printf("fleet %s to %s: canary %s, then %d sibling(s)\n", g.Fleet.Package, g.Fleet.To, g.Canary, len(g.Siblings))
+	if why := a.canaryVerdict(g.Canary); why != "" {
+		for _, s := range g.Siblings {
+			a.w.printf("hold  %s: waits on canary %s (%s)\n", s.Repo, g.Canary, why)
+		}
+		return nil
+	}
+	for _, s := range g.Siblings {
+		if err := a.run(s); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// canaryVerdict is "" when the canary's release pull request checks pass,
+// and otherwise why its siblings must wait. A dry run cannot wait, so it
+// says it would and lists the siblings' folds.
+func (a *applier) canaryVerdict(canary string) string {
+	if !depsLive {
+		a.w.printf("plan  wait for %s's release pull request checks to pass\n", canary)
+		return ""
+	}
+	if a.failed[canary] {
+		return "the canary's own fold failed"
+	}
+	n := a.release[canary]
+	if n == 0 {
+		return "the canary has no release pull request"
+	}
+	owner, name, _ := strings.Cut(canary, "/")
+	return a.waitForChecks(owner, name, n)
+}
+
+// waitForChecks reads owner/name#n's checks every ciPoll until they pass
+// (""), fail, or are still unfinished at depsCITimeout.
+func (a *applier) waitForChecks(owner, name string, n int) string {
+	for waited := time.Duration(0); ; waited += ciPoll {
+		ci, err := depsPRCI(a.ctx, a.client, owner, name, n)
+		switch {
+		case err != nil:
+			return "its checks could not be read: " + err.Error()
+		case ci == "success":
+			return ""
+		case ci == "failure":
+			return fmt.Sprintf("checks on #%d failed", n)
+		case waited >= depsCITimeout:
+			return fmt.Sprintf("checks on #%d were %s after %s", n, ci, depsCITimeout)
+		}
+		depsSleep(ciPoll)
+	}
 }
 
 // applyFold carries out one repository's fold, in the order the release
-// branch rule needs: branch, merges, release pull request, closes.
-func applyFold(ctx context.Context, w *lines, client *gh.Client, f deps.RepoFold) error {
+// branch rule needs: branch, merges, release pull request, closes. It
+// returns the release pull request (0 in a dry run that would open one).
+func applyFold(ctx context.Context, w *lines, client *gh.Client, f deps.RepoFold) (int, error) {
 	owner, name, _ := strings.Cut(f.Repo, "/")
+	release := f.ReleasePR
 	if len(f.Merge) > 0 {
 		if err := ensureReleaseBranch(ctx, w, client, owner, name, f); err != nil {
-			return err
+			return 0, err
 		}
-		release, err := mergeAndOpen(ctx, w, client, owner, name, f)
-		if err != nil {
-			return err
+		var err error
+		if release, err = mergeAndOpen(ctx, w, client, owner, name, f); err != nil {
+			return 0, err
 		}
 		for _, d := range f.Merge {
 			comment := fmt.Sprintf("Folded into `%s`; it ships with the release pull request #%d (~/Code/AGENTS.md section 3: updates reach %s only through feat/v<next>).", f.Branch, release, f.Base)
 			if err := closePR(ctx, w, client, owner, name, d.PR.Number, comment); err != nil {
-				return err
+				return 0, err
 			}
 		}
 	}
 	for _, d := range f.Close {
 		if err := closePR(ctx, w, client, owner, name, d.PR.Number, "Closed by corralctl deps: "+d.Reason+"."); err != nil {
-			return err
+			return 0, err
 		}
 	}
-	return nil
+	return release, nil
 }
 
 // ensureReleaseBranch creates feat/v<next> when it does not exist yet.
@@ -223,7 +338,7 @@ func mergeAndOpen(ctx context.Context, w *lines, client *gh.Client, owner, name 
 	if !f.OpenReleasePR {
 		return f.ReleasePR, nil
 	}
-	w.printf("%s  %s: open the release pull request %s -> %s\n", verb(), f.Repo, f.Branch, f.Base)
+	w.printf("%s  %s: open the release pull request %s -> %s (draft)\n", verb(), f.Repo, f.Branch, f.Base)
 	if !depsLive {
 		return 0, nil
 	}
@@ -236,7 +351,7 @@ func mergeAndOpen(ctx context.Context, w *lines, client *gh.Client, owner, name 
 func releaseBody(f deps.RepoFold) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "This PR is the %s iteration; corralctl deps folded these Dependabot updates into it.\n\n", strings.TrimPrefix(f.Branch, "feat/"))
-	b.WriteString("Prepare the version and changelog on this branch before merging.\n\n## What's Changed\n\n")
+	b.WriteString("Prepare the version and changelog on this branch, then mark it ready for review.\n\n## What's Changed\n\n")
 	for _, d := range f.Merge {
 		fmt.Fprintf(&b, "* %s in %s\n", d.PR.Title, d.PR.URL)
 	}
@@ -267,5 +382,6 @@ func init() {
 	depsApplyCmd.Flags().StringVar(&depsOverrides, "overrides", "", "JSON file of known-bad versions, as for deps plan")
 	depsApplyCmd.Flags().BoolVar(&depsLive, "live", false, "make the changes; without it, print them only")
 	depsApplyCmd.Flags().StringVar(&depsSignoff, "signoff", "", `the maintainer's "Name <email>" for the merge commits' Signed-off-by (required with --live)`)
+	depsApplyCmd.Flags().DurationVar(&depsCITimeout, "ci-timeout", 15*time.Minute, "how long to wait for a canary's release pull request checks")
 	depsCmd.AddCommand(depsApplyCmd)
 }
