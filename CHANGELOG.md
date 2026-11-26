@@ -6,6 +6,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.57] - 2026-11-26
+
+### Fixed
+
+- `TestMapFileReportsAnUnmappableTarget` now reaches `mmap` on every
+  filesystem. btrfs reports an empty directory's size as 0, so the test
+  took `mapFile`'s "index file is empty" branch and still passed, leaving
+  the `mmap` error branch uncovered and `make claims-check` failing on
+  btrfs. CI's ext4 reports 4096, which hid it. The directory now holds an
+  entry and the test asserts the error comes from `mmap`.
+
 ## [0.0.56] - 2026-11-24
 
 ### Changed
@@ -3161,7 +3172,8 @@ cron-safety overhaul.
   100 % doc coverage.
 - All tests green under `-race -count=1`.
 
-[Unreleased]: https://github.com/sebastienrousseau/corralctl/compare/v0.0.56...HEAD
+[Unreleased]: https://github.com/sebastienrousseau/corralctl/compare/v0.0.57...HEAD
+[0.0.57]: https://github.com/sebastienrousseau/corralctl/compare/v0.0.56...v0.0.57
 [0.0.56]: https://github.com/sebastienrousseau/corralctl/compare/v0.0.55...v0.0.56
 [0.0.55]: https://github.com/sebastienrousseau/corralctl/compare/v0.0.54...v0.0.55
 [0.0.54]: https://github.com/sebastienrousseau/corralctl/compare/v0.0.53...v0.0.54
