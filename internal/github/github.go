@@ -26,11 +26,7 @@ func FetchReposWithOptions(ctx context.Context, owner string, opts FetchOptions)
 	}
 
 	opts = normalizeFetchOptions(opts)
-	base, host, err := enterpriseBase(opts.BaseURL)
-	if err != nil {
-		return nil, err
-	}
-	token, err := resolveTokenFor(ctx, opts.AuthMode, host)
+	client, err := NewClient(ctx, opts)
 	if err != nil {
 		return nil, err
 	}
@@ -40,6 +36,24 @@ func FetchReposWithOptions(ctx context.Context, owner string, opts FetchOptions)
 	}
 	ctx, cancel := context.WithTimeout(ctx, opts.TotalTimeout)
 	defer cancel()
+	return FetchReposWithClientOptions(ctx, client, owner, opts)
+}
+
+// NewClient builds the go-github client every corral GitHub call uses: the
+// token resolved for the target host, the retrying transport, the
+// per-request timeout, and Enterprise Server URLs when opts.BaseURL names
+// one. It does not bound the whole operation; callers wrap ctx with
+// opts.TotalTimeout for that.
+func NewClient(ctx context.Context, opts FetchOptions) (*gh.Client, error) {
+	opts = normalizeFetchOptions(opts)
+	base, host, err := enterpriseBase(opts.BaseURL)
+	if err != nil {
+		return nil, err
+	}
+	token, err := resolveTokenFor(ctx, opts.AuthMode, host)
+	if err != nil {
+		return nil, err
+	}
 
 	httpClient := &http.Client{
 		Timeout: opts.RequestTimeout,
@@ -61,7 +75,7 @@ func FetchReposWithOptions(ctx context.Context, owner string, opts FetchOptions)
 	if err != nil {
 		return nil, fmt.Errorf("construct GitHub client: %w", err)
 	}
-	return FetchReposWithClientOptions(ctx, client, owner, opts)
+	return client, nil
 }
 
 // newGitHubClient constructs the go-github client. A seam rather than a
