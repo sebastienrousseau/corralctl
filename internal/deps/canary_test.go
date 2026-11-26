@@ -105,3 +105,42 @@ func TestStageNeedsTwoFoldableMembersToGate(t *testing.T) {
 		t.Errorf("first = %v, gates = %v; want o/a folded at once and no gate", first, gates)
 	}
 }
+
+func TestStagePrefersACanaryWithAFreshReleaseBranch(t *testing.T) {
+	kit := "bump kit from 0.0.9 to 0.0.10"
+	p := Build([]PR{pr("o/a", 1, kit), pr("o/b", 2, kit), pr("o/c", 3, kit)}, nil)
+	states := map[string]RepoState{
+		// o/a's feat/v0.0.2 already exists and may hold unreleased work.
+		"o/a": {Repo: "o/a", DefaultBranch: "main", LatestTag: "v0.0.1", BranchExists: true, ReleasePR: 9},
+		"o/b": {Repo: "o/b", DefaultBranch: "main", LatestTag: "v0.0.1"},
+		"o/c": {Repo: "o/c", DefaultBranch: "main", LatestTag: "v0.0.1"},
+	}
+	folds, _ := Folds(p, states)
+	first, gates := Stage(folds, p.Fleets)
+	if len(gates) != 1 || gates[0].Canary != "o/b" {
+		t.Fatalf("the canary should be o/b, the first with a fresh branch: %+v", gates)
+	}
+	if len(first) != 1 || first[0].Repo != "o/b" {
+		t.Errorf("only the canary folds first: %v", first)
+	}
+	var sib []string
+	for _, s := range gates[0].Siblings {
+		sib = append(sib, s.Repo)
+	}
+	if !reflect.DeepEqual(sib, []string{"o/a", "o/c"}) {
+		t.Errorf("siblings = %v", sib)
+	}
+}
+
+func TestStageFallsBackToTheFirstMemberWhenNoBranchIsFresh(t *testing.T) {
+	kit := "bump kit from 0.0.9 to 0.0.10"
+	p := Build([]PR{pr("o/a", 1, kit), pr("o/b", 2, kit), pr("o/c", 3, kit)}, nil)
+	states := map[string]RepoState{}
+	for _, r := range []string{"o/a", "o/b", "o/c"} {
+		states[r] = RepoState{Repo: r, DefaultBranch: "main", LatestTag: "v0.0.1", BranchExists: true, ReleasePR: 9}
+	}
+	folds, _ := Folds(p, states)
+	if _, gates := Stage(folds, p.Fleets); len(gates) != 1 || gates[0].Canary != "o/a" {
+		t.Errorf("gates = %+v", gates)
+	}
+}

@@ -20,8 +20,9 @@ type Gate struct {
 func fleetKey(pkg, to string) string { return pkg + "@" + to }
 
 // Stage splits folds into what runs at once and what waits on a canary.
-// For each fleet, the canary is the first repository (in fold order) that
-// folds the fleet's bump as a tier 1 merge; every other repository's merge
+// For each fleet, the canary is a repository that folds the fleet's bump
+// as a tier 1 merge, preferring one whose release branch is new
+// (pickCanary); every other repository's merge
 // of that bump moves into the fleet's Gate. A fleet with fewer than two
 // such repositories has nothing to prove and no gate. first keeps every
 // fold that still has a merge or a close.
@@ -51,25 +52,38 @@ func Stage(folds []RepoFold, fleets []Fleet) (first []RepoFold, gates []Gate) {
 	return first, gates
 }
 
-// canaries picks each fleet's canary: the first fold that merges the
-// fleet's bump, when a second fold merges it too. order lists the gated
+// canaries picks each fleet's canary among the folds that merge the
+// fleet's bump, when at least two do (pickCanary). order lists the gated
 // fleets in the plan's order.
 func canaries(folds []RepoFold, fleets []Fleet) (canary map[string]string, order []Fleet) {
 	canary = map[string]string{}
 	for _, fl := range fleets {
 		key := fleetKey(fl.Package, fl.To)
-		var members []string
+		var members []RepoFold
 		for _, f := range folds {
 			if merges(f, key) {
-				members = append(members, f.Repo)
+				members = append(members, f)
 			}
 		}
 		if len(members) >= 2 {
-			canary[key] = members[0]
+			canary[key] = pickCanary(members)
 			order = append(order, fl)
 		}
 	}
 	return canary, order
+}
+
+// pickCanary prefers the first member whose release branch this run
+// creates: a fresh feat/v<next> carries only this run's folds, so its
+// checks speak for the bump, where an existing branch may hold unreleased
+// work that fails on its own. Without one, it takes the first member.
+func pickCanary(members []RepoFold) string {
+	for _, f := range members {
+		if f.CreateBranch {
+			return f.Repo
+		}
+	}
+	return members[0].Repo
 }
 
 // merges reports whether f folds the bump key as a tier 1 merge.

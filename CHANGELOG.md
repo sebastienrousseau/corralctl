@@ -54,6 +54,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `--ci-timeout` (15 minutes by default); if they fail, stay unfinished,
   cannot be read, or the canary's own fold failed, the siblings are held
   and the run says why. A sibling's other updates and closes do not wait.
+  The canary is a repository whose `feat/v<next>` the run creates when
+  one exists: a fresh branch carries only the run's folds, where an
+  existing one may hold unreleased work whose checks fail on their own.
 - `deps apply` merges the release pull requests earlier runs opened once
   they are ready. Each one it opens is labelled `corral-deps`; at the
   start of a run it finds them with one search and merges one only when
