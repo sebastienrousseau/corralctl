@@ -28,6 +28,7 @@ type applyWorld struct {
 	extra   map[string]github.ReleasePRs // repo -> other or merged release pull requests
 	labeled []github.LabeledPullRequest  // release pull requests earlier runs opened
 	commits map[string][]github.Commit   // "repo#n" -> its commits
+	files   map[string]string            // "repo@ref:path" -> content
 	ci      map[string][]string          // repo -> successive check verdicts on its release pull request
 	sleeps  int
 	writes  []string
@@ -95,6 +96,12 @@ func stubApply(t *testing.T, w *applyWorld) {
 	depsAddLabel = func(_ context.Context, _ *gh.Client, owner, name string, n int, label string) error {
 		return w.write(fmt.Sprintf("label %s/%s#%d %s", owner, name, n, label), "label "+owner+"/"+name)
 	}
+	fileAt := depsFileAt
+	t.Cleanup(func() { depsFileAt = fileAt })
+	depsFileAt = func(_ context.Context, _ *gh.Client, owner, name, path, ref string) (string, bool, error) {
+		text, ok := w.files[owner+"/"+name+"@"+ref+":"+path]
+		return text, ok, w.fail["file "+owner+"/"+name]
+	}
 	depsMergeRelease = func(_ context.Context, _ *gh.Client, owner, name string, n int, msg string) error {
 		return w.write(fmt.Sprintf("release %s/%s#%d %q", owner, name, n, msg), "release "+owner+"/"+name)
 	}
@@ -152,6 +159,7 @@ func world(t *testing.T) *applyWorld {
 		extra:   map[string]github.ReleasePRs{},
 		ci:      map[string][]string{},
 		commits: map[string][]github.Commit{},
+		files:   map[string]string{},
 	}
 }
 
@@ -443,7 +451,8 @@ func TestDepsApplyHoldsTheSiblingsWhenTheCanaryDoesNotPass(t *testing.T) {
 func TestDepsApplyReadsOtherAndMergedReleasePullRequests(t *testing.T) {
 	w := world(t)
 	w.extra["o/a"] = github.ReleasePRs{Other: 7, OtherBranch: "feat/v0.0.60"}
-	w.extra["o/b"] = github.ReleasePRs{Merged: 8}
+	w.extra["o/b"] = github.ReleasePRs{Merged: 8, MergedSHA: "m8"}
+	w.files["o/b@m8:CHANGELOG.md"] = "# Changelog\n\n## [0.0.10] - 2026-11-20\n"
 	stubApply(t, w)
 	out, err := runDeps(t, "apply", "o")
 	if err != nil {
@@ -451,7 +460,7 @@ func TestDepsApplyReadsOtherAndMergedReleasePullRequests(t *testing.T) {
 	}
 	for _, want := range []string{
 		"skip  o/a: release pull request #7 from feat/v0.0.60 is already open",
-		"skip  o/b: feat/v0.0.10 was merged in #8 but v0.0.10 is not tagged",
+		"skip  o/b: feat/v0.0.10 was merged in #8 with its release preparation but v0.0.10 is not tagged",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("output lacks %q:\n%s", want, out)
@@ -592,5 +601,37 @@ func TestDepsApplyLabelFailureFailsTheRepository(t *testing.T) {
 	out, _ := runDeps(t, "apply", "o", "--live", "--signoff", "A B <a@b.c>")
 	if !strings.Contains(out, "FAIL  o/a: no label") {
 		t.Errorf("a release pull request that cannot be labelled fails its repository:\n%s", out)
+	}
+}
+
+func TestDepsApplyCarriesOnAfterAnUnpreparedMerge(t *testing.T) {
+	w := world(t)
+	// o/b's feat/v0.0.10 was merged in #8 before 0.0.10 had a changelog
+	// entry: 0.0.10 was never released, so the run folds into it again.
+	w.extra["o/b"] = github.ReleasePRs{Merged: 8, MergedSHA: "m8"}
+	w.release["o/b"] = 0
+	w.files["o/b@m8:CHANGELOG.md"] = "# Changelog\n\n## [0.0.9] - 2026-11-16\n"
+	stubApply(t, w)
+	out, err := runDeps(t, "apply", "o")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"plan  o/b: merge #6 (dependabot/npm_and_yarn/x-6) into feat/v0.0.10", "plan  o/b: open the release pull request feat/v0.0.10 -> master (draft)"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output lacks %q:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "skip  o/b") {
+		t.Errorf("an unprepared merge is not a release to tag:\n%s", out)
+	}
+}
+
+func TestDepsApplyStopsWhenItCannotReadTheChangelog(t *testing.T) {
+	w := world(t)
+	w.extra["o/b"] = github.ReleasePRs{Merged: 8, MergedSHA: "m8"}
+	w.fail["file o/b"] = errors.New("boom")
+	stubApply(t, w)
+	if _, err := runDeps(t, "apply", "o"); err == nil || err.Error() != "boom" {
+		t.Errorf("err = %v", err)
 	}
 }

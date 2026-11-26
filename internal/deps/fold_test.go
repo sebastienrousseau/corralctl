@@ -107,13 +107,49 @@ func TestFoldsKeepsOneReleaseAtATime(t *testing.T) {
 	}, nil)
 	folds, skipped := Folds(p, map[string]RepoState{
 		"o/other":    {Repo: "o/other", DefaultBranch: "main", LatestTag: "v0.0.57", OtherReleasePR: 7, OtherReleaseBranch: "feat/v0.0.60"},
-		"o/untagged": {Repo: "o/untagged", DefaultBranch: "main", LatestTag: "v0.0.24", BranchExists: true, MergedReleasePR: 8},
+		"o/untagged": {Repo: "o/untagged", DefaultBranch: "main", LatestTag: "v0.0.24", BranchExists: true, MergedReleasePR: 8, MergedPrepared: true},
 	})
 	want := []string{
 		"o/other: release pull request #7 from feat/v0.0.60 is already open; a repository has one at a time",
-		"o/untagged: feat/v0.0.25 was merged in #8 but v0.0.25 is not tagged; tag that release first",
+		"o/untagged: feat/v0.0.25 was merged in #8 with its release preparation but v0.0.25 is not tagged; tag that release first",
 	}
 	if len(folds) != 0 || !reflect.DeepEqual(skipped, want) {
 		t.Errorf("folds = %v\nskipped = %v\nwant %v", folds, skipped, want)
+	}
+}
+
+func TestFoldsCarriesOnAfterAnUnpreparedMerge(t *testing.T) {
+	// feat/v0.0.16 was merged in #22 with the manifest still at 0.0.15 and
+	// no changelog entry: 0.0.16 was never released, so it is still next.
+	p := Build([]PR{pr("o/r", 1, "bump x from 1.0.0 to 1.0.1")}, nil)
+	folds, skipped := Folds(p, map[string]RepoState{
+		"o/r": {Repo: "o/r", DefaultBranch: "main", LatestTag: "v0.0.15", BranchExists: true, MergedReleasePR: 22},
+	})
+	if len(skipped) != 0 || len(folds) != 1 {
+		t.Fatalf("folds = %v, skipped = %v", folds, skipped)
+	}
+	if got := summarise(folds[0]); got != "feat/v0.0.16<-main create=false open=true pr=0 merge=[1] close=[]" {
+		t.Errorf("fold = %s", got)
+	}
+}
+
+func TestChangelogHasVersionReadsEveryHeadingForm(t *testing.T) {
+	yes := []string{
+		"# Changelog\n\n## [0.0.58] - 2026-11-26\n",
+		"## [0.0.58]\n",
+		"## 0.0.58\n",
+		"## v0.0.58 (2026-11-26)\n",
+		"  ## [v0.0.58]\n",
+	}
+	for _, c := range yes {
+		if !ChangelogHasVersion(c, "v0.0.58") {
+			t.Errorf("should find v0.0.58 in %q", c)
+		}
+	}
+	no := []string{"", "## [Unreleased]\n", "## [0.0.580]\n", "## [0.0.5]\n", "### 0.0.58\n", "0.0.58\n", "## [0.0.57] - mentions 0.0.58\n"}
+	for _, c := range no {
+		if ChangelogHasVersion(c, "0.0.58") {
+			t.Errorf("should not find 0.0.58 in %q", c)
+		}
 	}
 }

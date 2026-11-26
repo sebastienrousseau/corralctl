@@ -45,6 +45,7 @@ var (
 	depsPRCommits    = github.PullRequestCommits
 	depsAddLabel     = github.AddLabel
 	depsMergeRelease = github.MergeReleasePullRequest
+	depsFileAt       = github.FileAt
 )
 
 // signoffPattern is a DCO identity: "Name <email>".
@@ -138,6 +139,15 @@ func releaseState(ctx context.Context, client *gh.Client, repo string) (deps.Rep
 		return deps.RepoState{}, err
 	}
 	s.ReleasePR, s.OtherReleasePR, s.OtherReleaseBranch, s.MergedReleasePR = prs.Open, prs.Other, prs.OtherBranch, prs.Merged
+	if prs.Merged != 0 {
+		// Was the merge a prepared release waiting for its tag, or an
+		// iteration merged before its version and changelog were written?
+		changelog, _, err := depsFileAt(ctx, client, owner, name, "CHANGELOG.md", prs.MergedSHA)
+		if err != nil {
+			return deps.RepoState{}, err
+		}
+		s.MergedPrepared = deps.ChangelogHasVersion(changelog, strings.TrimPrefix(branch, "feat/"))
+	}
 	return s, nil
 }
 

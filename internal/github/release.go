@@ -86,6 +86,8 @@ type ReleasePRs struct {
 	// Merged is a merged pull request from the release branch, or 0: that
 	// version was merged, and is untagged if it is still <next>.
 	Merged int
+	// MergedSHA is Merged's merge commit.
+	MergedSHA string
 }
 
 // ReleasePullRequests reads the pull requests from feat/v* branches into
@@ -114,7 +116,7 @@ func ReleasePullRequests(ctx context.Context, client *gh.Client, owner, name, br
 	}
 	for _, pr := range merged {
 		if pr.MergedAt != nil {
-			r.Merged = pr.GetNumber()
+			r.Merged, r.MergedSHA = pr.GetNumber(), pr.GetMergeCommitSHA()
 			break
 		}
 	}
@@ -200,4 +202,22 @@ func apiStatus(err error) int {
 		return er.Response.StatusCode
 	}
 	return 0
+}
+
+// FileAt reads path at ref in owner/name. ok is false when the file does
+// not exist there, which is an answer, not an error.
+func FileAt(ctx context.Context, client *gh.Client, owner, name, path, ref string) (text string, ok bool, err error) {
+	f, _, resp, err := client.Repositories.GetContents(ctx, owner, name, path, &gh.RepositoryContentGetOptions{Ref: ref})
+	switch {
+	case err == nil:
+		text, err = f.GetContent()
+		if err != nil {
+			return "", false, fmt.Errorf("decode %s at %s in %s/%s: %w", path, ref, owner, name, err)
+		}
+		return text, true, nil
+	case resp != nil && resp.StatusCode == http.StatusNotFound:
+		return "", false, nil
+	default:
+		return "", false, fmt.Errorf("read %s at %s in %s/%s: %w", path, ref, owner, name, err)
+	}
 }

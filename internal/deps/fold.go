@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"sort"
 	"strconv"
+	"strings"
 )
 
 // tagPattern matches a release tag such as "v0.0.57".
@@ -58,6 +59,11 @@ type RepoState struct {
 	// MergedReleasePR is a merged pull request from feat/v<next>, or 0:
 	// that version was merged but never tagged.
 	MergedReleasePR int `json:"merged_release_pr,omitempty"`
+	// MergedPrepared reports whether that merge carried the release
+	// preparation (a CHANGELOG heading for the version). A prepared merge
+	// is a release waiting for its tag; an unprepared one never released
+	// the version, which is still the next one.
+	MergedPrepared bool `json:"merged_prepared,omitempty"`
 }
 
 // RepoFold is what applying a plan does in one repository: fold the kept
@@ -135,12 +141,30 @@ func (f *RepoFold) target(s RepoState) error {
 	if s.OtherReleasePR != 0 {
 		return fmt.Errorf("release pull request #%d from %s is already open; a repository has one at a time", s.OtherReleasePR, s.OtherReleaseBranch)
 	}
-	if s.MergedReleasePR != 0 {
-		return fmt.Errorf("feat/%s was merged in #%d but %s is not tagged; tag that release first", next, s.MergedReleasePR, next)
+	if s.MergedReleasePR != 0 && s.MergedPrepared {
+		return fmt.Errorf("feat/%s was merged in #%d with its release preparation but %s is not tagged; tag that release first", next, s.MergedReleasePR, next)
 	}
 	f.Branch, f.Base = "feat/"+next, s.DefaultBranch
 	f.CreateBranch = !s.BranchExists
 	f.ReleasePR = s.ReleasePR
 	f.OpenReleasePR = s.ReleasePR == 0
 	return nil
+}
+
+// ChangelogHasVersion reports whether a CHANGELOG has a heading for
+// version, in any of the forms the repositories use: "## [0.0.58]",
+// "## 0.0.58", "## v0.0.58", each optionally followed by a date.
+func ChangelogHasVersion(changelog, version string) bool {
+	v := strings.TrimPrefix(version, "v")
+	for _, line := range strings.Split(changelog, "\n") {
+		h, ok := strings.CutPrefix(strings.TrimSpace(line), "## ")
+		if !ok {
+			continue
+		}
+		h = strings.TrimPrefix(strings.TrimPrefix(h, "["), "v")
+		if h == v || strings.HasPrefix(h, v+"]") || strings.HasPrefix(h, v+" ") {
+			return true
+		}
+	}
+	return false
 }

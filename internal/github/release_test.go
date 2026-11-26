@@ -138,11 +138,11 @@ func TestReleasePullRequestsReadsOpenOtherAndMerged(t *testing.T) {
 				{"number": 8, "head": {"ref": "feat/v0.0.61"}}]`, nil), nil
 		default:
 			return jsonResp(req, 200, `[{"number": 150, "head": {"ref": "feat/v0.0.58"}},
-				{"number": 151, "head": {"ref": "feat/v0.0.58"}, "merged_at": "2026-11-22T07:40:41Z"}]`, nil), nil
+				{"number": 151, "head": {"ref": "feat/v0.0.58"}, "merged_at": "2026-11-22T07:40:41Z", "merge_commit_sha": "m151"}]`, nil), nil
 		}
 	})
 	got, err := ReleasePullRequests(bg, newTestClient(api), "o", "r", "feat/v0.0.58", "main")
-	want := ReleasePRs{Open: 201, Other: 7, OtherBranch: "feat/v0.0.60", Merged: 151}
+	want := ReleasePRs{Open: 201, Other: 7, OtherBranch: "feat/v0.0.60", Merged: 151, MergedSHA: "m151"}
 	if err != nil || got != want {
 		t.Errorf("got %+v, %v; want %+v", got, err, want)
 	}
@@ -276,5 +276,30 @@ func TestAPIStatusIsZeroForATransportError(t *testing.T) {
 	}))
 	if _, err := BranchExists(bg, client, "o", "r", "b"); err == nil || apiStatus(err) != 0 {
 		t.Errorf("err = %v, status %d; want an error with status 0", err, apiStatus(err))
+	}
+}
+
+func TestFileAtReadsDecodesAndTellsMissingFromBroken(t *testing.T) {
+	var seen []string
+	client := newTestClient(releaseAPI(t, map[string]route{
+		"GET /repos/o/r/contents/CHANGELOG.md": {200, `{"type": "file", "encoding": "base64", "content": "IyMgWzAuMC4xNl0K"}`},
+	}, &seen))
+	text, ok, err := FileAt(bg, client, "o", "r", "CHANGELOG.md", "m151")
+	if err != nil || !ok || text != "## [0.0.16]\n" || !strings.Contains(seen[0], "ref=m151") {
+		t.Errorf("got %q %v %v; request %v", text, ok, err, seen)
+	}
+	client = newTestClient(releaseAPI(t, map[string]route{"GET /repos/o/r/contents/CHANGELOG.md": {404, `{}`}}, nil))
+	if _, ok, err := FileAt(bg, client, "o", "r", "CHANGELOG.md", "m"); ok || err != nil {
+		t.Errorf("missing: ok %v, err %v", ok, err)
+	}
+	client = newTestClient(releaseAPI(t, map[string]route{"GET /repos/o/r/contents/CHANGELOG.md": {500, `{}`}}, nil))
+	if _, _, err := FileAt(bg, client, "o", "r", "CHANGELOG.md", "m"); err == nil || !strings.Contains(err.Error(), "read CHANGELOG.md at m in o/r") {
+		t.Errorf("broken: %v", err)
+	}
+	client = newTestClient(releaseAPI(t, map[string]route{
+		"GET /repos/o/r/contents/CHANGELOG.md": {200, `{"type": "file", "encoding": "rot13", "content": "x"}`},
+	}, nil))
+	if _, _, err := FileAt(bg, client, "o", "r", "CHANGELOG.md", "m"); err == nil || !strings.Contains(err.Error(), "decode CHANGELOG.md") {
+		t.Errorf("undecodable: %v", err)
 	}
 }

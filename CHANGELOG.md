@@ -71,9 +71,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   publishing stay with the maintainer.
 - `deps apply` keeps one release at a time. It skips, and names, a
   repository with another `feat/v*` release pull request already open,
-  and one whose `feat/v<next>` was merged but never tagged (the first
-  live dry run found both on this account): that release is tagged
-  first.
+  and one whose `feat/v<next>` was merged with its release preparation
+  (a CHANGELOG heading for the version at the merge commit) but never
+  tagged: that release is tagged first. A `feat/v<next>` merged without
+  its preparation never released the version, which stays the next one:
+  the run folds into it again and opens a new draft release pull
+  request. The dry run on this account found 54 merged, untagged
+  release branches; the first two checked (acmt001-lsp, acmt001-mcp)
+  were unprepared.
 - Release notes in the standard layout, written by the release workflow.
   A new `notes` job runs `scripts/release_notes.py` after the assets are
   published and applies its output with `gh release edit`: the
