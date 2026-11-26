@@ -28,6 +28,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `--output json`. Every kept update's action folds it into the
   repository's `feat/v<next>` branch, as `~/Code/AGENTS.md` section 3
   requires; nothing merges a Dependabot pull request into `main`.
+- `corralctl deps apply <owner>` applies the plan. Per repository with
+  tier 1 updates it creates `feat/v<next>` from the default branch if
+  needed (`<next>` is the newest `vX.Y.Z` tag plus 0.0.1, v0.0.999
+  followed by v0.1.0), merges each tier 1 pull request's head into it
+  through the GitHub merges API (a merge commit GitHub signs, carrying
+  `Signed-off-by` from `--signoff "Name <email>"`), opens the release
+  pull request if none is open, and closes each merged pull request with
+  a comment linking it. Tier 4 pull requests are closed with their
+  reason; tiers 2 and 3 are left for a person. It is a dry run that
+  changes nothing unless `--live`, which requires `--signoff`. A failing
+  repository is reported and skipped; three failures in a row stop the
+  run.
 - Release notes in the standard layout, written by the release workflow.
   A new `notes` job runs `scripts/release_notes.py` after the assets are
   published and applies its output with `gh release edit`: the

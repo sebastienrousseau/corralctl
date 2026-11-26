@@ -1,0 +1,299 @@
+// SPDX-FileCopyrightText: 2026 Sebastien Rousseau <sebastian.rousseau@gmail.com>
+// SPDX-License-Identifier: GPL-3.0-only
+
+package cmd
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"strings"
+	"testing"
+
+	gh "github.com/google/go-github/v90/github"
+	"github.com/sebastienrousseau/corralctl/internal/github"
+)
+
+// applyWorld is the GitHub the apply tests stand up: repositories, their
+// open Dependabot pull requests and release state, and a log of writes.
+type applyWorld struct {
+	t       *testing.T
+	repos   []string
+	prs     map[string][]github.PullRequest
+	states  map[string]github.ReleaseState
+	exists  map[string]bool // repo -> feat/v<next> exists
+	release map[string]int  // repo -> open release pull request
+	fail    map[string]error
+	writes  []string
+}
+
+// stubApply installs w behind every deps seam and restores them after.
+func stubApply(t *testing.T, w *applyWorld) {
+	t.Helper()
+	stubDeps(t)
+	saved := []any{depsReadState, depsBranchExists, depsOpenPR, depsCreateBranch, depsMerge, depsCreatePR, depsClosePR}
+	live, signoff := depsLive, depsSignoff
+	t.Cleanup(func() {
+		depsReadState = saved[0].(func(context.Context, *gh.Client, string, string) (github.ReleaseState, error))
+		depsBranchExists = saved[1].(func(context.Context, *gh.Client, string, string, string) (bool, error))
+		depsOpenPR = saved[2].(func(context.Context, *gh.Client, string, string, string, string) (int, error))
+		depsCreateBranch = saved[3].(func(context.Context, *gh.Client, string, string, string, string) error)
+		depsMerge = saved[4].(func(context.Context, *gh.Client, string, string, string, string, string) (string, error))
+		depsCreatePR = saved[5].(func(context.Context, *gh.Client, string, string, string, string, string, string) (int, error))
+		depsClosePR = saved[6].(func(context.Context, *gh.Client, string, string, int, string) error)
+		depsLive, depsSignoff = live, signoff
+	})
+	depsFetchRepos = func(_ context.Context, owner string, _ github.FetchOptions) ([]github.Repo, error) {
+		var out []github.Repo
+		for _, r := range w.repos {
+			out = append(out, github.Repo{Owner: owner, Name: r})
+		}
+		return out, nil
+	}
+	depsListPRs = func(_ context.Context, _ *gh.Client, owner, name string) ([]github.PullRequest, error) {
+		return w.prs[owner+"/"+name], nil
+	}
+	depsReadState = func(_ context.Context, _ *gh.Client, owner, name string) (github.ReleaseState, error) {
+		return w.states[owner+"/"+name], w.fail["state "+owner+"/"+name]
+	}
+	depsBranchExists = func(_ context.Context, _ *gh.Client, owner, name, branch string) (bool, error) {
+		return w.exists[owner+"/"+name], w.fail["exists "+owner+"/"+name]
+	}
+	depsOpenPR = func(_ context.Context, _ *gh.Client, owner, name, head, base string) (int, error) {
+		return w.release[owner+"/"+name], w.fail["openpr "+owner+"/"+name]
+	}
+	depsCreateBranch = func(_ context.Context, _ *gh.Client, owner, name, branch, from string) error {
+		return w.write(fmt.Sprintf("branch %s/%s %s<-%s", owner, name, branch, from), "branch "+owner+"/"+name)
+	}
+	depsMerge = func(_ context.Context, _ *gh.Client, owner, name, base, head, msg string) (string, error) {
+		return "m", w.write(fmt.Sprintf("merge %s/%s %s<-%s %q", owner, name, base, head, msg), "merge "+owner+"/"+name)
+	}
+	depsCreatePR = func(_ context.Context, _ *gh.Client, owner, name, head, base, title, body string) (int, error) {
+		return 202, w.write(fmt.Sprintf("pr %s/%s %s->%s %q", owner, name, head, base, title), "pr "+owner+"/"+name)
+	}
+	depsClosePR = func(_ context.Context, _ *gh.Client, owner, name string, n int, comment string) error {
+		return w.write(fmt.Sprintf("close %s/%s#%d %q", owner, name, n, comment), "close "+owner+"/"+name)
+	}
+}
+
+// write logs a write, or fails it when the world says so.
+func (w *applyWorld) write(entry, key string) error {
+	if err := w.fail[key]; err != nil {
+		return err
+	}
+	w.writes = append(w.writes, entry)
+	return nil
+}
+
+// dependabotPR is an open, green, clean Dependabot pull request.
+func dependabotPR(repo string, n int, title string) github.PullRequest {
+	return github.PullRequest{Repo: repo, Number: n, Title: title, URL: fmt.Sprintf("https://github.com/%s/pull/%d", repo, n),
+		Branch: fmt.Sprintf("dependabot/npm_and_yarn/x-%d", n), CI: "success", Mergeable: "clean"}
+}
+
+// world is two repositories: o/a with nothing set up for v0.0.58, and o/b
+// whose feat/v0.0.10 and release pull request #12 already exist, plus a
+// superseded pull request to close.
+func world(t *testing.T) *applyWorld {
+	return &applyWorld{
+		t:     t,
+		repos: []string{"a", "b"},
+		prs: map[string][]github.PullRequest{
+			"o/a": {dependabotPR("o/a", 1, "bump x from 1.0.0 to 1.0.1")},
+			"o/b": {dependabotPR("o/b", 5, "bump z from 1.0.0 to 1.0.1"), dependabotPR("o/b", 6, "bump z from 1.0.0 to 1.0.2")},
+		},
+		states: map[string]github.ReleaseState{
+			"o/a": {DefaultBranch: "main", LatestTag: "v0.0.57"},
+			"o/b": {DefaultBranch: "master", LatestTag: "v0.0.9"},
+		},
+		exists:  map[string]bool{"o/b": true},
+		release: map[string]int{"o/b": 12},
+		fail:    map[string]error{},
+	}
+}
+
+func TestDepsApplyDryRunChangesNothing(t *testing.T) {
+	w := world(t)
+	stubApply(t, w)
+	out, err := runDeps(t, "apply", "o")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"plan  o/a: create feat/v0.0.58 from main",
+		"plan  o/a: merge #1 (dependabot/npm_and_yarn/x-1) into feat/v0.0.58",
+		"plan  o/a: open the release pull request feat/v0.0.58 -> main",
+		"plan  o/a: close #1",
+		"plan  o/b: merge #6", "plan  o/b: close #6", "plan  o/b: close #5",
+		"dry run: nothing was changed; pass --live to apply",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("dry run lacks %q:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "create feat/v0.0.10") || strings.Contains(out, "open the release pull request feat/v0.0.10") {
+		t.Errorf("o/b's branch and release pull request exist and must be reused:\n%s", out)
+	}
+	if len(w.writes) != 0 {
+		t.Errorf("a dry run wrote %v", w.writes)
+	}
+}
+
+func TestDepsApplyLiveNeedsASignoff(t *testing.T) {
+	for _, signoff := range []string{"", "Someone", "<a@b>", "A B <not-an-email>"} {
+		stubApply(t, world(t))
+		_, err := runDeps(t, "apply", "o", "--live", "--signoff", signoff)
+		if err == nil || !strings.Contains(err.Error(), "--live needs --signoff") {
+			t.Errorf("signoff %q: err = %v", signoff, err)
+		}
+	}
+}
+
+func TestDepsApplyLiveFoldsInOrder(t *testing.T) {
+	w := world(t)
+	stubApply(t, w)
+	out, err := runDeps(t, "apply", "o", "--live", "--signoff", "Ada Lovelace <ada@example.com>")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{
+		"branch o/a feat/v0.0.58<-main",
+		`merge o/a feat/v0.0.58<-dependabot/npm_and_yarn/x-1 "Merge #1 into feat/v0.0.58\n\nbump x from 1.0.0 to 1.0.1\n\nSigned-off-by: Ada Lovelace <ada@example.com>"`,
+		`pr o/a feat/v0.0.58->main "chore(release): v0.0.58"`,
+		"close o/a#1 \"Folded into `feat/v0.0.58`; it ships with the release pull request #202 (~/Code/AGENTS.md section 3: updates reach main only through feat/v<next>).\"",
+		`merge o/b feat/v0.0.10<-dependabot/npm_and_yarn/x-6 "Merge #6 into feat/v0.0.10\n\nbump z from 1.0.0 to 1.0.2\n\nSigned-off-by: Ada Lovelace <ada@example.com>"`,
+		"close o/b#6 \"Folded into `feat/v0.0.10`; it ships with the release pull request #12 (~/Code/AGENTS.md section 3: updates reach master only through feat/v<next>).\"",
+		`close o/b#5 "Closed by corralctl deps: superseded by #6."`,
+	}
+	if strings.Join(w.writes, "\n") != strings.Join(want, "\n") {
+		t.Errorf("writes:\n%s\nwant:\n%s", strings.Join(w.writes, "\n"), strings.Join(want, "\n"))
+	}
+	if strings.Contains(out, "dry run") || !strings.Contains(out, "do    o/a: merge #1") {
+		t.Errorf("a live run reports what it did:\n%s", out)
+	}
+}
+
+func TestDepsApplySkipsARepositoryWithoutAReleaseTag(t *testing.T) {
+	w := world(t)
+	w.states["o/a"] = github.ReleaseState{DefaultBranch: "main", LatestTag: "nightly"}
+	stubApply(t, w)
+	out, err := runDeps(t, "apply", "o")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, `skip  o/a: "nightly" is not a vX.Y.Z release tag`) || strings.Contains(out, "o/a: merge") {
+		t.Errorf("o/a should be skipped:\n%s", out)
+	}
+}
+
+func TestDepsApplyStopsWhenItCannotReadARepository(t *testing.T) {
+	boom := errors.New("boom")
+	for _, key := range []string{"state o/a", "exists o/a", "openpr o/a"} {
+		w := world(t)
+		w.fail[key] = boom
+		stubApply(t, w)
+		if _, err := runDeps(t, "apply", "o"); !errors.Is(err, boom) {
+			t.Errorf("%s: err = %v, want boom", key, err)
+		}
+	}
+}
+
+func TestDepsApplyReportsAFailedRepositoryAndGoesOn(t *testing.T) {
+	boom := errors.New("boom")
+	for _, key := range []string{"branch o/a", "merge o/a", "pr o/a", "close o/a"} {
+		w := world(t)
+		w.fail[key] = boom
+		stubApply(t, w)
+		out, err := runDeps(t, "apply", "o", "--live", "--signoff", "A B <a@b.c>")
+		if err != nil {
+			t.Errorf("%s: one failed repository is not a stopped run: %v", key, err)
+		}
+		if !strings.Contains(out, "FAIL  o/a: boom") || !strings.Contains(out, "do    o/b: close #5") {
+			t.Errorf("%s: o/a should fail and o/b still run:\n%s", key, out)
+		}
+	}
+}
+
+func TestDepsApplyClosesTierFourEvenWhereNothingMerges(t *testing.T) {
+	w := world(t)
+	w.fail["close o/b"] = errors.New("boom")
+	w.prs["o/b"] = []github.PullRequest{dependabotPR("o/b", 5, "bump z from 1.0.0 to 1.0.1"), dependabotPR("o/b", 6, "bump z from 1.0.0 to 2.0.0")}
+	stubApply(t, w)
+	out, _ := runDeps(t, "apply", "o", "--live", "--signoff", "A B <a@b.c>")
+	if !strings.Contains(out, "FAIL  o/b: boom") || strings.Contains(out, "o/b: merge") {
+		t.Errorf("o/b has only a tier 4 close, which fails:\n%s", out)
+	}
+}
+
+func TestDepsApplyStopsAfterThreeFailuresInARow(t *testing.T) {
+	w := world(t)
+	w.repos = []string{"a", "b", "c", "d"}
+	for _, r := range []string{"o/a", "o/b", "o/c", "o/d"} {
+		w.prs[r] = []github.PullRequest{dependabotPR(r, 1, "bump x from 1.0.0 to 1.0.1")}
+		w.states[r] = github.ReleaseState{DefaultBranch: "main", LatestTag: "v0.0.1"}
+		w.fail["merge "+r] = errors.New("token revoked")
+	}
+	stubApply(t, w)
+	out, err := runDeps(t, "apply", "o", "--live", "--signoff", "A B <a@b.c>")
+	if err == nil || !strings.Contains(err.Error(), "stopped after 3 failures in a row") {
+		t.Errorf("err = %v", err)
+	}
+	if strings.Contains(out, "o/d") {
+		t.Errorf("the fourth repository should not be tried:\n%s", out)
+	}
+}
+
+func TestDepsApplyPassesInventoryErrorsOn(t *testing.T) {
+	stubApply(t, world(t))
+	boom := errors.New("boom")
+	depsFetchRepos = func(context.Context, string, github.FetchOptions) ([]github.Repo, error) { return nil, boom }
+	if _, err := runDeps(t, "apply", "o"); !errors.Is(err, boom) {
+		t.Errorf("err = %v", err)
+	}
+	stubApply(t, world(t))
+	calls := 0
+	depsNewClient = func(context.Context, github.FetchOptions) (*gh.Client, error) {
+		calls++
+		if calls == 2 { // the first is the inventory's; the second is apply's own
+			return nil, boom
+		}
+		return nil, nil
+	}
+	if _, err := runDeps(t, "apply", "o"); !errors.Is(err, boom) {
+		t.Errorf("client: err = %v", err)
+	}
+	stubApply(t, world(t))
+	if _, err := runDeps(t, "apply", "o", "--overrides", "/does/not/exist.json"); err == nil {
+		t.Error("an unreadable overrides file is an error")
+	}
+}
+
+func TestDepsApplyReadsEachRepositoryOnce(t *testing.T) {
+	w := world(t)
+	w.prs["o/a"] = append(w.prs["o/a"], dependabotPR("o/a", 2, "bump y from 2.0.0 to 2.0.1"))
+	stubApply(t, w)
+	reads := 0
+	read := depsReadState
+	depsReadState = func(ctx context.Context, c *gh.Client, owner, name string) (github.ReleaseState, error) {
+		reads++
+		return read(ctx, c, owner, name)
+	}
+	out, err := runDeps(t, "apply", "o")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reads != 2 {
+		t.Errorf("read release state %d times for 2 repositories", reads)
+	}
+	if !strings.Contains(out, "plan  o/a: merge #1") || !strings.Contains(out, "plan  o/a: merge #2") {
+		t.Errorf("both of o/a's updates are folded:\n%s", out)
+	}
+}
+
+func TestDepsApplyReportsAClosedPipe(t *testing.T) {
+	stubApply(t, world(t))
+	err := runFolds(context.Background(), &lines{w: errorWriter{}}, nil, nil, []string{"o/x: one", "o/y: two"})
+	if err == nil {
+		t.Error("a failed write should end the run with an error")
+	}
+}

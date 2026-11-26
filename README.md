@@ -223,7 +223,7 @@ and makes Finder searches and Smart Folders useful across ecosystems.
 | **Legacy Migration** | Automatically moves existing flat directory layouts into the new structure and cleans up empty folders. |
 | **Concurrency** | Processes clones and pulls concurrently with configurable worker limits (`--concurrency`). |
 | **Batch Commands** | Batch execute Git commands concurrently across all cloned repositories using `exec`. |
-| **Dependabot Triage** | `deps inventory` lists every open Dependabot pull request across an owner's repositories with its checks and merge state; `deps plan` tiers each one (fold as is, fix first, needs a person, close), spots bumps shared by three or more repositories, and applies known-bad-version overrides. Read-only: kept updates are folded into the `feat/v<next>` release branch, never merged into `main`. |
+| **Dependabot Triage** | `deps inventory` lists every open Dependabot pull request across an owner's repositories with its checks and merge state; `deps plan` tiers each one (fold as is, fix first, needs a person, close), spots bumps shared by three or more repositories, and applies known-bad-version overrides. `deps apply` folds the tier 1 updates into each repository's `feat/v<next>` release branch (merge commits carrying your `--signoff`), opens the release pull request if none is open, and closes the folded and superseded pull requests with a comment; it is a dry run unless `--live`, and nothing is ever merged into `main`. |
 | **Zero Configuration** | No configuration files required — simple, sensible defaults that work out of the box. |
 
 ---
