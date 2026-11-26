@@ -46,10 +46,11 @@ import urllib.request
 MANIFEST = "server.json"
 CHANGELOG = "CHANGELOG.md"
 WORKFLOW = ".github/workflows/release.yml"
+HIGHLIGHTS_DIR = ".github/releases"
 
 # Jobs that publish somewhere outside this repository. Each must be able to
 # fail without taking the release, or the other publishers, with it.
-PUBLISHER_JOBS = ("registry", "brew", "aur")
+PUBLISHER_JOBS = ("registry", "brew", "aur", "notes")
 
 # Steps that must NOT live in the release job. A publish inside it aborts
 # everything after it — which is how v0.0.33 lost its provenance and v0.0.35
@@ -153,6 +154,33 @@ def check_versions(manifest, problems):
         print(f"  versions    OK (everything agrees on {released})")
 
 
+def check_highlights(problems):
+    """The newest version has the hand-written Highlights its notes are built from.
+
+    release_notes.py composes every other section from the tag, the pull
+    requests and the assets; the Highlights are the one part a person
+    writes. A release without them would publish notes the standard
+    rejects, so the release PR fails here instead.
+    """
+    released = latest_release(problems)
+    if released is None:
+        return
+    path = f"{HIGHLIGHTS_DIR}/v{released}.md"
+    try:
+        with open(path, encoding="utf-8") as fh:
+            text = fh.read()
+    except OSError:
+        fail(problems, f"{path} is missing: write the 2 to 4 Highlights for v{released}")
+        return
+    bullets = [line for line in text.splitlines() if re.match(r"^\* \*\*[^*]+\*\*: \S", line)]
+    if not 2 <= len(bullets) <= 4:
+        fail(problems, f"{path} has {len(bullets)} Highlights bullets; the standard requires 2 to 4")
+    elif "\u2014" in text:
+        fail(problems, f"{path} contains an em dash; the standard forbids it")
+    else:
+        print(f"  highlights  OK ({len(bullets)} for v{released})")
+
+
 def check_publisher_isolation(problems):
     """No publisher may be able to fail the release, or each other."""
     try:
@@ -207,6 +235,7 @@ def main() -> int:
     if manifest is not None:
         check_schema(manifest, problems, offline)
         check_versions(manifest, problems)
+    check_highlights(problems)
     check_publisher_isolation(problems)
 
     if problems:

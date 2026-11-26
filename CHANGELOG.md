@@ -13,6 +13,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   rate limit, so the v0.0.57 publish failed with HTTP 403 and needed a
   re-run.
 
+### Added
+
+- Release notes in the standard layout, written by the release workflow.
+  A new `notes` job runs `scripts/release_notes.py` after the assets are
+  published and applies its output with `gh release edit`: the
+  hand-written Highlights from `.github/releases/vX.Y.Z.md`, What's
+  Changed, New Contributors, Checksums of every asset, and the Full
+  Changelog link. goreleaser's own layout had to be corrected by hand
+  after every release. `release_preflight.py` now fails a release whose
+  Highlights file is missing, holds other than 2 to 4 bullets, or
+  contains an em dash, and treats `notes` as a publisher that must not
+  be able to fail the release.
+
 ## [0.0.57] - 2026-11-26
 
 ### Fixed

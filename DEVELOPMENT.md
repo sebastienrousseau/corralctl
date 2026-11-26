@@ -176,15 +176,21 @@ hand.
 
 1. Land everything for the release on `main`, with `CHANGELOG.md` updated
    under a `## [x.y.z]` heading and `server.json`'s version matching. The
-   manifest gate enforces that they agree.
+   manifest gate enforces that they agree. Write the release's Highlights,
+   2 to 4 `* **Headline**: sentence` bullets, in
+   `.github/releases/vX.Y.Z.md`; `release_preflight.py` fails the release
+   PR without them.
 2. Dry-run the pipeline: run the Release workflow via `workflow_dispatch`
    with `dry_run: true`. It builds and packages everything and stops before
    publishing, signing and attesting.
-3. Tag and push: `git tag -s vX.Y.Z && git push origin vX.Y.Z`.
+3. Tag and push: `git tag -s vX.Y.Z -m "corralctl vX.Y.Z" && git push origin vX.Y.Z`.
 4. The workflow builds the target matrix, signs with keyless cosign,
    attaches SLSA provenance and a CycloneDX SBOM, publishes archives, deb
    and rpm packages, the Homebrew cask, the AUR package, the container
-   image, and the MCP registry entry.
+   image, and the MCP registry entry. The `notes` job then replaces
+   goreleaser's notes with the ones `~/Code/AGENTS.md` section 3 requires,
+   composed by `scripts/release_notes.py`: the Highlights, What's Changed,
+   New Contributors, Checksums of every asset, and the Full Changelog link.
 
 Every commit must be **cryptographically signed** and carry a DCO
 `Signed-off-by` trailer. See [CONTRIBUTING.md](CONTRIBUTING.md).
