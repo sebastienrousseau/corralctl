@@ -15,6 +15,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `corralctl deps inventory <owner>` lists every open Dependabot pull
+  request across the owner's repositories (forks and archived ones
+  excluded unless asked), with its head branch, mergeable state and one
+  CI verdict over its check runs and commit statuses. `corralctl deps
+  plan <owner>` tiers each one: 1 fold as is, 2 fix first, 3 needs a
+  person (a major or pre-1.0 minor jump), 4 close (superseded by a newer
+  pull request, or a known-bad version with no fix). It names the bumps
+  open in three or more repositories as fleet batches with a canary, and
+  `--overrides` takes known-bad versions, such as config-kit 0.0.9
+  superseded by 0.0.10. Both are read-only and print text or
+  `--output json`. Every kept update's action folds it into the
+  repository's `feat/v<next>` branch, as `~/Code/AGENTS.md` section 3
+  requires; nothing merges a Dependabot pull request into `main`.
 - Release notes in the standard layout, written by the release workflow.
   A new `notes` job runs `scripts/release_notes.py` after the assets are
   published and applies its output with `gh release edit`: the
